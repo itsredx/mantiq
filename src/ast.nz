@@ -2,7 +2,6 @@
 import std.collections
 from std.string import String
 from std.collections import List
-from std.option import Option
 
 // ── Language Configurations ─────────────────────────────────────────────
 enum LanguageMode:
@@ -22,9 +21,9 @@ struct TypeAnnotation:
     public var name as String
     public var is_ref as bool
     public var is_mut as bool
-    public var lifetime as Option[String]
-    public var generics as Option[List[TypeAnnotation]]
-    public var params as Option[List[TypeAnnotation]]
+    public var lifetime as ptr
+    public var generics as ptr[List[TypeAnnotation]]
+    public var params as ptr[List[TypeAnnotation]]
     public var return_type as ptr[TypeAnnotation]
 
 // ── NodeType ───────────────────────────────────────────────────────────
@@ -42,10 +41,10 @@ enum NodeType:
 // ── Node Data Tagged Union ─────────────────────────────────────────────
 enum NodeData:
     Program(declarations as List[ptr[Node]])
-    ImportDecl(target as String, imported_symbols as List[String], alias as Option[String])
+    ImportDecl(target as String, imported_symbols as List[String], alias as ptr)
     FunDecl(name as String, params as List[ptr[Node]], body as ptr[Node], is_async as bool)
-    VarDecl(names as List[String], type_annots as List[Option[TypeAnnotation]], initializers as Option[List[ptr[Node]]], is_mut as bool)
-    IfStmt(cond as ptr[Node], then_branch as ptr[Node], else_branch as Option[ptr[Node]])
+    VarDecl(names as List[String], type_annots as List[ptr[TypeAnnotation]], initializers as ptr[List[ptr[Node]]], is_mut as bool)
+    IfStmt(cond as ptr[Node], then_branch as ptr[Node], else_branch as ptr[Node])
     BinaryExpr(op as String, left as ptr[Node], right as ptr[Node])
     Identifier(name as String)
     NumberLiteral(value as f64)
@@ -56,4 +55,4 @@ struct Node:
     public var node_type as NodeType
     public var span as Span
     public var data as NodeData
-    public var module_name as Option[String]
+    public var module_name as ptr

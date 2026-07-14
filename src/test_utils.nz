@@ -1,0 +1,39 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from tree_sitter import ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_string_ptr, TSNode
+from string_utils import cstr_to_string, free_cstr
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    // Convert a plain C-string to Nizam String using our helper
+    let raw_c as cstr = "Hello FFI" to cstr
+    let greeting_ptr as ptr[String] = cstr_to_string(raw_c) to ptr[String]
+    let greeting as String = deref greeting_ptr
+    print(greeting)
+    drop(greeting_ptr to ptr)
+
+    // Test with a C-allocated tree-sitter string
+    let parser as ptr = ts_parser_new()
+    let language as ptr = tree_sitter_mantiq()
+    let ok as bool = ts_parser_set_language(parser, language)
+    let source as String = String.make("let x = 42 + 13" to cstr)
+    let tree as ptr = ts_parser_parse_string(parser, None to ptr, source.data, source.len to u32)
+
+    let ctx as List[u32, 4] = [0 to u32, 0 to u32, 0 to u32, 0 to u32]
+    var root as TSNode = TSNode(context = ctx, id = None to ptr, tree = None to ptr)
+    ts_tree_root_node_ptr(tree, ref root)
+
+    // Get C-allocated S-expression representation of the node
+    let c_str as cstr = ts_node_string_ptr(ref root)
+    let s_expr_ptr as ptr[String] = cstr_to_string(c_str) to ptr[String]
+    let s_expr as String = deref s_expr_ptr
+    print(s_expr)
+    drop(s_expr_ptr to ptr)
+
+    // Free the C-allocated string using our helper
+    free_cstr(c_str)
+
+    // Cleanup
+    ts_parser_delete(parser)
