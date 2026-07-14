@@ -1,0 +1,23 @@
+# Nizam compiled binaries and objects
+*.o
+*.so
+*.ll
+mantiq
+nizam
+
+# JIT / AOT temporary compilation files
+*_jit.ll
+lib*_jit.so
+*_jit_runtime.c
+*_runtime.c
+
+# Node / tree-sitter artifacts if any dependencies are installed
+node_modules/
+package-lock.json
+
+# Editor / OS metadata
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
