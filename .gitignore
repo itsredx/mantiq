@@ -21,3 +21,7 @@ package-lock.json
 .DS_Store
 *.swp
 *~
+
+# Research documentation
+research/
+

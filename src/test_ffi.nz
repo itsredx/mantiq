@@ -1,0 +1,49 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+from std.string import String
+from std.collections import List
+from tree_sitter import ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, TSNode
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    // Initialize parser
+    let parser as ptr = ts_parser_new()
+    if parser == None:
+        print("Failed to create tree-sitter parser")
+        return
+
+    // Get language grammar
+    let language as ptr = tree_sitter_mantiq()
+    if language == None:
+        print("Failed to get mantiq language definition")
+        ts_parser_delete(parser)
+        return
+
+    // Set language grammar on parser
+    let ok as bool = ts_parser_set_language(parser, language)
+    if not ok:
+        print("Language version mismatch")
+        ts_parser_delete(parser)
+        return
+
+    // Parse a small program code snippet
+    let source as String = String.make("let x = 42" to cstr)
+    // Convert String data to ptr[u8] for the parser FFI
+    let tree as ptr = ts_parser_parse_string(parser, None to ptr, source.data, source.len to u32)
+    if tree == None:
+        print("Parsing failed")
+        ts_parser_delete(parser)
+        return
+
+    // Get root node (via pointer parameter)
+    let ctx as List[u32, 4] = [0 to u32, 0 to u32, 0 to u32, 0 to u32]
+    var root as TSNode = TSNode(context = ctx, id = None to ptr, tree = None to ptr)
+    ts_tree_root_node_ptr(tree, ref root)
+
+    // Get type of root node
+    let root_type as cstr = ts_node_type_ptr(ref root)
+    
+    print("Parsed root node successfully!")
+    print(String(root_type))
+
+    // Clean up parser
+    ts_parser_delete(parser)

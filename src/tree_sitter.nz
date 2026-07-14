@@ -1,0 +1,30 @@
+// ── Link Libraries ───────────────────────────────────────────────────
+link "tree-sitter-mantiq"
+
+// ── Imports ──────────────────────────────────────────────────────────
+from std.collections import List
+
+// ── TSNode ABI Structure ──────────────────────────────────────────────
+struct TSNode:
+    public var context as List[u32, 4]
+    public var id as ptr
+    public var tree as ptr
+
+// ── Extern Functions ───────────────────────────────────────────────────
+extern fn ts_parser_new() as ptr
+extern fn ts_parser_delete(parser as ptr)
+extern fn tree_sitter_mantiq() as ptr
+extern fn ts_parser_set_language(parser as ptr, language as ptr) as bool
+extern fn ts_parser_parse_string(parser as ptr, old_tree as ptr, source as ptr[u8], length as u32) as ptr
+
+// Pointer-based wrappers for TSNode value arguments/returns
+extern fn ts_tree_root_node_ptr(tree as ptr, out_node as ptr[TSNode])
+extern fn ts_node_type_ptr(node as ptr[TSNode]) as cstr
+extern fn ts_node_child_count_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_child_ptr(node as ptr[TSNode], index as u32, out_node as ptr[TSNode])
+extern fn ts_node_start_byte_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_end_byte_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_is_named_ptr(node as ptr[TSNode]) as bool
+extern fn ts_node_string_ptr(node as ptr[TSNode]) as cstr
+extern fn ts_node_field_name_for_child_ptr(node as ptr[TSNode], index as u32) as cstr
+extern fn ts_node_named_child_ptr(node as ptr[TSNode], index as u32, out_node as ptr[TSNode])
