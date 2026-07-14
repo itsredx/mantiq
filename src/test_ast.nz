@@ -1,0 +1,39 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from std.option import Option, Some, Empty
+from std.mem import make
+from ast import Node, NodeData, NodeType, Span, LanguageMode, TypeAnnotation
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    let span as Span = Span(start_byte = 0 to u32, end_byte = 10 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 1 to u32, end_col = 10 to u32)
+
+    // Instantiate identifier AST node (using positional enum variant arguments)
+    let id_node as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    (deref id_node).node_type = NodeType.Identifier
+    (deref id_node).span = span
+    (deref id_node).data = NodeData.Identifier(String.make("x" to cstr))
+    (deref id_node).module_name = Empty
+
+    // Instantiate literal AST node (using positional enum variant arguments)
+    let lit_node as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    (deref lit_node).node_type = NodeType.NumberLiteral
+    (deref lit_node).span = span
+    (deref lit_node).data = NodeData.NumberLiteral(42.0)
+    (deref lit_node).module_name = Empty
+
+    // Instantiate binary expression node linking left and right child pointers
+    let bin_node as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    (deref bin_node).node_type = NodeType.BinaryExpr
+    (deref bin_node).span = span
+    (deref bin_node).data = NodeData.BinaryExpr(String.make("+" to cstr), id_node, lit_node)
+    (deref bin_node).module_name = Empty
+
+    // Print successful verification message and inspect structure fields
+    print("AST instantiation successful!")
+    
+    // ── Cleanup ─────────────────────────────────────────────────────────
+    // For this simple test, we manually drop them
+    // To drop the data field payloads (which contain moved Strings/Lists), we let Nizam drops run
