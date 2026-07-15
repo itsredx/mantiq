@@ -1,0 +1,33 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+from ast import Node, LanguageMode
+from lower import Lowerer, MacroDef
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    let source as String = String.make("let x = 42" to cstr)
+    let path as String = String.make("test.nz" to cstr)
+
+    // Instantiate Lowerer
+    var lower as Lowerer = Lowerer(source = source, mode = LanguageMode.Nizam, path = path)
+
+    // Verify fields
+    print("Lowerer fields verified:")
+    print(lower.source_code)
+    print(lower.file_path)
+
+    // Construct a MacroDef
+    let params as List[String] = List[String]()
+    let macro_def as MacroDef = MacroDef(param_names = params, body_ast = None to ptr[Node])
+
+    // Insert into lower.macros using subscript assignment
+    let name as String = String.make("assert_eq" to cstr)
+    lower.macros[name] = macro_def
+
+    // Verify insertion
+    if lower.macros.has(name):
+        print("Macro definition successfully stored!")
+    else:
+        print("Failed to store macro definition!")

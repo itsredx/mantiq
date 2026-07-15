@@ -1,0 +1,23 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+from ast import Node, LanguageMode
+
+// ── Macro Definition Storage ─────────────────────────────────────────────
+struct MacroDef:
+    public var param_names as List[String]
+    public var body_ast as ptr[Node]
+
+// ── AST Lowerer State ───────────────────────────────────────────────────
+struct Lowerer:
+    public var source_code as String
+    public var mode as LanguageMode
+    public var file_path as String
+    public var macros as Dict[String, MacroDef]
+
+    public fn __init__(self as ptr[Lowerer], source as String, mode as LanguageMode, path as String):
+        (deref self).source_code = source
+        (deref self).mode = mode
+        (deref self).file_path = path
+        (deref self).macros = Dict[String, MacroDef]()

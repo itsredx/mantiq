@@ -39,3 +39,19 @@ const char *ts_node_field_name_for_child_ptr(const TSNode *node, uint32_t index)
 void ts_node_named_child_ptr(const TSNode *node, uint32_t index, TSNode *out_node) {
     *out_node = ts_node_named_child(*node, index);
 }
+
+uint32_t ts_node_start_row_ptr(const TSNode *node) {
+    return ts_node_start_point(*node).row;
+}
+
+uint32_t ts_node_start_col_ptr(const TSNode *node) {
+    return ts_node_start_point(*node).column;
+}
+
+uint32_t ts_node_end_row_ptr(const TSNode *node) {
+    return ts_node_end_point(*node).row;
+}
+
+uint32_t ts_node_end_col_ptr(const TSNode *node) {
+    return ts_node_end_point(*node).column;
+}

@@ -28,3 +28,8 @@ extern fn ts_node_is_named_ptr(node as ptr[TSNode]) as bool
 extern fn ts_node_string_ptr(node as ptr[TSNode]) as cstr
 extern fn ts_node_field_name_for_child_ptr(node as ptr[TSNode], index as u32) as cstr
 extern fn ts_node_named_child_ptr(node as ptr[TSNode], index as u32, out_node as ptr[TSNode])
+extern fn ts_node_start_row_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_start_col_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_end_row_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_end_col_ptr(node as ptr[TSNode]) as u32
+
