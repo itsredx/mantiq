@@ -1,0 +1,16 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+from lower import Lowerer, make_lowerer_from_cstr
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    // Parse variable declaration containing the binary expression "x + 42"
+    var lower as Lowerer = make_lowerer_from_cstr("let a = x + 42" to cstr, "test.nz" to cstr)
+
+    // Run CST to AST lowering
+    let root_ast as ptr = lower.lower_source() to ptr
+    if root_ast == None:
+        print("Lowering failed")
+        return
+
+    // Verify AST structure recursively
+    let ok as bool = lower.verify_ast(root_ast)
