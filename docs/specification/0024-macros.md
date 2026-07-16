@@ -224,7 +224,7 @@ Macros defined in one snippet are available in later snippets.
 
 ## 7. Hygiene
 
-**Decision: Unhygienic (caller-scope identifiers are visible).**
+**Decision: Hygienic (macro-local declarations are mangled).**
 
 ```nizam
 let x = 10
@@ -234,7 +234,8 @@ macro add_x(y):
 let result = add_x!(5)  // 15 — refers to caller's x
 ```
 
-The expanded AST inherits the call site's scope during semantic analysis. There is no automatic renaming of identifiers inside the macro body.
+Local variables, parameter names, and function names declared within the macro body are recursively collected and mangled with a unique `_mac{hygiene_id}` suffix to prevent collision with the caller's scope. Non-local identifiers referencing the surrounding context are resolved in the caller's scope.
+
 
 ---
 
@@ -314,7 +315,7 @@ macro _mac(): pass   // parsed as MacroDecl, stored in macros map
 
 | Limitation | Impact | Future Fix |
 |------------|--------|------------|
-| Unhygienic | Macro body identifiers can clash with caller scope | Add `gensym` or `$crate` hygiene |
+| Hygiene boundary | External free variables resolve in caller scope | Fully lexical macro hygiene |
 | No procedural macros | `@`-decorator-style AST transformation not supported | Implement `@macro` dunder protocol |
 | No recursive macros | Macros cannot invoke themselves | Add recursion depth guard |
 | No token-level macros | No `$`-based pattern matching | Keep AST-level (simpler, safer) |

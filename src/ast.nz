@@ -37,6 +37,8 @@ struct TypeAnnotation:
 // Identifier = 7
 // NumberLiteral = 8
 // StringLiteral = 9
+// MacroDecl = 10
+// MacroInvocation = 11
 
 // ── Node ───────────────────────────────────────────────────────────────
 struct Node:

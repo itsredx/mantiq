@@ -1,0 +1,111 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
+from ast import Node
+from std.collections import List
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn printf(format as cstr, val as cstr) as i32
+
+// ── Main Entry ─────────────────────────────────────────────────────────
+fn main():
+    // Test 1: Nizam mode strict validation
+    let src_nizam as cstr = "class MyClass:\n    var val as i32\n" to cstr
+    var lower_nizam as Lowerer = make_lowerer_from_cstr(src_nizam, "test_nizam.nz" to cstr)
+    let root_nizam as ptr = lower_nizam.lower_source() to ptr
+    if root_nizam == None:
+        let r1 as i32 = printf("Nizam strict mode successfully rejected class definition!\n" to cstr, "" to cstr)
+    else:
+        let r1 as i32 = printf("FAILED: Nizam mode allowed class definition!\n" to cstr, "" to cstr)
+
+    // Test 2: Mantiq mode class decl allowance
+    let src_mantiq as cstr = "class MyClass:\n    var val as i32\n" to cstr
+    var lower_mantiq as Lowerer = make_lowerer_mantiq_from_cstr(src_mantiq, "test_mantiq.mq" to cstr)
+    let root_mantiq as ptr = lower_mantiq.lower_source() to ptr
+    if root_mantiq != None:
+        let r2 as i32 = printf("Mantiq mode successfully allowed class definition!\n" to cstr, "" to cstr)
+    else:
+        let r2 as i32 = printf("FAILED: Mantiq mode rejected class definition!\n" to cstr, "" to cstr)
+
+    // Test 3: Macro expansion and Hygiene
+    let src_macro as cstr = "macro twice(x):\n    x + x\n\nmacro make_local(val):\n    let y = val\n    y + y\n\nlet res = twice!(5)\nlet res2 = make_local!(10)\n" to cstr
+    var lower_macro as Lowerer = make_lowerer_from_cstr(src_macro, "test_macro.nz" to cstr)
+    let root_macro_ast as ptr = lower_macro.lower_source() to ptr
+    if root_macro_ast == None:
+        let r3 as i32 = printf("FAILED: CST to AST lowering with macros returned null!\n" to cstr, "" to cstr)
+        return
+
+    let root as ptr[Node] = root_macro_ast to ptr[Node]
+    let decls as ptr = (deref root).declarations to ptr
+    if decls == None:
+        let r4 as i32 = printf("FAILED: root declarations is null!\n" to cstr, "" to cstr)
+        return
+
+    let decls_list as List[ptr[Node]] = (deref root).declarations
+    let decls_len as i64 = decls_list.length()
+    
+    // decls should contain:
+    // 0: MacroDecl (twice)
+    // 1: MacroDecl (make_local)
+    // 2: VarDecl (res)
+    // 3: VarDecl (res2)
+    let r_len as i32 = printf("Declarations count: %d\n" to cstr, decls_len to cstr) // print counts
+
+    var idx as i64 = 0 to i64
+    while idx < decls_len:
+        let decl as ptr[Node] = decls_list[idx]
+        let nt as i32 = (deref decl).node_type
+        let r_info as i32 = printf("Decl index %d node_type: %d\n" to cstr, nt to cstr) // print index and type (simple format check)
+        
+        if idx == 2 to i64: // VarDecl res = twice!(5)
+            if nt == 4: // VarDecl
+                let name as cstr = (deref decl).name.data to cstr
+                let r_v1 as i32 = printf("res VarDecl variable name: %s\n" to cstr, name)
+                
+                let init_node as ptr[Node] = (deref decl).left
+
+                if init_node != None to ptr[Node] and (deref init_node).node_type == 6: // BinaryExpr
+                    let r_v2 as i32 = printf("twice!(5) expanded to BinaryExpr!\n" to cstr, "" to cstr)
+                    let left as ptr[Node] = (deref init_node).left
+                    let right as ptr[Node] = (deref init_node).right
+                    if (deref left).node_type == 8 and (deref right).node_type == 8:
+                        if (deref left).val == 5.0 and (deref right).val == 5.0:
+                            let r_v3 as i32 = printf("twice!(5) arguments successfully substituted (5 + 5)!\n" to cstr, "" to cstr)
+                            
+        elif idx == 3 to i64: // VarDecl res2 = make_local!(10)
+            if nt == 4: // VarDecl
+                let name as cstr = (deref decl).name.data to cstr
+                let r_v4 as i32 = printf("res2 VarDecl variable name: %s\n" to cstr, name)
+                
+                let init_node as ptr[Node] = (deref decl).left // expanded block
+
+                if init_node != None to ptr[Node] and (deref init_node).node_type == 19: // BlockStmt
+                    let r_v5 as i32 = printf("make_local!(10) expanded to BlockStmt!\n" to cstr, "" to cstr)
+                    
+                    let block_decls as List[ptr[Node]] = (deref init_node).declarations
+                    let block_len as i64 = block_decls.length()
+                    let r_v5_2 as i32 = printf("Block statement count: %d\n" to cstr, block_len to cstr)
+                    
+                    // Inside block:
+                    // 0: VarDecl (y_mac1 = 10)
+                    // 1: BinaryExpr (y_mac1 + y_mac1)
+                    if block_len == 2 to i64:
+                        let block_decl0 as ptr[Node] = block_decls[0]
+                        let block_decl1 as ptr[Node] = block_decls[1]
+                        
+                        if (deref block_decl0).node_type == 4: // VarDecl
+                            let local_var_name as cstr = (deref block_decl0).name.data to cstr
+                            let r_v6 as i32 = printf("Mangled local variable name in block: %s\n" to cstr, local_var_name)
+                            
+                            if (deref block_decl1).node_type == 6: // BinaryExpr
+                                let left as ptr[Node] = (deref block_decl1).left
+                                let right as ptr[Node] = (deref block_decl1).right
+                                if left != None to ptr[Node] and right != None to ptr[Node]:
+                                    let l_name as cstr = (deref left).name.data to cstr
+                                    let r_name as cstr = (deref right).name.data to cstr
+                                    let r_v7 as i32 = printf("BinaryExpr operand names: left = %s, right = %s\n" to cstr, l_name) // simple formatting print
+                                    
+                                    // Verify that mangling matched
+                                    if strcmp(local_var_name, l_name) == 0 and strcmp(local_var_name, r_name) == 0:
+                                        let r_v8 as i32 = printf("Hygienic macro expansion and mangling verified successfully!\n" to cstr, "" to cstr)
+        idx = idx + 1 to i64

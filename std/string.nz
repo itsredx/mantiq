@@ -93,7 +93,15 @@ struct String:
         return self.data[idx]
 
     fn make(s as cstr) as String:
-        return String(s)
+        if s == None to cstr:
+            let d as ptr[u8] = make(1 to usize) to ptr[u8]
+            d[0] = 0 to u8
+            return String(data = d, len = 0 to usize, capacity = 1 to usize)
+        let l as usize = strlen(s)
+        let cap as usize = l + 1
+        let d as ptr[u8] = make(cap) to ptr[u8]
+        let dummy as ptr = memcpy(d to ptr, s to ptr, cap)
+        return String(data = d, len = l, capacity = cap)
 
     fn deinit(self as ptr[String]):
         self.__del__()
@@ -242,7 +250,7 @@ struct StringBuilder:
     // The StringBuilder itself is unaffected and can continue to be used.
     // -----------------------------------------------------------------
     fn builder_to_string(self as ptr[StringBuilder]) as String:
-        return String((deref self).buffer to cstr)
+        return String.make((deref self).buffer to cstr)
 
 // ============================================================================
 // Module-level documentation notes:
