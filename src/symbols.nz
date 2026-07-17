@@ -1,0 +1,81 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from std.collections import Dict
+from std.option import Option
+
+// ── LanguageMode ───────────────────────────────────────────────────────
+enum LanguageMode:
+    Nizam
+    Mantiq
+
+// ── Span ───────────────────────────────────────────────────────────────
+struct Span:
+    public var start_byte as u32
+    public var end_byte as u32
+    public var start_row as u32
+    public var start_col as u32
+    public var end_row as u32
+    public var end_col as u32
+
+// ── TypeAnnotation ─────────────────────────────────────────────────────
+struct TypeAnnotation:
+    public var name as String
+    public var is_ref as bool
+    public var is_mut as bool
+    public var lifetime as Option[String]
+    public var generics as Option[List[TypeAnnotation]]
+    public var params as Option[List[TypeAnnotation]]
+    public var return_type as ptr[TypeAnnotation]
+
+// ── Node ───────────────────────────────────────────────────────────────
+struct Node:
+    public var node_type as i32
+    public var span as Span
+    public var module_name as Option[String]
+
+    // Flattened AST Fields
+    public var declarations as List[ptr[Node]]
+    public var target as String
+    public var imported_symbols as List[String]
+    public var alias as Option[String]
+    public var name as String
+    public var params as List[ptr[Node]]
+    public var body as ptr[Node]
+    public var is_async as bool
+    public var names as List[String]
+    public var type_annots as List[Option[TypeAnnotation]]
+    public var initializers as Option[List[ptr[Node]]]
+    public var is_mut as bool
+    public var cond as ptr[Node]
+    public var then_branch as ptr[Node]
+    public var else_branch as Option[ptr[Node]]
+    public var op as String
+    public var left as ptr[Node]
+    public var right as ptr[Node]
+    public var val as f64
+    public var str_val as String
+
+// ── SymbolKind ─────────────────────────────────────────────────────────
+enum SymbolKind:
+    Variable
+    Function
+    Struct
+    Union
+    Enum
+    Module
+
+// ── Symbol ─────────────────────────────────────────────────────────────
+struct Symbol:
+    public var name as String
+    public var kind as SymbolKind
+    public var decl_node as ptr[Node]
+    public var sym_type as Option[TypeAnnotation]
+    public var is_context_manager as bool
+
+// ── Scope ──────────────────────────────────────────────────────────────
+struct Scope:
+    public var parent as ptr[Scope]
+    public var symbols as Dict[String, ptr[Symbol]]
+    public var closure_node as ptr[Node]

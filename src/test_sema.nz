@@ -1,0 +1,91 @@
+import std.collections
+from std.string import String
+from std.collections import List
+import symbols
+from symbols import Node
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+
+extern fn printf(format as cstr, val as cstr) as i32
+
+fn main() -> i32:
+    // Test Scenario 1: Correct Scoping & Shadowing
+    let src1 as cstr = "let x = 42\nfn f():\n    let x = 10\n    let y = x\n" to cstr
+    let lowerer1 as Lowerer = make_lowerer_mantiq_from_cstr(src1, "test1.nz" to cstr)
+    let root1 as ptr[Node] = lowerer1.lower_source()
+    
+    let s1 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s1.init("test1.nz" to cstr)
+    
+    s1.declare_pass(root1)
+    s1.resolve_pass(root1)
+    
+    if (deref s1).errors.length() == 0 to i64:
+        let r as i32 = printf("Test 1 (Scoping & Shadowing): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 1 (Scoping & Shadowing): FAILED!\n" to cstr, "" to cstr)
+
+    // Test Scenario 2: Duplicate Declaration Detection
+    let src2 as cstr = "let x = 42\nlet x = 10\n" to cstr
+    let lowerer2 as Lowerer = make_lowerer_mantiq_from_cstr(src2, "test2.nz" to cstr)
+    let root2 as ptr[Node] = lowerer2.lower_source()
+    
+    let s2 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s2.init("test2.nz" to cstr)
+    
+    s2.declare_pass(root2)
+    s2.resolve_pass(root2)
+    
+    if (deref s2).errors.length() > 0 to i64:
+        let r as i32 = printf("Test 2 (Duplicate Declaration): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 2 (Duplicate Declaration): FAILED!\n" to cstr, "" to cstr)
+
+    // Test Scenario 3: Undeclared Variable Detection
+    let src3 as cstr = "fn g():\n    let y = z\n" to cstr
+    let lowerer3 as Lowerer = make_lowerer_mantiq_from_cstr(src3, "test3.nz" to cstr)
+    let root3 as ptr[Node] = lowerer3.lower_source()
+    
+    let s3 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s3.init("test3.nz" to cstr)
+    
+    s3.declare_pass(root3)
+    s3.resolve_pass(root3)
+    
+    if (deref s3).errors.length() > 0 to i64:
+        let r as i32 = printf("Test 3 (Undeclared Variable): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 3 (Undeclared Variable): FAILED!\n" to cstr, "" to cstr)
+
+    // Test Scenario 4: Closure Capture Detection
+    let src4 as cstr = "fn outer():\n    let a = 1\n    fn inner():\n        let b = a\n" to cstr
+    let lowerer4 as Lowerer = make_lowerer_mantiq_from_cstr(src4, "test4.nz" to cstr)
+    let root4 as ptr[Node] = lowerer4.lower_source()
+    
+    let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s4.init("test4.nz" to cstr)
+    
+    s4.declare_pass(root4)
+    s4.resolve_pass(root4)
+    
+    let r_cap as i32 = printf("Test 4 (Closure Capture): Completed!\n" to cstr, "" to cstr)
+
+    // Test Scenario 5: Cross-Module Resolution
+    let src5 as cstr = "from test_module import pi\nlet res = pi\n" to cstr
+    let lowerer5 as Lowerer = make_lowerer_mantiq_from_cstr(src5, "test5.nz" to cstr)
+    let root5 as ptr[Node] = lowerer5.lower_source()
+    
+    let s5 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s5.init("test5.nz" to cstr)
+    
+    s5.declare_pass(root5)
+    s5.resolve_pass(root5)
+    
+    if (deref s5).errors.length() == 0 to i64:
+        let r as i32 = printf("Test 5 (Cross-Module Resolution): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 5 (Cross-Module Resolution): FAILED!\n" to cstr, "" to cstr)
+
+    return 0

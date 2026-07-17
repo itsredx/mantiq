@@ -1,0 +1,6 @@
+// A simple test module for cross-module resolution testing
+let pi as f64 = 3.14159
+let tau as f64 = 6.28318
+
+fn add(a as i32, b as i32) as i32:
+    return a + b
