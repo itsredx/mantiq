@@ -39,6 +39,11 @@ struct TypeAnnotation:
 // StringLiteral = 9
 // MacroDecl = 10
 // MacroInvocation = 11
+// CallExpr = 12
+// ReturnStmt = 13
+// WhileStmt = 14
+// ForStmt = 15
+// MemberExpr = 16
 
 // ── Node ───────────────────────────────────────────────────────────────
 struct Node:

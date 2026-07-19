@@ -1,0 +1,94 @@
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+import symbols
+from symbols import Node, TypeAnnotation, LanguageMode, Span
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import types
+from types import Type, TypeKind, is_copy_type
+import typecheck
+from typecheck import TypeChecker, option_has_value, option_value, ListWrapper
+import borrowck
+from borrowck import BorrowChecker
+
+extern fn printf(format as cstr, val as cstr) as i32
+
+fn main() -> i32:
+    extern fn memset(s as ptr, c as i32, n as usize) as ptr
+
+    // Test Scenario 1: Move on assignment, then use → use-after-move error
+    let src1 as cstr = "fn f():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
+    let lowerer1 as Lowerer = make_lowerer_mantiq_from_cstr(src1, "test_borrow1.nz" to cstr)
+    let root1 as ptr[Node] = lowerer1.lower_source()
+    
+    let bc1 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc1()
+    (deref bc1).current_file = String.make("test_borrow1.nz" to cstr)
+    bc1.walk_ast(root1)
+    
+    if (deref bc1).errors.length() > 0 to i64:
+        let r as i32 = printf("Test 8 (Use-After-Move Detection): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 8 (Use-After-Move Detection): FAILED (no error detected)!\n" to cstr, "" to cstr)
+
+    // Test Scenario 2: No move violation - clean usage
+    let src2 as cstr = "fn g():\n    let x = 42\n    let y = x\n" to cstr
+    let lowerer2 as Lowerer = make_lowerer_mantiq_from_cstr(src2, "test_borrow2.nz" to cstr)
+    let root2 as ptr[Node] = lowerer2.lower_source()
+    
+    let bc2 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc2()
+    (deref bc2).current_file = String.make("test_borrow2.nz" to cstr)
+    bc2.walk_ast(root2)
+    
+    if (deref bc2).errors.length() == 0 to i64:
+        let r as i32 = printf("Test 9 (No False Positives): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 9 (No False Positives): FAILED (false positive)!\n" to cstr, "" to cstr)
+
+    // Test Scenario 3: Move on assignment, then reassignment (should be ok - new owned value)
+    let src3 as cstr = "fn h():\n    let x = 42\n    let y = x\n    let x = 10\n" to cstr
+    let lowerer3 as Lowerer = make_lowerer_mantiq_from_cstr(src3, "test_borrow3.nz" to cstr)
+    let root3 as ptr[Node] = lowerer3.lower_source()
+    
+    let bc3 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc3()
+    (deref bc3).current_file = String.make("test_borrow3.nz" to cstr)
+    bc3.walk_ast(root3)
+    
+    if (deref bc3).errors.length() == 0 to i64:
+        let r as i32 = printf("Test 10 (Move then Redeclare): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 10 (Move then Redeclare): FAILED (unexpected borrow error)!\n" to cstr, "" to cstr)
+
+    // Test Scenario 4: Copy type (i32) - multiple uses should NOT trigger move error
+    // Run type checker so inferred_type is set on nodes
+    let src4 as cstr = "fn k():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
+    let lowerer4 as Lowerer = make_lowerer_mantiq_from_cstr(src4, "test_borrow4.nz" to cstr)
+    let root4 as ptr[Node] = lowerer4.lower_source()
+    
+    let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_s4 as ptr = memset(s4 to ptr, 0 to i32, 96 to usize)
+    s4("test_borrow4.nz" to cstr)
+    s4.declare_pass(root4)
+    s4.resolve_pass(root4)
+    
+    let tc4 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_tc4 as ptr = memset(tc4 to ptr, 0 to i32, 24 to usize)
+    tc4(s4)
+    tc4.typecheck_node(root4)
+    
+    let bc4 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc4()
+    (deref bc4).current_file = String.make("test_borrow4.nz" to cstr)
+    bc4.walk_ast(root4)
+    
+    if (deref bc4).errors.length() == 0 to i64:
+        let r as i32 = printf("Test 11 (Copy Type No Move): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 11 (Copy Type No Move): FAILED (false positive on i32)!\n" to cstr, "" to cstr)
+
+    return 0

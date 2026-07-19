@@ -1,0 +1,198 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+from std.option import Option, Empty
+from std.mem import make
+import symbols
+from symbols import Node, Symbol, Scope, SymbolKind, Span
+import types
+from types import Type, TypeKind, is_copy_type
+
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn printf(format as cstr, val as cstr) as i32
+
+// ── ObjectState ────────────────────────────────────────────────────────
+enum ObjectState:
+    Owned
+    Moved
+    Dropped
+
+// ── VariableInfo ───────────────────────────────────────────────────────
+struct VarInfo:
+    public var state as ObjectState
+    public var var_type as ptr[Type]
+
+// ── BorrowChecker ──────────────────────────────────────────────────────
+struct BorrowChecker:
+    public var errors as List[String]
+    public var current_file as String
+    public var symbol_states as Dict[String, VarInfo]
+    public var auto_drops as Dict[usize, List[ptr[Symbol]]]
+    public var scope_depth as i32
+
+    public fn __init__(self as ptr[BorrowChecker]):
+        (deref self).errors = List[String]()
+        (deref self).current_file = String.make("" to cstr)
+        (deref self).symbol_states = Dict[String, VarInfo]()
+        (deref self).auto_drops = Dict[usize, List[ptr[Symbol]]]()
+        (deref self).scope_depth = 0 to i32
+
+    public fn report_error(self as ptr[BorrowChecker], msg as String, span as Span):
+        extern fn snprintf(str as ptr[u8], size as usize, format as cstr, file as cstr, row as u32, col as u32, err as cstr) as i32
+        extern fn memset(s as ptr, c as i32, n as usize) as ptr
+        let cap as usize = msg.len + 128 to usize
+        let buf as ptr[u8] = make(cap) to ptr[u8]
+        let dummy_memset as ptr = memset(buf to ptr, 0 to i32, cap to i32)
+        let len as i32 = snprintf(buf, cap, "%s:%d:%d: borrow error: %s" to cstr, (deref self).current_file.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
+        (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
+        let r as i32 = printf("%s\n" to cstr, buf to cstr)
+
+    public fn mark_moved(self as ptr[BorrowChecker], name as String):
+        if (deref self).symbol_states.has(name):
+            let info as VarInfo = (deref self).symbol_states[name]
+            (deref self).symbol_states[name] = VarInfo(state = ObjectState.Moved, var_type = info.var_type)
+        else:
+            (deref self).symbol_states[name] = VarInfo(state = ObjectState.Moved, var_type = None to ptr[Type])
+
+    public fn mark_dropped(self as ptr[BorrowChecker], name as String):
+        if (deref self).symbol_states.has(name):
+            let info as VarInfo = (deref self).symbol_states[name]
+            (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = info.var_type)
+        else:
+            (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = None to ptr[Type])
+
+    public fn mark_owned(self as ptr[BorrowChecker], name as String, var_type as ptr[Type]):
+        (deref self).symbol_states[name] = VarInfo(state = ObjectState.Owned, var_type = var_type)
+
+    // Check identifier for use-after-move, then mark as moved only if it's a move type
+    public fn move_identifier(self as ptr[BorrowChecker], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        if (deref node).node_type != 7: // not Identifier
+            return
+        let name as String = (deref node).name
+        // First check for use-after-move regardless of type
+        self.check_identifier_use(node)
+        // Only mark as moved if it's a move type (not Copy)
+        // Look up the type from symbol_states (stored at declaration time)
+        if (deref self).symbol_states.has(name):
+            let info as VarInfo = (deref self).symbol_states[name]
+            let t as ptr[Type] = info.var_type
+            if t != None to ptr[Type]:
+                if is_copy_type(t):
+                    return
+        self.mark_moved(name)
+
+    public fn check_identifier_use(self as ptr[BorrowChecker], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        if (deref node).node_type != 7: // not Identifier
+            return
+        let name as String = (deref node).name
+        if (deref self).symbol_states.has(name):
+            let info as VarInfo = (deref self).symbol_states[name]
+            if info.state == ObjectState.Moved:
+                self.report_error(String.make("use of moved variable" to cstr), (deref node).span)
+            elif info.state == ObjectState.Dropped:
+                self.report_error(String.make("use of dropped variable" to cstr), (deref node).span)
+
+    public fn walk_ast(self as ptr[BorrowChecker], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        
+        let nt as i32 = (deref node).node_type
+        
+        if nt == 1: // Program
+            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
+            let count as i64 = (deref decls).length()
+            var i as i64 = 0 to i64
+            while i < count:
+                self.walk_ast((deref decls)[i])
+                i = i + 1 to i64
+                
+        elif nt == 19: // BlockStmt
+            (deref self).scope_depth = (deref self).scope_depth + 1 to i32
+            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
+            let count as i64 = (deref decls).length()
+            var i as i64 = 0 to i64
+            while i < count:
+                self.walk_ast((deref decls)[i])
+                i = i + 1 to i64
+            (deref self).scope_depth = (deref self).scope_depth - 1 to i32
+                
+        elif nt == 3: // FunDecl
+            self.walk_ast((deref node).body)
+                
+        elif nt == 4: // VarDecl
+            var var_type as ptr[Type] = (deref node).inferred_type
+            // If VarDecl inferred_type is Void, try the init node's type
+            if var_type != None to ptr[Type]:
+                let k as TypeKind = (deref var_type).kind
+                if k == TypeKind.Void:
+                    let init_check as ptr[Node] = (deref node).left
+                    if init_check != None to ptr[Node]:
+                        if (deref init_check).inferred_type != None to ptr[Type]:
+                            var_type = (deref init_check).inferred_type
+            self.mark_owned((deref node).name, var_type)
+            let init as ptr[Node] = (deref node).left
+            if init != None to ptr[Node]:
+                if (deref init).node_type == 7: // Identifier
+                    self.move_identifier(init)
+                else:
+                    self.walk_ast(init)
+                    
+        elif nt == 12: // CallExpr
+            self.walk_ast((deref node).left)
+            let args as ptr[List[ptr[Node]]] = ref (deref node).params
+            let arg_count as i64 = (deref args).length()
+            var a_idx as i64 = 0 to i64
+            while a_idx < arg_count:
+                let arg as ptr[Node] = (deref args)[a_idx]
+                if (deref arg).node_type == 7: // Identifier
+                    self.move_identifier(arg)
+                else:
+                    self.walk_ast(arg)
+                a_idx = a_idx + 1 to i64
+                
+        elif nt == 13: // ReturnStmt
+            let return_val as ptr[Node] = (deref node).body
+            if return_val != None to ptr[Node]:
+                if (deref return_val).node_type == 7: // Identifier
+                    self.move_identifier(return_val)
+                else:
+                    self.walk_ast(return_val)
+                    
+        elif nt == 6: // BinaryExpr
+            let op as String = (deref node).op
+            let is_assign as bool = strcmp(op.data to cstr, "=" to cstr) == 0 or strcmp(op.data to cstr, "+=" to cstr) == 0 or strcmp(op.data to cstr, "-=" to cstr) == 0 or strcmp(op.data to cstr, "*=" to cstr) == 0 or strcmp(op.data to cstr, "/=" to cstr) == 0
+            if is_assign:
+                let right as ptr[Node] = (deref node).right
+                let left as ptr[Node] = (deref node).left
+                if (deref right).node_type == 7: // Identifier
+                    self.move_identifier(right)
+                else:
+                    self.walk_ast(right)
+                if (deref left).node_type == 7: // Identifier
+                    self.mark_owned((deref left).name, (deref left).inferred_type)
+            else:
+                self.walk_ast((deref node).left)
+                self.walk_ast((deref node).right)
+                
+        elif nt == 14: // WhileStmt
+            self.walk_ast((deref node).cond)
+            self.walk_ast((deref node).body)
+            
+        elif nt == 15: // ForStmt
+            let iter_name as String = (deref node).name
+            if iter_name.len > 0 to usize:
+                self.mark_owned(iter_name, None to ptr[Type])
+            self.walk_ast((deref node).left)
+            self.walk_ast((deref node).body)
+            
+        elif nt == 16: // MemberExpr
+            self.walk_ast((deref node).left)
+            
+        elif nt == 5: // IfStmt
+            self.walk_ast((deref node).cond)
+            self.walk_ast((deref node).then_branch)

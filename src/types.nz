@@ -85,3 +85,53 @@ fn make_struct_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Struct)
     (deref t).name = name
     return t
+
+// ── Copy/Move Type Classification ──────────────────────────────────────
+fn is_copy_type(t as ptr[Type]) as bool:
+    if t == None to ptr[Type]:
+        return False
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.I8:
+        return True
+    if k == TypeKind.I16:
+        return True
+    if k == TypeKind.I32:
+        return True
+    if k == TypeKind.I64:
+        return True
+    if k == TypeKind.I128:
+        return True
+    if k == TypeKind.ISize:
+        return True
+    if k == TypeKind.U8:
+        return True
+    if k == TypeKind.U16:
+        return True
+    if k == TypeKind.U32:
+        return True
+    if k == TypeKind.U64:
+        return True
+    if k == TypeKind.U128:
+        return True
+    if k == TypeKind.USize:
+        return True
+    if k == TypeKind.F16:
+        return True
+    if k == TypeKind.BFloat16:
+        return True
+    if k == TypeKind.F32:
+        return True
+    if k == TypeKind.F64:
+        return True
+    if k == TypeKind.F128:
+        return True
+    if k == TypeKind.Boolean:
+        return True
+    if k == TypeKind.Char:
+        return True
+    if k == TypeKind.RawPointer:
+        return True
+    return False
+
+fn is_move_type(t as ptr[Type]) as bool:
+    return not is_copy_type(t)

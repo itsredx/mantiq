@@ -350,6 +350,8 @@ struct TypeChecker:
             let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
             if sym != None to ptr[Symbol] and annotated_type != None to ptr[Type]:
                 (deref sym).resolved_type = annotated_type
+            if annotated_type != None to ptr[Type]:
+                (deref node).inferred_type = annotated_type
                 
             ret_type = make_type(TypeKind.Void)
             
@@ -411,6 +413,9 @@ struct TypeChecker:
             else:
                 ret_type = make_type(TypeKind.I32)
                 
+        elif nt == 9: // StringLiteral
+            ret_type = make_type(TypeKind.String)
+                
         elif nt == 6: // BinaryExpr
             let left as ptr[Node] = (deref node).left
             let right as ptr[Node] = (deref node).right
@@ -423,7 +428,59 @@ struct TypeChecker:
                 
                 if not self.is_implicitly_convertible(left_t, right_t):
                     (deref (deref self).sema).report_error(String.make("type mismatch in binary expression" to cstr), (deref node).span)
-                ret_type = left_t
+                
+                // If one side is a literal defaulting to I32 and the other is a wider
+                // numeric type, coerce the literal to the wider type.
+                let lk as TypeKind = (deref left_t).kind
+                let rk as TypeKind = (deref right_t).kind
+                let left_is_default_lit as bool = (deref left).node_type == 8 and lk == TypeKind.I32
+                let right_is_default_lit as bool = (deref right).node_type == 8 and rk == TypeKind.I32
+                
+                if left_is_default_lit and not right_is_default_lit:
+                    (deref left).inferred_type = right_t
+                    ret_type = right_t
+                elif right_is_default_lit and not left_is_default_lit:
+                    (deref right).inferred_type = left_t
+                    ret_type = left_t
+                else:
+                    ret_type = left_t
+                    
+        elif nt == 12: // CallExpr
+            let callee as ptr[Node] = (deref node).left
+            let callee_t as ptr[Type] = self.typecheck_node(callee)
+            
+            let args as ptr[List[ptr[Node]]] = ref (deref node).params
+            let arg_count as i64 = (deref args).length()
+            var a_idx as i64 = 0 to i64
+            while a_idx < arg_count:
+                let dummy_a as ptr[Type] = self.typecheck_node((deref args)[a_idx])
+                a_idx = a_idx + 1 to i64
+            
+            if (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
+                ret_type = (deref callee_t).return_type
+            else:
+                ret_type = make_type(TypeKind.Any)
+                
+        elif nt == 13: // ReturnStmt
+            let return_val as ptr[Node] = (deref node).body
+            if return_val != None to ptr[Node]:
+                ret_type = self.typecheck_node(return_val)
+            else:
+                ret_type = make_type(TypeKind.Void)
+                
+        elif nt == 14: // WhileStmt
+            let dummy_c as ptr[Type] = self.typecheck_node((deref node).cond)
+            let dummy_b as ptr[Type] = self.typecheck_node((deref node).body)
+            ret_type = make_type(TypeKind.Void)
+            
+        elif nt == 15: // ForStmt
+            let dummy_iter as ptr[Type] = self.typecheck_node((deref node).left)
+            let dummy_body as ptr[Type] = self.typecheck_node((deref node).body)
+            ret_type = make_type(TypeKind.Void)
+            
+        elif nt == 16: // MemberExpr
+            let obj_t as ptr[Type] = self.typecheck_node((deref node).left)
+            ret_type = make_type(TypeKind.Any)
                 
         let _sep2 as i32 = 0
         (deref node).inferred_type = ret_type

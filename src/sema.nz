@@ -379,3 +379,28 @@ struct Sema:
             else:
                 self.resolve_pass((deref node).left)
                 self.resolve_pass((deref node).right)
+        elif nt == 12: // CallExpr
+            if (deref node).left != None to ptr[Node]:
+                self.resolve_pass((deref node).left)
+            let args as ptr[List[ptr[Node]]] = ref (deref node).params
+            let arg_count as i64 = (deref args).length()
+            var a_idx as i64 = 0 to i64
+            while a_idx < arg_count:
+                self.resolve_pass((deref args)[a_idx])
+                a_idx = a_idx + 1 to i64
+        elif nt == 13: // ReturnStmt
+            if (deref node).body != None to ptr[Node]:
+                self.resolve_pass((deref node).body)
+        elif nt == 14: // WhileStmt
+            if (deref node).cond != None to ptr[Node]:
+                self.resolve_pass((deref node).cond)
+            if (deref node).body != None to ptr[Node]:
+                self.resolve_pass((deref node).body)
+        elif nt == 15: // ForStmt
+            if (deref node).left != None to ptr[Node]:
+                self.resolve_pass((deref node).left)
+            if (deref node).body != None to ptr[Node]:
+                self.resolve_pass((deref node).body)
+        elif nt == 16: // MemberExpr
+            if (deref node).left != None to ptr[Node]:
+                self.resolve_pass((deref node).left)
