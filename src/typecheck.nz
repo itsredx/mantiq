@@ -147,21 +147,38 @@ struct TypeChecker:
 
     public fn check_nizam_import(self as ptr[TypeChecker], name as cstr, span as Span):
         if (deref (deref self).sema).mode to i32 == LanguageMode.Nizam to i32:
-            // Check if name is imported in semantic analyzer
-            let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
-            var report as bool = False
-            if sym == None to ptr[Symbol]:
-                report = True
-            else:
-                if (deref sym).decl_node == None to ptr[Node]:
+            var skip as bool = False
+            if strcmp(name, "i8" to cstr) == 0 or strcmp(name, "i16" to cstr) == 0 or strcmp(name, "i32" to cstr) == 0 or strcmp(name, "i64" to cstr) == 0 or strcmp(name, "i128" to cstr) == 0 or strcmp(name, "isize" to cstr) == 0:
+                skip = True
+            elif strcmp(name, "u8" to cstr) == 0 or strcmp(name, "byte" to cstr) == 0 or strcmp(name, "u16" to cstr) == 0 or strcmp(name, "u32" to cstr) == 0 or strcmp(name, "u64" to cstr) == 0 or strcmp(name, "u128" to cstr) == 0 or strcmp(name, "usize" to cstr) == 0:
+                skip = True
+            elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
+                skip = True
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0:
+                skip = True
+                
+            let name_ptr as ptr[u8] = name to ptr[u8]
+            if not skip and (deref name_ptr) >= 65 to u8 and (deref name_ptr) <= 90 to u8:
+                let next_char as u8 = deref ((name_ptr to usize + 1 to usize) to ptr[u8])
+                if next_char == 0 to u8:
+                    skip = True
+                    
+            if not skip:
+                // Check if name is imported in semantic analyzer
+                let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
+                var report as bool = False
+                if sym == None to ptr[Symbol]:
                     report = True
-            
-            if report:
-                let sb as StringBuilder = StringBuilder.make()
-                sb.append(name)
-                sb.append(" requires explicit import in Nizam strict mode" to cstr)
-                let msg as String = sb.to_string()
-                (deref (deref self).sema).report_error(msg, span)
+                else:
+                    if (deref sym).decl_node == None to ptr[Node]:
+                        report = True
+                
+                if report:
+                    let sb as StringBuilder = StringBuilder.make()
+                    sb.append(name)
+                    sb.append(" requires explicit import in Nizam strict mode" to cstr)
+                    let msg as String = sb.to_string()
+                    (deref (deref self).sema).report_error(msg, span)
 
     public fn is_implicitly_convertible(self as ptr[TypeChecker], from_t as ptr[Type], to_t as ptr[Type]) as bool:
         if from_t == None to ptr[Type] or to_t == None to ptr[Type]:
