@@ -252,4 +252,49 @@ fn main() -> i32:
     else:
         let r as i32 = printf("Test 7 (Generic Monomorphization): FAILED (mangling)!\n" to cstr, "" to cstr)
 
+    // Test Scenario 12: Literal Type Inference (destination type known)
+    let src12 as cstr = "fn f(x as f64):\n    let a = 1\nfn main():\n    f(42)\n    let y as f64 = 0.0\n    y = 24\n" to cstr
+    let lowerer12 as Lowerer = make_lowerer_mantiq_from_cstr(src12, "test12.nz" to cstr)
+    let root12 as ptr[Node] = lowerer12.lower_source()
+    
+    let s12 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_memset_s12 as ptr = memset(s12 to ptr, 0 to i32, 96 to usize)
+    s12("test12.nz" to cstr)
+    s12.declare_pass(root12)
+    s12.resolve_pass(root12)
+    
+    let tc12 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc12 as ptr = memset(tc12 to ptr, 0 to i32, 24 to usize)
+    tc12(s12)
+    tc12.typecheck_node(root12)
+    
+    // Let's traverse to find the CallExpr "f(42)" and Assignment "y = 24"
+    let decls12 as ptr[List[ptr[Node]]] = ref (deref root12).declarations
+    let main_fn as ptr[Node] = (deref decls12)[1] // second declaration in program
+    let main_body as ptr[Node] = (deref main_fn).body // BlockStmt
+    let main_decls as ptr[List[ptr[Node]]] = ref (deref main_body).declarations
+    
+    let call_node as ptr[Node] = (deref main_decls)[0] // f(42)
+    let call_args as ptr[List[ptr[Node]]] = ref (deref call_node).params
+    let arg_lit as ptr[Node] = (deref call_args)[0] // 42
+    
+    let assign_node as ptr[Node] = (deref main_decls)[2] // y = 24 (BinaryExpr)
+    let assign_lit as ptr[Node] = (deref assign_node).right // 24
+    
+    let arg_inf as ptr[Type] = (deref arg_lit).inferred_type
+    let assign_inf as ptr[Type] = (deref assign_lit).inferred_type
+    
+    var pass_call as bool = False
+    if arg_inf != None to ptr[Type] and (deref arg_inf).kind to i32 == TypeKind.F64 to i32:
+        pass_call = True
+        
+    var pass_assign as bool = False
+    if assign_inf != None to ptr[Type] and (deref assign_inf).kind to i32 == TypeKind.F64 to i32:
+        pass_assign = True
+        
+    if pass_call and pass_assign:
+        let r as i32 = printf("Test 12 (Destination-Driven Literal Inference): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 12 (Destination-Driven Literal Inference): FAILED!\n" to cstr, "" to cstr)
+
     return 0

@@ -358,8 +358,18 @@ struct TypeChecker:
         elif nt == 3: // FunDecl
             let sema_ptr as ptr[Sema] = (deref self).sema
             let parent_scope as ptr[Scope] = (deref sema_ptr).current_scope
-            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
-            (deref sema_ptr).current_scope = child_scope
+            var child_scope as ptr[Scope] = None to ptr[Scope]
+            if (deref sema_ptr).fn_scopes.has(node to usize):
+                child_scope = (deref sema_ptr).fn_scopes[node to usize]
+            else:
+                child_scope = make_scope(parent_scope, node)
+            let sema_ptr_val as ptr[Sema] = sema_ptr
+            let sema_curr_scope_ptr as ptr[ptr[Scope]] = ref (deref sema_ptr_val).current_scope
+            deref sema_curr_scope_ptr = child_scope
+            
+            let f_type as ptr[Type] = make_type(TypeKind.Function)
+            (deref f_type).return_type = make_type(TypeKind.Void)
+            let f_params as ptr[List[Type]] = ref (deref f_type).param_types
             
             let params as ptr[List[ptr[Node]]] = ref (deref node).params
             let param_count as i64 = (deref params).length()
@@ -381,16 +391,45 @@ struct TypeChecker:
                     (deref p_sym).is_context_manager = False
                     (deref child_scope).symbols[String.make(p_name)] = p_sym
                 
-                // Parameter types default to Any if no type annotations exist
-                let p_type as ptr[Type] = make_type(TypeKind.Any)
-                (deref p_sym).resolved_type = p_type
+                var p_type as ptr[Type] = None to ptr[Type]
+                if (deref p_node).type_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                    let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref p_node).type_annots
+                    if (deref p_annots).length() > 0 to i64:
+                        let lay as ptr[ptr[u8]] = p_annots to ptr[ptr[u8]]
+                        let opt_annot as ptr[u8] = deref lay
+                        if option_has_value(opt_annot):
+                            let val_p as ptr[u8] = option_value(opt_annot)
+                            let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
+                            p_type = self.resolve_type_annotation(annot_val)
+                            self.check_nizam_import((deref annot_val).name.data to cstr, (deref p_node).span)
+                
+                if p_type == None to ptr[Type]:
+                    p_type = make_type(TypeKind.Any)
+                    
+                let p_sym_resolved_ptr as ptr[ptr[Type]] = ref (deref p_sym).resolved_type
+                deref p_sym_resolved_ptr = p_type
+                (deref f_params).append(deref p_type)
                 p_idx = p_idx + 1 to i64
+            
+            let saved_ret as Option[ptr[Type]] = (deref self).current_function_return
+            let self_ptr as ptr[TypeChecker] = self
+            let self_ref_ret as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
+            deref self_ref_ret = Some((deref f_type).return_type)
             
             if (deref node).body != None to ptr[Node]:
                 let dummy3 as ptr[Type] = self.typecheck_node((deref node).body)
                 
+            let self_ref_ret_back as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
+            deref self_ref_ret_back = saved_ret
+            
             let _sep as i32 = 0
             (deref sema_ptr).current_scope = parent_scope
+            
+            let f_name as cstr = (deref node).name.data to cstr
+            if (deref parent_scope).symbols.has(String.make(f_name)):
+                let f_sym as ptr[Symbol] = (deref parent_scope).symbols[String.make(f_name)]
+                (deref f_sym).resolved_type = f_type
+                
             ret_type = make_type(TypeKind.Void)
             
         elif nt == 7: // Identifier
@@ -422,6 +461,15 @@ struct TypeChecker:
             
             if strcmp((deref node).op.data to cstr, "." to cstr) == 0:
                 ret_type = make_type(TypeKind.Any)
+            elif strcmp((deref node).op.data to cstr, "=" to cstr) == 0:
+                let left_t as ptr[Type] = self.typecheck_node(left)
+                if left_t != None to ptr[Type]:
+                    if (deref right).node_type == 8: // NumberLiteral
+                        (deref right).inferred_type = left_t
+                let right_t as ptr[Type] = self.typecheck_node(right)
+                if not self.is_implicitly_convertible(right_t, left_t):
+                    (deref (deref self).sema).report_error(String.make("type mismatch in assignment" to cstr), (deref node).span)
+                ret_type = left_t
             else:
                 let left_t as ptr[Type] = self.typecheck_node(left)
                 let right_t as ptr[Type] = self.typecheck_node(right)
@@ -452,11 +500,24 @@ struct TypeChecker:
             let args as ptr[List[ptr[Node]]] = ref (deref node).params
             let arg_count as i64 = (deref args).length()
             var a_idx as i64 = 0 to i64
-            while a_idx < arg_count:
-                let dummy_a as ptr[Type] = self.typecheck_node((deref args)[a_idx])
-                a_idx = a_idx + 1 to i64
             
-            if (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
+            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function:
+                let params as ptr[List[Type]] = ref (deref callee_t).param_types
+                let expected_count as i64 = (deref params).length()
+                while a_idx < arg_count:
+                    let arg_node as ptr[Node] = (deref args)[a_idx]
+                    if a_idx < expected_count:
+                        let expected_t as ptr[Type] = ref (deref params)[a_idx]
+                        if (deref arg_node).node_type == 8: // NumberLiteral
+                            (deref arg_node).inferred_type = expected_t
+                    let dummy_a as ptr[Type] = self.typecheck_node(arg_node)
+                    a_idx = a_idx + 1 to i64
+            else:
+                while a_idx < arg_count:
+                    let dummy_a as ptr[Type] = self.typecheck_node((deref args)[a_idx])
+                    a_idx = a_idx + 1 to i64
+            
+            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
                 ret_type = (deref callee_t).return_type
             else:
                 ret_type = make_type(TypeKind.Any)
@@ -464,6 +525,14 @@ struct TypeChecker:
         elif nt == 13: // ReturnStmt
             let return_val as ptr[Node] = (deref node).body
             if return_val != None to ptr[Node]:
+                let opt_ret as ptr[u8] = (ref (deref self).current_function_return) to ptr[u8]
+                if option_has_value(opt_ret):
+                    let val_p as ptr[u8] = option_value(opt_ret)
+                    let expected_ret_t as ptr[Type] = val_p to ptr[Type]
+                    let ek as TypeKind = (deref expected_ret_t).kind
+                    if ek != TypeKind.Void and ek != TypeKind.Any and ek != TypeKind.Unknown:
+                        if (deref return_val).node_type == 8: // NumberLiteral
+                            (deref return_val).inferred_type = expected_ret_t
                 ret_type = self.typecheck_node(return_val)
             else:
                 ret_type = make_type(TypeKind.Void)
