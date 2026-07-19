@@ -4,6 +4,8 @@ from std.string import String
 from std.collections import List
 from std.collections import Dict
 from std.option import Option
+import types
+from types import Type
 
 // ── LanguageMode ───────────────────────────────────────────────────────
 enum LanguageMode:
@@ -34,6 +36,7 @@ struct Node:
     public var node_type as i32
     public var span as Span
     public var module_name as Option[String]
+    public var inferred_type as ptr[Type]
 
     // Flattened AST Fields
     public var declarations as List[ptr[Node]]
@@ -45,7 +48,7 @@ struct Node:
     public var body as ptr[Node]
     public var is_async as bool
     public var names as List[String]
-    public var type_annots as List[Option[TypeAnnotation]]
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
     public var initializers as Option[List[ptr[Node]]]
     public var is_mut as bool
     public var cond as ptr[Node]
@@ -73,6 +76,7 @@ struct Symbol:
     public var decl_node as ptr[Node]
     public var sym_type as Option[TypeAnnotation]
     public var is_context_manager as bool
+    public var resolved_type as ptr[Type]
 
 // ── Scope ──────────────────────────────────────────────────────────────
 struct Scope:

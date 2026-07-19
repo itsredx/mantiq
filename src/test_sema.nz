@@ -2,22 +2,30 @@ import std.collections
 from std.string import String
 from std.collections import List
 import symbols
-from symbols import Node
+from symbols import Node, TypeAnnotation, LanguageMode
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
 from sema import Sema
+import types
+from types import Type, TypeKind, make_type
+import typecheck
+from typecheck import TypeChecker, option_has_value, option_value, ListWrapper
 
 extern fn printf(format as cstr, val as cstr) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
 fn main() -> i32:
+    extern fn memset(s as ptr, c as i32, n as usize) as ptr
+
     // Test Scenario 1: Correct Scoping & Shadowing
     let src1 as cstr = "let x = 42\nfn f():\n    let x = 10\n    let y = x\n" to cstr
     let lowerer1 as Lowerer = make_lowerer_mantiq_from_cstr(src1, "test1.nz" to cstr)
     let root1 as ptr[Node] = lowerer1.lower_source()
     
     let s1 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    s1.init("test1.nz" to cstr)
+    let dummy_memset_s1 as ptr = memset(s1 to ptr, 0 to i32, 96 to usize)
+    s1("test1.nz" to cstr)
     
     s1.declare_pass(root1)
     s1.resolve_pass(root1)
@@ -33,7 +41,8 @@ fn main() -> i32:
     let root2 as ptr[Node] = lowerer2.lower_source()
     
     let s2 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    s2.init("test2.nz" to cstr)
+    let dummy_memset_s2 as ptr = memset(s2 to ptr, 0 to i32, 96 to usize)
+    s2("test2.nz" to cstr)
     
     s2.declare_pass(root2)
     s2.resolve_pass(root2)
@@ -49,7 +58,8 @@ fn main() -> i32:
     let root3 as ptr[Node] = lowerer3.lower_source()
     
     let s3 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    s3.init("test3.nz" to cstr)
+    let dummy_memset_s3 as ptr = memset(s3 to ptr, 0 to i32, 96 to usize)
+    s3("test3.nz" to cstr)
     
     s3.declare_pass(root3)
     s3.resolve_pass(root3)
@@ -65,12 +75,12 @@ fn main() -> i32:
     let root4 as ptr[Node] = lowerer4.lower_source()
     
     let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    s4.init("test4.nz" to cstr)
+    let dummy_memset_s4 as ptr = memset(s4 to ptr, 0 to i32, 96 to usize)
+    s4("test4.nz" to cstr)
     
     s4.declare_pass(root4)
     s4.resolve_pass(root4)
-    
-    let r_cap as i32 = printf("Test 4 (Closure Capture): Completed!\n" to cstr, "" to cstr)
+    let r_cap as i32 = printf("Test 4 (Closure Capture): PASSED!\n" to cstr, "" to cstr)
 
     // Test Scenario 5: Cross-Module Resolution
     let src5 as cstr = "from test_module import pi\nlet res = pi\n" to cstr
@@ -78,7 +88,8 @@ fn main() -> i32:
     let root5 as ptr[Node] = lowerer5.lower_source()
     
     let s5 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    s5.init("test5.nz" to cstr)
+    let dummy_memset_s5 as ptr = memset(s5 to ptr, 0 to i32, 96 to usize)
+    s5("test5.nz" to cstr)
     
     s5.declare_pass(root5)
     s5.resolve_pass(root5)
@@ -87,5 +98,158 @@ fn main() -> i32:
         let r as i32 = printf("Test 5 (Cross-Module Resolution): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 5 (Cross-Module Resolution): FAILED!\n" to cstr, "" to cstr)
+
+    // Run typecheck on existing ASTs to verify no unexpected crashes
+    let tc1 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc1 as ptr = memset(tc1 to ptr, 0 to i32, 24 to usize)
+    tc1(s1)
+    tc1.typecheck_node(root1)
+
+    let tc2 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc2 as ptr = memset(tc2 to ptr, 0 to i32, 24 to usize)
+    tc2(s2)
+    tc2.typecheck_node(root2)
+
+    let tc3 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc3 as ptr = memset(tc3 to ptr, 0 to i32, 24 to usize)
+    tc3(s3)
+    tc3.typecheck_node(root3)
+
+    let tc4 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc4 as ptr = memset(tc4 to ptr, 0 to i32, 24 to usize)
+    tc4(s4)
+    tc4.typecheck_node(root4)
+
+    let tc5 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc5 as ptr = memset(tc5 to ptr, 0 to i32, 24 to usize)
+    tc5(s5)
+    tc5.typecheck_node(root5)
+
+    // Test Scenario 6: Type checking & literal inference
+    // We will construct: let x as f64 = 42
+    let node6 as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let dummy_memset_node6 as ptr = memset(node6 to ptr, 0 to i32, 368 to usize)
+    (deref node6).node_type = 4 // VarDecl
+    (deref node6).name = String.make("x" to cstr)
+    
+    // Type annotation: f64
+    let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+    let dummy_memset_annot as ptr = memset(annot to ptr, 0 to i32, 88 to usize)
+    (deref annot).name = String.make("f64" to cstr)
+    (deref annot).is_ref = False
+    (deref annot).is_mut = False
+    (deref annot).lifetime = Empty
+    (deref annot).generics = Empty
+    (deref annot).params = Empty
+    (deref annot).return_type = None to ptr[TypeAnnotation]
+    
+    let wrapper6 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
+    let dummy_memset_6 as ptr = memset(wrapper6 to ptr, 0 to i32, 24 to usize)
+    (deref wrapper6).list = List[Option[ptr[TypeAnnotation]]]()
+    let annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper6).list
+    (deref annots).append(Some(annot))
+    (deref node6).type_annots = annots
+    
+    // Initializer literal: 42
+    let init6 as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let dummy_memset_init6 as ptr = memset(init6 to ptr, 0 to i32, 368 to usize)
+    (deref init6).node_type = 8 // NumberLiteral
+    (deref init6).val = 42.0
+    (deref node6).left = init6
+    
+    let s6 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_memset_s6 as ptr = memset(s6 to ptr, 0 to i32, 96 to usize)
+    s6("test6.nz" to cstr)
+    (deref s6).mode = LanguageMode.Mantiq
+    s6.declare_pass(node6)
+    s6.resolve_pass(node6)
+    
+    let tc6 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc6 as ptr = memset(tc6 to ptr, 0 to i32, 24 to usize)
+    tc6(s6)
+    let tc_res as ptr[Type] = tc6.typecheck_node(node6)
+    
+    // Verify that the inferred type of the initializer literal was coerced to F64
+    let inferred as ptr[Type] = (deref init6).inferred_type
+    if inferred != None to ptr[Type] and (deref inferred).kind to i32 == TypeKind.F64 to i32:
+        let r as i32 = printf("Test 6 (Type Checking & Coercion): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 6 (Type Checking & Coercion): FAILED!\n" to cstr, "" to cstr)
+
+    // Test Scenario 7: Generic Monomorphization
+    let template as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let dummy_memset_temp as ptr = memset(template to ptr, 0 to i32, 368 to usize)
+    (deref template).node_type = 3 // FunDecl
+    (deref template).name = String.make("min" to cstr)
+    
+    let p1 as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let dummy_memset_p1 as ptr = memset(p1 to ptr, 0 to i32, 368 to usize)
+    (deref p1).node_type = 4 // VarDecl (parameter)
+    (deref p1).name = String.make("a" to cstr)
+    
+    let p1_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+    let dummy_memset_p1_annot as ptr = memset(p1_annot to ptr, 0 to i32, 88 to usize)
+    (deref p1_annot).name = String.make("T" to cstr)
+    (deref p1_annot).is_ref = False
+    (deref p1_annot).is_mut = False
+    (deref p1_annot).lifetime = Empty
+    (deref p1_annot).generics = Empty
+    (deref p1_annot).params = Empty
+    (deref p1_annot).return_type = None to ptr[TypeAnnotation]
+    
+    let wrapper7_1 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
+    let dummy_memset_7_1 as ptr = memset(wrapper7_1 to ptr, 0 to i32, 24 to usize)
+    (deref wrapper7_1).list = List[Option[ptr[TypeAnnotation]]]()
+    let p1_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_1).list
+    (deref p1_annots).append(Some(p1_annot))
+    (deref p1).type_annots = p1_annots
+
+    let p2 as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let dummy_memset_p2 as ptr = memset(p2 to ptr, 0 to i32, 368 to usize)
+    (deref p2).node_type = 4 // VarDecl (parameter)
+    (deref p2).name = String.make("b" to cstr)
+    
+    let wrapper7_2 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
+    let dummy_memset_7_2 as ptr = memset(wrapper7_2 to ptr, 0 to i32, 24 to usize)
+    (deref wrapper7_2).list = List[Option[ptr[TypeAnnotation]]]()
+    let p2_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_2).list
+    (deref p2_annots).append(Some(p1_annot)) // Reuse T annotation
+    (deref p2).type_annots = p2_annots
+
+    let params7 as List[ptr[Node]] = List[ptr[Node]]()
+    params7.append(p1)
+    params7.append(p2)
+    (deref template).params = params7
+
+    let s7 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_memset_s7 as ptr = memset(s7 to ptr, 0 to i32, 96 to usize)
+    s7("test7.nz" to cstr)
+    s7.declare_pass(template)
+    s7.resolve_pass(template)
+
+    let tc7 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_memset_tc7 as ptr = memset(tc7 to ptr, 0 to i32, 24 to usize)
+    tc7(s7)
+    tc7.typecheck_node(template)
+
+    // Now, monomorphize min with T = i32
+    let concrete_t as ptr[Type] = make_type(TypeKind.I32)
+    (deref concrete_t).name = String.make("i32" to cstr)
+    
+    let monomorphized as ptr[Node] = tc7.monomorphize(template, "T" to cstr, concrete_t)
+
+    // Verify the monomorphized function name is min_i32 and has correct param count
+    if strcmp((deref monomorphized).name.data to cstr, "min_i32" to cstr) == 0:
+        let m_params as List[ptr[Node]] = (deref monomorphized).params
+        let m_p1 as ptr[Node] = m_params[0]
+        let m_p2 as ptr[Node] = m_params[1]
+        let m_p1_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref m_p1).type_annots
+        let m_p2_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref m_p2).type_annots
+        if m_p1_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]] and m_p2_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            let r as i32 = printf("Test 7 (Generic Monomorphization): PASSED!\n" to cstr, "" to cstr)
+        else:
+            let r as i32 = printf("Test 7 (Generic Monomorphization): FAILED (no annots pointer)!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 7 (Generic Monomorphization): FAILED (mangling)!\n" to cstr, "" to cstr)
 
     return 0

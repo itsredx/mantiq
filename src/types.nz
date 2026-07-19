@@ -1,0 +1,87 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from std.mem import make
+
+// ── TypeKind ────────────────────────────────────────────────────────────
+enum TypeKind:
+    I8
+    I16
+    I32
+    I64
+    I128
+    ISize
+    U8
+    U16
+    U32
+    U64
+    U128
+    USize
+    F16
+    BFloat16
+    F32
+    F64
+    F128
+    Boolean
+    Char
+    String
+    CStr
+    AsciiStr
+    Utf8Str
+    WebStr
+    RangeStr
+    Slice
+    List
+    Tuple
+    Dict
+    Result
+    Option
+    Task
+    QBit
+    QReg
+    Closure
+    Class
+    Interface
+    Error
+    Struct
+    Enum
+    Union
+    Module
+    Function
+    RawPointer
+    Unknown
+    Any
+    Void
+
+// ── Type ────────────────────────────────────────────────────────────────
+struct Type:
+    public var kind as TypeKind
+    public var payload as ptr[Type]
+    public var tuple_types as List[Type]
+    public var name as String
+    public var param_types as List[Type]
+    public var return_type as ptr[Type]
+
+// ── Helper Constructors ──────────────────────────────────────────────────
+fn make_type(kind as TypeKind) as ptr[Type]:
+    extern fn memset(s as ptr, c as i32, n as usize) as ptr
+    let t as ptr[Type] = make[Type](1 to usize) to ptr[Type]
+    let dummy_memset as ptr = memset(t to ptr, 0 to i32, 96 to usize)
+    (deref t).kind = kind
+    (deref t).payload = None to ptr[Type]
+    (deref t).tuple_types = List[Type]()
+    (deref t).name = String.make("" to cstr)
+    (deref t).param_types = List[Type]()
+    (deref t).return_type = None to ptr[Type]
+    return t
+
+fn make_ptr_type(element as ptr[Type]) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.RawPointer)
+    (deref t).payload = element
+    return t
+
+fn make_struct_type(name as String) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Struct)
+    (deref t).name = name
+    return t

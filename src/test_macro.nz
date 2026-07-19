@@ -91,7 +91,7 @@ fn main():
                     // 1: BinaryExpr (y_mac1 + y_mac1)
                     if block_len == 2 to i64:
                         let block_decl0 as ptr[Node] = block_decls[0]
-                        let block_decl1 as ptr[Node] = block_decls[1]
+             init           let block_decl1 as ptr[Node] = block_decls[1]
                         
                         if (deref block_decl0).node_type == 4: // VarDecl
                             let local_var_name as cstr = (deref block_decl0).name.data to cstr
