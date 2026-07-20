@@ -8,9 +8,13 @@ import symbols
 from symbols import Node, Symbol, Scope, SymbolKind, Span
 import types
 from types import Type, TypeKind, is_copy_type
+import sema
+from sema import Sema
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn printf(format as cstr, val as cstr) as i32
+extern fn malloc(size as usize) as ptr
+
 
 // ── ObjectState ────────────────────────────────────────────────────────
 enum ObjectState:
@@ -29,6 +33,8 @@ struct BorrowChecker:
     public var current_file as String
     public var symbol_states as Dict[String, VarInfo]
     public var auto_drops as Dict[usize, List[ptr[Symbol]]]
+    public var scopes as List[ptr[List[ptr[Symbol]]]]
+    public var sema as ptr[Sema]
     public var scope_depth as i32
 
     public fn __init__(self as ptr[BorrowChecker]):
@@ -36,13 +42,15 @@ struct BorrowChecker:
         (deref self).current_file = String.make("" to cstr)
         (deref self).symbol_states = Dict[String, VarInfo]()
         (deref self).auto_drops = Dict[usize, List[ptr[Symbol]]]()
+        (deref self).scopes = List[ptr[List[ptr[Symbol]]]]()
+        (deref self).sema = None to ptr[Sema]
         (deref self).scope_depth = 0 to i32
 
     public fn report_error(self as ptr[BorrowChecker], msg as String, span as Span):
         extern fn snprintf(str as ptr[u8], size as usize, format as cstr, file as cstr, row as u32, col as u32, err as cstr) as i32
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
         let cap as usize = msg.len + 128 to usize
-        let buf as ptr[u8] = make(cap) to ptr[u8]
+        let buf as ptr[u8] = malloc(cap) to ptr[u8]
         let dummy_memset as ptr = memset(buf to ptr, 0 to i32, cap to i32)
         let len as i32 = snprintf(buf, cap, "%s:%d:%d: borrow error: %s" to cstr, (deref self).current_file.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
@@ -64,6 +72,58 @@ struct BorrowChecker:
 
     public fn mark_owned(self as ptr[BorrowChecker], name as String, var_type as ptr[Type]):
         (deref self).symbol_states[name] = VarInfo(state = ObjectState.Owned, var_type = var_type)
+
+    public fn push_scope(self as ptr[BorrowChecker]):
+        extern fn memset(s as ptr, c as i32, n as usize) as ptr
+        let depth as i64 = (deref self).scope_depth to i64
+        let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
+        let len as i64 = (deref scopes_ref).length()
+        if depth >= len:
+            let new_list as ptr[List[ptr[Symbol]]] = malloc(24 to usize) to ptr[List[ptr[Symbol]]]
+            let dummy_memset as ptr = memset(new_list to ptr, 0 to i32, 24 to usize)
+            (deref scopes_ref).append(new_list)
+        else:
+            let s_ptr as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[depth]
+            (deref s_ptr).clear()
+        let dummy_sep1 as i32 = 0
+        (deref self).scope_depth = (deref self).scope_depth + 1 to i32
+
+    public fn add_symbol_to_current_scope(self as ptr[BorrowChecker], sym as ptr[Symbol]):
+        let depth as i64 = (deref self).scope_depth to i64
+        if depth > 0 to i64:
+            let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
+            let s_ptr as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[depth - 1]
+            (deref s_ptr).append(sym)
+
+    public fn pop_scope(self as ptr[BorrowChecker], node as ptr[Node]):
+        let depth as i64 = (deref self).scope_depth to i64
+        if depth <= 0 to i64:
+            return
+            
+        let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
+        let current_scope as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[depth - 1]
+        let sym_count as i64 = (deref current_scope).length()
+        
+        let drops as List[ptr[Symbol]] = List[ptr[Symbol]]()
+        var i as i64 = 0 to i64
+        while i < sym_count:
+            let sym as ptr[Symbol] = (deref current_scope)[i]
+            let name as String = (deref sym).name
+            if (deref self).symbol_states.has(name):
+                let info as VarInfo = (deref self).symbol_states[name]
+                if info.state == ObjectState.Owned:
+                    let t as ptr[Type] = info.var_type
+                    if t != None to ptr[Type]:
+                        if is_copy_type(t) == False or (deref sym).is_context_manager:
+                            drops.append(sym)
+                            (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = t)
+            i = i + 1 to i64
+            
+        if drops.length() > 0 to i64:
+            (deref self).auto_drops[node to usize] = drops
+            
+        let dummy_sep2 as i32 = 0
+        (deref self).scope_depth = (deref self).scope_depth - 1 to i32
 
     // Check identifier for use-after-move, then mark as moved only if it's a move type
     public fn move_identifier(self as ptr[BorrowChecker], node as ptr[Node]):
@@ -112,17 +172,47 @@ struct BorrowChecker:
                 i = i + 1 to i64
                 
         elif nt == 19: // BlockStmt
-            (deref self).scope_depth = (deref self).scope_depth + 1 to i32
+            self.push_scope()
             let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
             let count as i64 = (deref decls).length()
             var i as i64 = 0 to i64
             while i < count:
                 self.walk_ast((deref decls)[i])
                 i = i + 1 to i64
-            (deref self).scope_depth = (deref self).scope_depth - 1 to i32
+            self.pop_scope(node)
                 
         elif nt == 3: // FunDecl
+            let sema_ptr as ptr[Sema] = (deref self).sema
+            var parent_scope as ptr[Scope] = None to ptr[Scope]
+            if sema_ptr != None to ptr[Sema]:
+                parent_scope = (deref sema_ptr).current_scope
+                if (deref sema_ptr).fn_scopes.has(node to usize):
+                    let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
+                    (deref sema_ptr).current_scope = child_scope
+            
+            self.push_scope()
+            
+            // Register parameters in current scope stack
+            let params as ptr[List[ptr[Node]]] = ref (deref node).params
+            let param_count as i64 = (deref params).length()
+            var p_idx as i64 = 0 to i64
+            while p_idx < param_count:
+                let param as ptr[Node] = (deref params)[p_idx]
+                let param_name as String = (deref param).name
+                if sema_ptr != None to ptr[Sema]:
+                    let sym as ptr[Symbol] = (deref sema_ptr).lookup_symbol(param_name)
+                    if sym != None to ptr[Symbol]:
+                        self.mark_owned(param_name, (deref sym).resolved_type)
+                        self.add_symbol_to_current_scope(sym)
+                else:
+                    self.mark_owned(param_name, None to ptr[Type])
+                p_idx = p_idx + 1 to i64
+                
             self.walk_ast((deref node).body)
+            
+            self.pop_scope(node)
+            if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
+                (deref sema_ptr).current_scope = parent_scope
                 
         elif nt == 4: // VarDecl
             var var_type as ptr[Type] = (deref node).inferred_type
@@ -134,7 +224,15 @@ struct BorrowChecker:
                     if init_check != None to ptr[Node]:
                         if (deref init_check).inferred_type != None to ptr[Type]:
                             var_type = (deref init_check).inferred_type
-            self.mark_owned((deref node).name, var_type)
+            let name as String = (deref node).name
+            self.mark_owned(name, var_type)
+            
+            let sema_ptr as ptr[Sema] = (deref self).sema
+            if sema_ptr != None to ptr[Sema]:
+                let sym as ptr[Symbol] = (deref sema_ptr).lookup_symbol(name)
+                if sym != None to ptr[Symbol]:
+                    self.add_symbol_to_current_scope(sym)
+                    
             let init as ptr[Node] = (deref node).left
             if init != None to ptr[Node]:
                 if (deref init).node_type == 7: // Identifier
@@ -162,6 +260,37 @@ struct BorrowChecker:
                     self.move_identifier(return_val)
                 else:
                     self.walk_ast(return_val)
+                    
+            // Collect drops from all active scopes on the stack
+            let drops as List[ptr[Symbol]] = List[ptr[Symbol]]()
+            let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
+            var s_idx as i64 = (deref self).scope_depth to i64
+            while s_idx > 0 to i64:
+                let scope as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[s_idx - 1]
+                let sym_count as i64 = (deref scope).length()
+                var i as i64 = 0 to i64
+                while i < sym_count:
+                    let sym as ptr[Symbol] = (deref scope)[i]
+                    let name as String = (deref sym).name
+                    if (deref self).symbol_states.has(name):
+                        let info as VarInfo = (deref self).symbol_states[name]
+                        if info.state == ObjectState.Owned:
+                            let t as ptr[Type] = info.var_type
+                            if t != None to ptr[Type]:
+                                if is_copy_type(t) == False or (deref sym).is_context_manager:
+                                    var is_returned as bool = False
+                                    if return_val != None to ptr[Node]:
+                                        if (deref return_val).node_type == 7: // Identifier
+                                            if strcmp((deref return_val).name.data to cstr, name.data to cstr) == 0:
+                                                is_returned = True
+                                    if not is_returned:
+                                        drops.append(sym)
+                                        (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = t)
+                    i = i + 1 to i64
+                s_idx = s_idx - 1 to i64
+                
+            if drops.length() > 0 to i64:
+                (deref self).auto_drops[node to usize] = drops
                     
         elif nt == 6: // BinaryExpr
             let op as String = (deref node).op
@@ -192,6 +321,43 @@ struct BorrowChecker:
             
         elif nt == 16: // MemberExpr
             self.walk_ast((deref node).left)
+            
+        elif nt == 21: // WithStmt
+            let expr as ptr[Node] = (deref node).left
+            if expr != None to ptr[Node]:
+                self.walk_ast(expr)
+                if (deref expr).node_type == 7: // Identifier
+                    self.move_identifier(expr)
+            
+            let sema_ptr as ptr[Sema] = (deref self).sema
+            var parent_scope as ptr[Scope] = None to ptr[Scope]
+            if sema_ptr != None to ptr[Sema]:
+                parent_scope = (deref sema_ptr).current_scope
+                if (deref sema_ptr).fn_scopes.has(node to usize):
+                    let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
+                    (deref sema_ptr).current_scope = child_scope
+                    
+            self.push_scope()
+            
+            let name as String = (deref node).name
+            if name.len > 0 to usize:
+                var var_type as ptr[Type] = None to ptr[Type]
+                if expr != None to ptr[Node]:
+                    var_type = (deref expr).inferred_type
+                self.mark_owned(name, var_type)
+                
+                if sema_ptr != None to ptr[Sema]:
+                    let sym as ptr[Symbol] = (deref sema_ptr).lookup_symbol(name)
+                    if sym != None to ptr[Symbol]:
+                        self.add_symbol_to_current_scope(sym)
+            
+            let body as ptr[Node] = (deref node).body
+            if body != None to ptr[Node]:
+                self.walk_ast(body)
+                
+            self.pop_scope(node)
+            if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
+                (deref sema_ptr).current_scope = parent_scope
             
         elif nt == 5: // IfStmt
             self.walk_ast((deref node).cond)

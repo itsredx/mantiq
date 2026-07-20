@@ -154,7 +154,7 @@ struct TypeChecker:
                 skip = True
             elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
                 skip = True
-            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0:
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0:
                 skip = True
                 
             let name_ptr as ptr[u8] = name to ptr[u8]
@@ -567,6 +567,10 @@ struct TypeChecker:
         elif nt == 16: // MemberExpr
             let obj_t as ptr[Type] = self.typecheck_node((deref node).left)
             ret_type = make_type(TypeKind.Any)
+        elif nt == 21: // WithStmt
+            let expr_t as ptr[Type] = self.typecheck_node((deref node).left)
+            let body_t as ptr[Type] = self.typecheck_node((deref node).body)
+            ret_type = body_t
                 
         let _sep2 as i32 = 0
         (deref node).inferred_type = ret_type

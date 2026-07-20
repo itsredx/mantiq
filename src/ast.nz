@@ -44,6 +44,7 @@ struct TypeAnnotation:
 // WhileStmt = 14
 // ForStmt = 15
 // MemberExpr = 16
+// WithStmt = 21
 
 // ── Node ───────────────────────────────────────────────────────────────
 struct Node:

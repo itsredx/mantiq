@@ -2,7 +2,7 @@ import std.collections
 from std.string import String
 from std.collections import List, Dict
 import symbols
-from symbols import Node, TypeAnnotation, LanguageMode, Span
+from symbols import Node, TypeAnnotation, LanguageMode, Span, Symbol
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
@@ -15,6 +15,7 @@ import borrowck
 from borrowck import BorrowChecker
 
 extern fn printf(format as cstr, val as cstr) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
 fn main() -> i32:
     extern fn memset(s as ptr, c as i32, n as usize) as ptr
@@ -90,5 +91,88 @@ fn main() -> i32:
         let r as i32 = printf("Test 11 (Copy Type No Move): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 11 (Copy Type No Move): FAILED (false positive on i32)!\n" to cstr, "" to cstr)
+
+    // Test Scenario 13: Auto-drops injection
+    let src13 as cstr = "fn f():\n    let x as String = String()\n    let y as i32 = 42\n" to cstr
+    let lowerer13 as Lowerer = make_lowerer_mantiq_from_cstr(src13, "test_borrow13.nz" to cstr)
+    let root13 as ptr[Node] = lowerer13.lower_source()
+    
+    let s13 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_s13 as ptr = memset(s13 to ptr, 0 to i32, 96 to usize)
+    s13("test_borrow13.nz" to cstr)
+    s13.declare_pass(root13)
+    s13.resolve_pass(root13)
+    
+    let tc13 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_tc13 as ptr = memset(tc13 to ptr, 0 to i32, 24 to usize)
+    tc13(s13)
+    tc13.typecheck_node(root13)
+    
+    let bc13 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc13()
+    (deref bc13).sema = s13
+    (deref bc13).current_file = String.make("test_borrow13.nz" to cstr)
+    bc13.walk_ast(root13)
+    
+    let fundecl as ptr[Node] = (deref root13).declarations[0]
+    let body13 as ptr[Node] = (deref fundecl).body
+    
+    var pass13 as bool = False
+    if (deref bc13).auto_drops.has(body13 to usize):
+        let drops as List[ptr[Symbol]] = (deref bc13).auto_drops[body13 to usize]
+        if drops.length() == 1 to i64:
+            let sym as ptr[Symbol] = drops[0]
+            let s_name as String = (deref sym).name
+            if strcmp(s_name.data to cstr, "x" to cstr) == 0:
+                pass13 = True
+                
+    if pass13:
+        let r as i32 = printf("Test 13 (Auto-Drops Injection): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 13 (Auto-Drops Injection): FAILED!\n" to cstr, "" to cstr)
+
+    // Test Scenario 14: Context manager with-stmt
+    let src14 as cstr = "fn open() as i32:\n    return 0\n\nfn f():\n    with open() as resource:\n        let x = 10\n" to cstr
+    let lowerer14 as Lowerer = make_lowerer_mantiq_from_cstr(src14, "test_borrow14.nz" to cstr)
+    let root14 as ptr[Node] = lowerer14.lower_source()
+    
+    let s14 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dummy_s14 as ptr = memset(s14 to ptr, 0 to i32, 96 to usize)
+    s14("test_borrow14.nz" to cstr)
+    s14.declare_pass(root14)
+    s14.resolve_pass(root14)
+    
+    let tc14 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dummy_tc14 as ptr = memset(tc14 to ptr, 0 to i32, 24 to usize)
+    tc14(s14)
+    tc14.typecheck_node(root14)
+    
+    let bc14 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc14()
+    (deref bc14).sema = s14
+    (deref bc14).current_file = String.make("test_borrow14.nz" to cstr)
+    bc14.walk_ast(root14)
+    
+    let fundecl_f as ptr[Node] = (deref root14).declarations[1]
+    let f_body as ptr[Node] = (deref fundecl_f).body
+    var with_stmt as ptr[Node] = None to ptr[Node]
+    if (deref f_body).node_type == 21: // WithStmt
+        with_stmt = f_body
+    else:
+        with_stmt = (deref f_body).declarations[0]
+    
+    var pass14 as bool = False
+    if (deref bc14).auto_drops.has(with_stmt to usize):
+        let drops as List[ptr[Symbol]] = (deref bc14).auto_drops[with_stmt to usize]
+        if drops.length() == 1 to i64:
+            let sym as ptr[Symbol] = drops[0]
+            let s_name as String = (deref sym).name
+            if strcmp(s_name.data to cstr, "resource" to cstr) == 0 and (deref sym).is_context_manager:
+                pass14 = True
+                
+    if pass14:
+        let r as i32 = printf("Test 14 (Context Manager Auto-Drop): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let r as i32 = printf("Test 14 (Context Manager Auto-Drop): FAILED!\n" to cstr, "" to cstr)
 
     return 0

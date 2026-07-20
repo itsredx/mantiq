@@ -84,6 +84,15 @@ struct Sema:
         (deref gs).symbols[String.make("printf")] = make_symbol(String.make("printf"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("String")] = make_symbol(String.make("String"), SymbolKind.Struct, None to ptr[Node])
         (deref gs).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("None")] = make_symbol(String.make("None"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Some")] = make_symbol(String.make("Some"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Empty")] = make_symbol(String.make("Empty"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Ok")] = make_symbol(String.make("Ok"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Err")] = make_symbol(String.make("Err"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("make")] = make_symbol(String.make("make"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("drop")] = make_symbol(String.make("drop"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("range")] = make_symbol(String.make("range"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("print")] = make_symbol(String.make("print"), SymbolKind.Function, None to ptr[Node])
 
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
         let cap as usize = msg.len + (deref self).current_file.len + 64 to usize
@@ -129,6 +138,19 @@ struct Sema:
         let target as String = (deref node).target
         // Skip non-import nodes (e.g. `link` directives) that have empty targets
         if target.len == 0 to usize:
+            return
+            
+        if strcmp(target.data to cstr, "std.mem" to cstr) == 0:
+            let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
+            (deref (deref self).current_scope).symbols[target] = mod_sym
+            
+            let count as i64 = (deref node).imported_symbols.length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = (deref node).imported_symbols[s_idx]
+                let builtin_sym as ptr[Symbol] = make_symbol(s_name, SymbolKind.Function, node)
+                (deref (deref self).current_scope).symbols[s_name] = builtin_sym
+                s_idx = s_idx + 1 to i64
             return
         
         let path_buf as ptr[u8] = strdup(target.data to cstr) to ptr[u8]
@@ -318,6 +340,31 @@ struct Sema:
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Struct, node)
                 (deref (deref self).current_scope).symbols[name] = sym
+        elif nt == 21: // WithStmt
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
+            (deref self).current_scope = child_scope
+            (deref self).fn_scopes[node to usize] = child_scope
+            
+            // Define the context variable in this scope with is_context_manager = True
+            var var_name as String = (deref node).name
+            if var_name.len == 0 to usize:
+                // Generate a temporary name like "_with_temp_{start_byte}"
+                let cap as usize = 32 to usize
+                let buf as ptr[u8] = make(cap) to ptr[u8]
+                extern fn snprintf(str as ptr[u8], size as usize, format as cstr, val as u32) as i32
+                let snprintf_len as i32 = snprintf(buf, cap, "_with_temp_%d" to cstr, (deref node).span.start_byte)
+                var_name = String(data = buf, len = snprintf_len to usize, capacity = cap)
+                (deref node).name = var_name
+                
+            let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
+            (deref sym).is_context_manager = True
+            (deref child_scope).symbols[var_name] = sym
+            
+            if (deref node).body != None to ptr[Node]:
+                self.declare_pass((deref node).body)
+            let self_ref_w1 as ptr[Sema] = self
+            (deref self_ref_w1).current_scope = parent_scope
         elif nt == 2: // ImportDecl
             self.load_imported_module(node)
 
@@ -404,3 +451,13 @@ struct Sema:
         elif nt == 16: // MemberExpr
             if (deref node).left != None to ptr[Node]:
                 self.resolve_pass((deref node).left)
+        elif nt == 21: // WithStmt
+            if (deref node).left != None to ptr[Node]:
+                self.resolve_pass((deref node).left)
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
+            (deref self).current_scope = child_scope
+            if (deref node).body != None to ptr[Node]:
+                self.resolve_pass((deref node).body)
+            let self_ref_w2 as ptr[Sema] = self
+            (deref self_ref_w2).current_scope = parent_scope
