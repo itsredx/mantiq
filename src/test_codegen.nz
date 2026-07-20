@@ -1,0 +1,100 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+import symbols
+from symbols import Node
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import types
+from types import Type, TypeKind, make_type
+import typecheck
+from typecheck import TypeChecker
+import codegen
+from codegen import LLVMCodegen
+
+extern fn printf(format as cstr, val as cstr) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn memset(s as ptr, c as i32, n as usize) as ptr
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
+
+fn run_one(source as cstr, file as cstr, check as cstr) as bool:
+    let lr as Lowerer = make_lowerer_mantiq_from_cstr(source, file)
+    let root as ptr[Node] = lr.lower_source()
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let _ as ptr = memset(s to ptr, 0 to i32, 96 to usize)
+    s(file)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dm1 as ptr = memset(tc to ptr, 0 to i32, 24 to usize)
+    tc(s)
+    tc.typecheck_node(root)
+    let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    let dm2 as ptr = memset(cg to ptr, 0 to i32, 256 to usize)
+    cg()
+    let ir as String = cg.generate(root)
+    if ir.data == None:
+        return False
+    if strstr(ir.data to cstr, check to cstr) != None:
+        return True
+    return False
+
+fn main() -> i32:
+    // Test 1: Variable Declaration + Number
+    if run_one("let x = 42\n" to cstr, "t1.nz" to cstr, "alloca" to cstr):
+        let p1 as i32 = printf("Test 1 (VarDecl + Number): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p1f as i32 = printf("Test 1 (VarDecl + Number): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 2: Function Declaration (noop)
+    if run_one("fn noop():\n    pass\n" to cstr, "t2.nz" to cstr, "define" to cstr):
+        let p2 as i32 = printf("Test 2 (FunDecl noop): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p2f as i32 = printf("Test 2 (FunDecl noop): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 3: Function with return
+    if run_one("fn get42():\n    return 42\n" to cstr, "t3.nz" to cstr, "ret" to cstr):
+        let p3 as i32 = printf("Test 3 (FunDecl return): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p3f as i32 = printf("Test 3 (FunDecl return): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 4: String Literal
+    if run_one("let s = \"hello\"\n" to cstr, "t4.nz" to cstr, "constant" to cstr):
+        let p4 as i32 = printf("Test 4 (StringLiteral): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p4f as i32 = printf("Test 4 (StringLiteral): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 5: Simple Call (no args, no return)
+    if run_one("fn noop():\n    pass\nnoop()\n" to cstr, "t5.nz" to cstr, "call" to cstr):
+        let p5 as i32 = printf("Test 5 (CallExpr): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p5f as i32 = printf("Test 5 (CallExpr): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 6: Var Assignment
+    if run_one("var x as i32 = 1\nx = 2\n" to cstr, "t6.nz" to cstr, "store" to cstr):
+        let p6 as i32 = printf("Test 6 (Assignment): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p6f as i32 = printf("Test 6 (Assignment): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 7: Multi-statement
+    if run_one("let a = 1\nlet b = 2\n" to cstr, "t7.nz" to cstr, "alloca" to cstr):
+        let p7 as i32 = printf("Test 7 (Multi-stmt): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p7f as i32 = printf("Test 7 (Multi-stmt): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 8: While statement
+    if run_one("while 1:\n    pass\n" to cstr, "t8.nz" to cstr, "br" to cstr):
+        let p8 as i32 = printf("Test 8 (WhileStmt): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p8f as i32 = printf("Test 8 (WhileStmt): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 9: Two Vars
+    if run_one("let x as i32 = 10\nlet y as i32 = 5\n" to cstr, "t9.nz" to cstr, "alloca" to cstr):
+        let p9 as i32 = printf("Test 9 (Two Vars): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p9f as i32 = printf("Test 9 (Two Vars): FAILED!\n" to cstr, "" to cstr)
+
+    return 0 to i32
