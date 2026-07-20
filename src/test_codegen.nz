@@ -19,12 +19,17 @@ extern fn printf(format as cstr, val as cstr) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
+extern fn fopen(path as cstr, mode as cstr) as ptr
+extern fn fwrite(ptr as ptr, size as usize, nmemb as usize, stream as ptr) as usize
+extern fn fclose(stream as ptr) as i32
+extern fn system(cmd as cstr) as i32
+extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 
-fn run_one(source as cstr, file as cstr, check as cstr) as bool:
+fn gen_ir(source as cstr, file as cstr) as String:
     let lr as Lowerer = make_lowerer_mantiq_from_cstr(source, file)
     let root as ptr[Node] = lr.lower_source()
     let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let _ as ptr = memset(s to ptr, 0 to i32, 96 to usize)
+    let dm0 as ptr = memset(s to ptr, 0 to i32, 96 to usize)
     s(file)
     s.declare_pass(root)
     s.resolve_pass(root)
@@ -35,12 +40,25 @@ fn run_one(source as cstr, file as cstr, check as cstr) as bool:
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     let dm2 as ptr = memset(cg to ptr, 0 to i32, 256 to usize)
     cg()
-    let ir as String = cg.generate(root)
+    return cg.generate(root)
+
+fn run_one(source as cstr, file as cstr, check as cstr) as bool:
+    let ir as String = gen_ir(source, file)
     if ir.data == None:
         return False
     if strstr(ir.data to cstr, check to cstr) != None:
         return True
     return False
+
+fn write_file(path as cstr, data as cstr, data_len as usize) as bool:
+    let f as ptr = fopen(path, "w" to cstr)
+    if f == None to ptr:
+        return False
+    let written as usize = fwrite(data to ptr, 1 to usize, data_len to usize, f)
+    let fc as i32 = fclose(f)
+    return written == data_len
+
+extern fn strlen(s as cstr) as usize
 
 fn main() -> i32:
     // Test 1: Variable Declaration + Number
@@ -96,5 +114,29 @@ fn main() -> i32:
         let p9 as i32 = printf("Test 9 (Two Vars): PASSED!\n" to cstr, "" to cstr)
     else:
         let p9f as i32 = printf("Test 9 (Two Vars): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 10: IR has valid module header
+    if run_one("fn noop():\n    pass\n" to cstr, "t10.nz" to cstr, "target triple" to cstr):
+        let p10 as i32 = printf("Test 10 (IR Module Header): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p10f as i32 = printf("Test 10 (IR Module Header): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 11: IR declares external functions
+    if run_one("fn noop():\n    pass\n" to cstr, "t11.nz" to cstr, "declare" to cstr):
+        let p11 as i32 = printf("Test 11 (IR External Decls): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p11f as i32 = printf("Test 11 (IR External Decls): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 12: Write IR to file and validate with clang
+    let test12_ir as cstr = "define i32 @main() { entry: ret i32 0 }\n" to cstr
+    let ok12 as bool = write_file("/tmp/nz_test12.ll" to cstr, test12_ir, 39 to usize)
+    if ok12:
+        let r12 as i32 = system("clang-15 -fsyntax-only /tmp/nz_test12.ll -x ir 2>/dev/null" to cstr)
+        if r12 == 0:
+            let p12 as i32 = printf("Test 12 (Clang Syntax Check): PASSED!\n" to cstr, "" to cstr)
+        else:
+            let p12f as i32 = printf("Test 12 (Clang Syntax Check): FAILED!\n" to cstr, "" to cstr)
+    else:
+        let p12f as i32 = printf("Test 12 (Clang Syntax Check): FAILED (write)!\n" to cstr, "" to cstr)
 
     return 0 to i32

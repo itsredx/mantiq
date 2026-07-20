@@ -169,6 +169,13 @@ struct Lowerer:
             return self.lower_member_expr(ts_node)
         elif strcmp(kind, "with_stmt" to cstr) == 0:
             return self.lower_with_stmt(ts_node)
+        elif strcmp(kind, "pass_stmt" to cstr) == 0:
+            let n as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+            (deref n).node_type = 8 // NumberLiteral placeholder (0 value)
+            (deref n).span = self.get_span(ts_node)
+            (deref n).val = 0.0
+            (deref n).module_name = Empty
+            return n
         elif strcmp(kind, "assignment" to cstr) == 0:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "class_decl" to cstr) == 0:
