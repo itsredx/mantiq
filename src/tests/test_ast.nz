@@ -1,0 +1,21 @@
+import std.collections
+from std.string import String
+from std.collections import List
+from std.mem import make
+from symbols import Node, NodeType, Span, make_node, set_node_name, set_node_left, set_node_right, set_node_val, node_kind, node_name, node_left, node_right
+
+fn main():
+    let span as Span = Span(start_byte = 0 to u32, end_byte = 10 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 1 to u32, end_col = 10 to u32)
+
+    let id_node as ptr[Node] = make_node(NodeType.Identifier, span)
+    set_node_name(id_node, String.make("x" to cstr))
+
+    let lit_node as ptr[Node] = make_node(NodeType.NumberLiteral, span)
+    set_node_val(lit_node, 42 to f64)
+
+    let bin_node as ptr[Node] = make_node(NodeType.BinaryExpr, span)
+    set_node_name(bin_node, String.make("+" to cstr))
+    set_node_left(bin_node, id_node)
+    set_node_right(bin_node, lit_node)
+
+    print("AST instantiation successful!")

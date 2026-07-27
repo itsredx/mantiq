@@ -86,6 +86,16 @@ fn make_struct_type(name as String) as ptr[Type]:
     (deref t).name = name
     return t
 
+fn make_enum_type(name as String) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Enum)
+    (deref t).name = name
+    return t
+
+fn make_union_type(name as String) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Union)
+    (deref t).name = name
+    return t
+
 // ── Copy/Move Type Classification ──────────────────────────────────────
 fn is_copy_type(t as ptr[Type]) as bool:
     if t == None to ptr[Type]:

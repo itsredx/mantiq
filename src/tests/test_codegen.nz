@@ -3,7 +3,7 @@ import std.collections
 from std.string import String
 from std.collections import List
 import symbols
-from symbols import Node
+from symbols import Node, NodeType, Span, make_node, set_node_val, set_node_body, ClosureExprData, NumberLiteralData
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
@@ -12,6 +12,8 @@ import types
 from types import Type, TypeKind, make_type
 import typecheck
 from typecheck import TypeChecker
+import borrowck
+from borrowck import BorrowChecker
 import codegen
 from codegen import LLVMCodegen
 
@@ -138,5 +140,42 @@ fn main() -> i32:
             let p12f as i32 = printf("Test 12 (Clang Syntax Check): FAILED!\n" to cstr, "" to cstr)
     else:
         let p12f as i32 = printf("Test 12 (Clang Syntax Check): FAILED (write)!\n" to cstr, "" to cstr)
+
+    // Test 13: Scope Auto-Drops IR Generation (Task 6.5)
+    let cg_drops as List[String] = List[String]()
+    cg_drops.append(String.make("s" to cstr))
+    let cg13 as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    let dm13 as ptr = memset(cg13 to ptr, 0 to i32, 256 to usize)
+    cg13()
+    cg13.emit_auto_drops(cg_drops)
+    let ir13 as String = (deref cg13).main_out.to_string()
+    if strstr(ir13.data to cstr, "mantiq_free" to cstr) != None to cstr:
+        let p13 as i32 = printf("Test 13 (Scope Auto-Drops IR): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p13f as i32 = printf("Test 13 (Scope Auto-Drops IR): FAILED!\n" to cstr, "" to cstr)
+
+    // Test 14: Closure Outlining IR Generation (Task 6.4)
+    let cg14 as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    let dm14 as ptr = memset(cg14 to ptr, 0 to i32, 256 to usize)
+    cg14()
+    let dummy_span as Span = Span(0 to u32, 0 to u32, 0 to u32, 0 to u32, 0 to u32, 0 to u32)
+    let closure_node as ptr[Node] = make_node(NodeType.ClosureExpr, dummy_span)
+    let cd14 as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]
+    (deref cd14).params = List[ptr[Node]]()
+    (deref closure_node).data = cd14 to ptr[u8]
+
+    let num_node as ptr[Node] = make_node(NodeType.NumberLiteral, dummy_span)
+    let nd14 as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
+    (deref num_node).data = nd14 to ptr[u8]
+
+    set_node_val(num_node, 42.5)
+    set_node_body(closure_node, num_node)
+    let _cl_reg as ptr[u8] = cg14.emit_closure_expr(closure_node)
+    let outlined_ir as String = (deref cg14).outlined_out.to_string()
+    let main_ir as String = (deref cg14).main_out.to_string()
+    if strstr(outlined_ir.data to cstr, "define" to cstr) != None to cstr and strstr(main_ir.data to cstr, "alloca { ptr, ptr }" to cstr) != None to cstr:
+        let p14 as i32 = printf("Test 14 (Closure Outlining IR): PASSED!\n" to cstr, "" to cstr)
+    else:
+        let p14f as i32 = printf("Test 14 (Closure Outlining IR): FAILED!\n" to cstr, "" to cstr)
 
     return 0 to i32

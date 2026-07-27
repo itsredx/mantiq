@@ -5,11 +5,11 @@ from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
 import symbols
-from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode
+from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node
 import types
-from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
+from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type
 import sema
-from sema import Sema, make_scope
+from sema import Sema, make_scope, make_symbol
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
@@ -32,10 +32,12 @@ struct ListWrapper:
 struct TypeChecker:
     public var sema as ptr[Sema]
     public var current_function_return as Option[ptr[Type]]
+    public var inferred_return_type as ptr[Type]
 
     public fn __init__(self as ptr[TypeChecker], sema as ptr[Sema]):
         (deref self).sema = sema
         (deref self).current_function_return = Empty
+        (deref self).inferred_return_type = None to ptr[Type]
 
     public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
         let name as cstr = (deref annot).name.data to cstr
@@ -141,7 +143,9 @@ struct TypeChecker:
             if (deref sym).kind == SymbolKind.Struct:
                 return make_struct_type(String.make(name))
             elif (deref sym).kind == SymbolKind.Enum:
-                return make_type(TypeKind.Enum)
+                return make_enum_type(String.make(name))
+            elif (deref sym).kind == SymbolKind.Union:
+                return make_union_type(String.make(name))
 
         return make_type(TypeKind.Unknown)
 
@@ -218,22 +222,19 @@ struct TypeChecker:
         if node == None to ptr[Node]:
             return None to ptr[Node]
             
-        let nt as i32 = (deref node).node_type
-        let res as ptr[Node] = make[Node](1 to usize) to ptr[Node]
-        let dummy_memset as ptr = memset(res to ptr, 0 to i32, 368 to usize)
-        (deref res).node_type = nt
-        (deref res).span = (deref node).span
-        (deref res).module_name = (deref node).module_name
-        (deref res).val = (deref node).val
-        (deref res).op = (deref node).op
-        (deref res).is_mut = (deref node).is_mut
-        (deref res).is_async = (deref node).is_async
-        (deref res).name = (deref node).name
+        let nt as NodeType = node_kind(node)
+        let res as ptr[Node] = make_node(nt, node_span(node))
+        set_node_module_name(res, node_module_name(node))
+        set_node_val(res, node_val(node))
+        set_node_op(res, node_op(node))
+        set_node_is_mut(res, node_is_mut(node))
+        set_node_is_async(res, node_is_async(node))
+        set_node_name(res, node_name(node))
         
-        if (deref node).type_annots == None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-            (deref res).type_annots = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+        if node_type_annots(node) == None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            set_node_type_annots(res, None to ptr[List[Option[ptr[TypeAnnotation]]]])
         else:
-            let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref node).type_annots
+            let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
             let wrapper as ptr[ListWrapper] = make[ListWrapper](1 to usize)
             let dummy_memset3 as ptr = memset(wrapper to ptr, 0 to i32, 24 to usize)
             (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
@@ -250,7 +251,6 @@ struct TypeChecker:
                     let orig_annot as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
                     
                     let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize)
-                    let dummy_memset as ptr = memset(annot to ptr, 0 to i32, 88 to usize)
                     deref annot = deref orig_annot
                     
                     if strcmp((deref annot).name.data to cstr, param_name) == 0:
@@ -259,31 +259,33 @@ struct TypeChecker:
                 else:
                     (deref cloned_annots_ptr).append(Empty)
                 a_idx = a_idx + 1 to i64
-            (deref res).type_annots = cloned_annots_ptr
+            set_node_type_annots(res, cloned_annots_ptr)
 
         let _sep3 as i32 = 0
-        (deref res).left = self.clone_and_substitute((deref node).left, param_name, concrete_type)
-        (deref res).right = self.clone_and_substitute((deref node).right, param_name, concrete_type)
-        (deref res).body = self.clone_and_substitute((deref node).body, param_name, concrete_type)
-        (deref res).cond = self.clone_and_substitute((deref node).cond, param_name, concrete_type)
-        (deref res).then_branch = self.clone_and_substitute((deref node).then_branch, param_name, concrete_type)
-        (deref res).str_val = (deref node).str_val
+        set_node_left(res, self.clone_and_substitute(node_left(node), param_name, concrete_type))
+        set_node_right(res, self.clone_and_substitute(node_right(node), param_name, concrete_type))
+        set_node_body(res, self.clone_and_substitute(node_body(node), param_name, concrete_type))
+        set_node_cond(res, self.clone_and_substitute(node_cond(node), param_name, concrete_type))
+        set_node_then_branch(res, self.clone_and_substitute(node_then_branch(node), param_name, concrete_type))
+        set_node_str_val(res, node_str_val(node))
         
-        let count as i64 = (deref node).declarations.length()
+        let node_decls as List[ptr[Node]] = node_declarations(node)
+        let count as i64 = node_decls.length()
         let decls as List[ptr[Node]] = List[ptr[Node]]()
         var i as i64 = 0 to i64
         while i < count:
-            decls.append(self.clone_and_substitute((deref node).declarations[i], param_name, concrete_type))
+            decls.append(self.clone_and_substitute(node_decls[i], param_name, concrete_type))
             i = i + 1 to i64
-        (deref res).declarations = decls
+        set_node_declarations(res, decls)
         
-        let p_count as i64 = (deref node).params.length()
+        let node_prms as List[ptr[Node]] = node_params(node)
+        let p_count as i64 = node_prms.length()
         let params as List[ptr[Node]] = List[ptr[Node]]()
         var p_idx as i64 = 0 to i64
         while p_idx < p_count:
-            params.append(self.clone_and_substitute((deref node).params[p_idx], param_name, concrete_type))
+            params.append(self.clone_and_substitute(node_prms[p_idx], param_name, concrete_type))
             p_idx = p_idx + 1 to i64
-        (deref res).params = params
+        set_node_params(res, params)
 
         return res
 
@@ -293,12 +295,12 @@ struct TypeChecker:
         
         // Generate mangled name
         let sb as StringBuilder = StringBuilder.make()
-        sb.append((deref template_node).name.data to cstr)
+        sb.append(node_name(template_node).data to cstr)
         sb.append("_" to cstr)
         sb.append((deref concrete_type).name.data to cstr)
         let mangled_name as String = sb.to_string()
         
-        (deref monomorphized).name = mangled_name
+        set_node_name(monomorphized, mangled_name)
         mangled_name.data = None to ptr[u8]
         
         // Run declare_pass on the monomorphized subtree to register the new symbol
@@ -315,32 +317,32 @@ struct TypeChecker:
         if node == None to ptr[Node]:
             return make_type(TypeKind.Void)
             
-        let nt as i32 = (deref node).node_type
+        let nt as NodeType = node_kind(node)
         var ret_type as ptr[Type] = make_type(TypeKind.Void)
         
-        if nt == 1: // Program
-            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
-            let count as i64 = (deref decls).length()
+        if nt == NodeType.Program:
+            let decls as List[ptr[Node]] = node_declarations(node)
+            let count as i64 = decls.length()
             var i as i64 = 0 to i64
             while i < count:
-                let dummy2 as ptr[Type] = self.typecheck_node((deref decls)[i])
+                let dummy2 as ptr[Type] = self.typecheck_node(decls[i])
                 i = i + 1 to i64
             ret_type = make_type(TypeKind.Void)
             
-        elif nt == 19: // BlockStmt
-            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
-            let count as i64 = (deref decls).length()
+        elif nt == NodeType.BlockStmt:
+            let decls as List[ptr[Node]] = node_declarations(node)
+            let count as i64 = decls.length()
             var i as i64 = 0 to i64
             while i < count:
-                ret_type = self.typecheck_node((deref decls)[i])
+                ret_type = self.typecheck_node(decls[i])
                 i = i + 1 to i64
                 
-        elif nt == 4: // VarDecl
-            let name as cstr = (deref node).name.data to cstr
+        elif nt == NodeType.VarDecl:
+            let name as cstr = node_name(node).data to cstr
             var annotated_type as ptr[Type] = None to ptr[Type]
             
-            if (deref node).type_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-                let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref node).type_annots
+            if node_type_annots(node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
                 if (deref type_annots).length() > 0 to i64:
                     let lay as ptr[ptr[u8]] = type_annots to ptr[ptr[u8]]
                     let opt_annot as ptr[u8] = deref lay
@@ -348,18 +350,18 @@ struct TypeChecker:
                         let val_p as ptr[u8] = option_value(opt_annot)
                         let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
                         annotated_type = self.resolve_type_annotation(annot_val)
-                        self.check_nizam_import((deref annot_val).name.data to cstr, (deref node).span)
+                        self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node))
             
-            if (deref node).left != None to ptr[Node]:
-                let init_node as ptr[Node] = (deref node).left
+            if node_left(node) != None to ptr[Node]:
+                let init_node as ptr[Node] = node_left(node)
                 
                 if annotated_type != None to ptr[Type]:
-                    if (deref init_node).node_type == 8: // NumberLiteral
-                        (deref init_node).inferred_type = annotated_type
+                    if node_kind(init_node) == NodeType.NumberLiteral:
+                        set_node_inferred_type(init_node, annotated_type)
                     
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
-                        (deref (deref self).sema).report_error(String.make("type mismatch in variable initialization" to cstr), (deref node).span)
+                        (deref (deref self).sema).report_error(String.make("type mismatch in variable initialization" to cstr), node_span(node))
                 else:
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     annotated_type = init_type
@@ -368,11 +370,12 @@ struct TypeChecker:
             if sym != None to ptr[Symbol] and annotated_type != None to ptr[Type]:
                 (deref sym).resolved_type = annotated_type
             if annotated_type != None to ptr[Type]:
-                (deref node).inferred_type = annotated_type
-                
-            ret_type = make_type(TypeKind.Void)
+                set_node_inferred_type(node, annotated_type)
+                ret_type = annotated_type
+            else:
+                ret_type = make_type(TypeKind.Void)
             
-        elif nt == 3: // FunDecl
+        elif nt == NodeType.FunDecl:
             let sema_ptr as ptr[Sema] = (deref self).sema
             let parent_scope as ptr[Scope] = (deref sema_ptr).current_scope
             var child_scope as ptr[Scope] = None to ptr[Scope]
@@ -385,32 +388,32 @@ struct TypeChecker:
             deref sema_curr_scope_ptr = child_scope
             
             let f_type as ptr[Type] = make_type(TypeKind.Function)
-            (deref f_type).return_type = make_type(TypeKind.Void)
+            
+            // Use return type annotation if available
+            let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(node)
+            if ret_annot != None to ptr[TypeAnnotation]:
+                (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
+            else:
+                (deref f_type).return_type = make_type(TypeKind.Void)
             let f_params as ptr[List[Type]] = ref (deref f_type).param_types
             
-            let params as ptr[List[ptr[Node]]] = ref (deref node).params
-            let param_count as i64 = (deref params).length()
+            let params as List[ptr[Node]] = node_params(node)
+            let param_count as i64 = params.length()
             var p_idx as i64 = 0 to i64
             while p_idx < param_count:
-                let p_node as ptr[Node] = (deref params)[p_idx]
-                let p_name as cstr = (deref p_node).name.data to cstr
+                let p_node as ptr[Node] = params[p_idx]
+                let p_name as cstr = node_name(p_node).data to cstr
                 
                 var p_sym as ptr[Symbol] = None to ptr[Symbol]
                 if (deref child_scope).symbols.has(String.make(p_name)):
                     p_sym = (deref child_scope).symbols[String.make(p_name)]
                 else:
-                    p_sym = make[Symbol](1 to usize) to ptr[Symbol]
-                    let dummy_memset_p as ptr = memset(p_sym to ptr, 0 to i32, 72 to usize)
-                    (deref p_sym).name = String.make(p_name)
-                    (deref p_sym).kind = SymbolKind.Variable
-                    (deref p_sym).decl_node = p_node
-                    (deref p_sym).sym_type = Empty
-                    (deref p_sym).is_context_manager = False
+                    p_sym = make_symbol(String.make(p_name), SymbolKind.Variable, p_node)
                     (deref child_scope).symbols[String.make(p_name)] = p_sym
                 
                 var p_type as ptr[Type] = None to ptr[Type]
-                if (deref p_node).type_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-                    let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = (deref p_node).type_annots
+                if node_type_annots(p_node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                    let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
                     if (deref p_annots).length() > 0 to i64:
                         let lay as ptr[ptr[u8]] = p_annots to ptr[ptr[u8]]
                         let opt_annot as ptr[u8] = deref lay
@@ -418,13 +421,14 @@ struct TypeChecker:
                             let val_p as ptr[u8] = option_value(opt_annot)
                             let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
                             p_type = self.resolve_type_annotation(annot_val)
-                            self.check_nizam_import((deref annot_val).name.data to cstr, (deref p_node).span)
+                            self.check_nizam_import((deref annot_val).name.data to cstr, node_span(p_node))
                 
                 if p_type == None to ptr[Type]:
                     p_type = make_type(TypeKind.Any)
                     
                 let p_sym_resolved_ptr as ptr[ptr[Type]] = ref (deref p_sym).resolved_type
                 deref p_sym_resolved_ptr = p_type
+                set_node_inferred_type(p_node, p_type)
                 (deref f_params).append(deref p_type)
                 p_idx = p_idx + 1 to i64
             
@@ -432,25 +436,41 @@ struct TypeChecker:
             let self_ptr as ptr[TypeChecker] = self
             let self_ref_ret as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
             deref self_ref_ret = Some((deref f_type).return_type)
+            // Reset inferred return type tracker
+            (deref self_ptr).inferred_return_type = None to ptr[Type]
             
-            if (deref node).body != None to ptr[Node]:
-                let dummy3 as ptr[Type] = self.typecheck_node((deref node).body)
+            if node_body(node) != None to ptr[Node]:
+                let dummy3 as ptr[Type] = self.typecheck_node(node_body(node))
                 
+            // Validate return type if declared return type is not Void/Any/Unknown (skip for extern)
+            if not node_is_extern(node):
+                let declared_ret as ptr[Type] = (deref f_type).return_type
+                let declared_kind as TypeKind = (deref declared_ret).kind
+                if declared_kind != TypeKind.Void and declared_kind != TypeKind.Any and declared_kind != TypeKind.Unknown:
+                    let inferred_ret as ptr[Type] = (deref self_ptr).inferred_return_type
+                    if inferred_ret != None to ptr[Type]:
+                        let inferred_kind as TypeKind = (deref inferred_ret).kind
+                        if inferred_kind != TypeKind.Void and inferred_kind != TypeKind.Any and inferred_kind != TypeKind.Unknown:
+                            if not self.is_implicitly_convertible(inferred_ret, declared_ret):
+                                (deref (deref self).sema).report_error(String.make("return type mismatch: declared return type does not match actual return type" to cstr), node_span(node))
+                    else:
+                        (deref (deref self).sema).report_error(String.make("function with non-void return type must return a value" to cstr), node_span(node))
+            
             let self_ref_ret_back as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
             deref self_ref_ret_back = saved_ret
             
             let _sep as i32 = 0
             (deref sema_ptr).current_scope = parent_scope
             
-            let f_name as cstr = (deref node).name.data to cstr
+            let f_name as cstr = node_name(node).data to cstr
             if (deref parent_scope).symbols.has(String.make(f_name)):
                 let f_sym as ptr[Symbol] = (deref parent_scope).symbols[String.make(f_name)]
                 (deref f_sym).resolved_type = f_type
                 
-            ret_type = make_type(TypeKind.Void)
+            ret_type = (deref f_type).return_type
             
-        elif nt == 7: // Identifier
-            let name as cstr = (deref node).name.data to cstr
+        elif nt == NodeType.Identifier:
+            let name as cstr = node_name(node).data to cstr
             if strcmp(name, "UNSUPPORTED" to cstr) == 0:
                 ret_type = make_type(TypeKind.Void)
             else:
@@ -463,75 +483,73 @@ struct TypeChecker:
                 else:
                     ret_type = make_type(TypeKind.Unknown)
                 
-        elif nt == 8: // NumberLiteral
-            if (deref node).inferred_type != None to ptr[Type]:
-                ret_type = (deref node).inferred_type
+        elif nt == NodeType.NumberLiteral:
+            if node_inferred_type(node) != None to ptr[Type]:
+                ret_type = node_inferred_type(node)
             else:
                 ret_type = make_type(TypeKind.I32)
                 
-        elif nt == 9: // StringLiteral
+        elif nt == NodeType.StringLiteral:
             ret_type = make_type(TypeKind.String)
                 
-        elif nt == 6: // BinaryExpr
-            let left as ptr[Node] = (deref node).left
-            let right as ptr[Node] = (deref node).right
+        elif nt == NodeType.BinaryExpr:
+            let left as ptr[Node] = node_left(node)
+            let right as ptr[Node] = node_right(node)
             
-            if strcmp((deref node).op.data to cstr, "." to cstr) == 0:
+            if strcmp(node_op(node).data to cstr, "." to cstr) == 0:
                 ret_type = make_type(TypeKind.Any)
-            elif strcmp((deref node).op.data to cstr, "=" to cstr) == 0:
+            elif strcmp(node_op(node).data to cstr, "=" to cstr) == 0:
                 let left_t as ptr[Type] = self.typecheck_node(left)
                 if left_t != None to ptr[Type]:
-                    if (deref right).node_type == 8: // NumberLiteral
-                        (deref right).inferred_type = left_t
+                    if node_kind(right) == NodeType.NumberLiteral:
+                        set_node_inferred_type(right, left_t)
                 let right_t as ptr[Type] = self.typecheck_node(right)
                 if not self.is_implicitly_convertible(right_t, left_t):
-                    (deref (deref self).sema).report_error(String.make("type mismatch in assignment" to cstr), (deref node).span)
+                    (deref (deref self).sema).report_error(String.make("type mismatch in assignment" to cstr), node_span(node))
                 ret_type = left_t
             else:
                 let left_t as ptr[Type] = self.typecheck_node(left)
                 let right_t as ptr[Type] = self.typecheck_node(right)
                 
                 if not self.is_implicitly_convertible(left_t, right_t):
-                    (deref (deref self).sema).report_error(String.make("type mismatch in binary expression" to cstr), (deref node).span)
+                    (deref (deref self).sema).report_error(String.make("type mismatch in binary expression" to cstr), node_span(node))
                 
-                // If one side is a literal defaulting to I32 and the other is a wider
-                // numeric type, coerce the literal to the wider type.
                 let lk as TypeKind = (deref left_t).kind
                 let rk as TypeKind = (deref right_t).kind
-                let left_is_default_lit as bool = (deref left).node_type == 8 and lk == TypeKind.I32
-                let right_is_default_lit as bool = (deref right).node_type == 8 and rk == TypeKind.I32
+                let left_is_default_lit as bool = node_kind(left) == NodeType.NumberLiteral and lk == TypeKind.I32
+                let right_is_default_lit as bool = node_kind(right) == NodeType.NumberLiteral and rk == TypeKind.I32
                 
                 if left_is_default_lit and not right_is_default_lit:
-                    (deref left).inferred_type = right_t
+                    set_node_inferred_type(left, right_t)
                     ret_type = right_t
                 elif right_is_default_lit and not left_is_default_lit:
-                    (deref right).inferred_type = left_t
+                    set_node_inferred_type(right, left_t)
                     ret_type = left_t
                 else:
                     ret_type = left_t
                     
-        elif nt == 12: // CallExpr
-            let callee as ptr[Node] = (deref node).left
+        elif nt == NodeType.CallExpr:
+            let callee as ptr[Node] = node_left(node)
             let callee_t as ptr[Type] = self.typecheck_node(callee)
             
-            let args as ptr[List[ptr[Node]]] = ref (deref node).params
-            let arg_count as i64 = (deref args).length()
+            let args as List[ptr[Node]] = node_params(node)
+            let arg_count as i64 = args.length()
             var a_idx as i64 = 0 to i64
             
             if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function:
                 let params as ptr[List[Type]] = ref (deref callee_t).param_types
                 let expected_count as i64 = (deref params).length()
                 while a_idx < arg_count:
-                    let arg_node as ptr[Node] = (deref args)[a_idx]
+                    let arg_node as ptr[Node] = args[a_idx]
                     if a_idx < expected_count:
                         let expected_t as ptr[Type] = ref (deref params)[a_idx]
-                        if (deref arg_node).node_type == 8: // NumberLiteral
-                            (deref arg_node).inferred_type = expected_t
+                        if node_kind(arg_node) == NodeType.NumberLiteral:
+                            set_node_inferred_type(arg_node, expected_t)
                     let dummy_a as ptr[Type] = self.typecheck_node(arg_node)
                     a_idx = a_idx + 1 to i64
             else:
                 while a_idx < arg_count:
-                    let dummy_a as ptr[Type] = self.typecheck_node((deref args)[a_idx])
+                    let dummy_a as ptr[Type] = self.typecheck_node(args[a_idx])
                     a_idx = a_idx + 1 to i64
             
             if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
@@ -539,8 +557,8 @@ struct TypeChecker:
             else:
                 ret_type = make_type(TypeKind.Any)
                 
-        elif nt == 13: // ReturnStmt
-            let return_val as ptr[Node] = (deref node).body
+        elif nt == NodeType.ReturnStmt:
+            let return_val as ptr[Node] = node_body(node)
             if return_val != None to ptr[Node]:
                 let opt_ret as ptr[u8] = (ref (deref self).current_function_return) to ptr[u8]
                 if option_has_value(opt_ret):
@@ -548,30 +566,207 @@ struct TypeChecker:
                     let expected_ret_t as ptr[Type] = val_p to ptr[Type]
                     let ek as TypeKind = (deref expected_ret_t).kind
                     if ek != TypeKind.Void and ek != TypeKind.Any and ek != TypeKind.Unknown:
-                        if (deref return_val).node_type == 8: // NumberLiteral
-                            (deref return_val).inferred_type = expected_ret_t
+                        if node_kind(return_val) == NodeType.NumberLiteral:
+                            set_node_inferred_type(return_val, expected_ret_t)
                 ret_type = self.typecheck_node(return_val)
+                // Track inferred return type for validation
+                let self_ptr_r as ptr[TypeChecker] = self
+                (deref self_ptr_r).inferred_return_type = ret_type
             else:
                 ret_type = make_type(TypeKind.Void)
                 
-        elif nt == 14: // WhileStmt
-            let dummy_c as ptr[Type] = self.typecheck_node((deref node).cond)
-            let dummy_b as ptr[Type] = self.typecheck_node((deref node).body)
+        elif nt == NodeType.WhileStmt:
+            let dummy_c as ptr[Type] = self.typecheck_node(node_cond(node))
+            let dummy_b as ptr[Type] = self.typecheck_node(node_body(node))
             ret_type = make_type(TypeKind.Void)
             
-        elif nt == 15: // ForStmt
-            let dummy_iter as ptr[Type] = self.typecheck_node((deref node).left)
-            let dummy_body as ptr[Type] = self.typecheck_node((deref node).body)
+        elif nt == NodeType.ForStmt:
+            let dummy_iter as ptr[Type] = self.typecheck_node(node_left(node))
+            let dummy_body as ptr[Type] = self.typecheck_node(node_body(node))
             ret_type = make_type(TypeKind.Void)
             
-        elif nt == 16: // MemberExpr
-            let obj_t as ptr[Type] = self.typecheck_node((deref node).left)
-            ret_type = make_type(TypeKind.Any)
-        elif nt == 21: // WithStmt
-            let expr_t as ptr[Type] = self.typecheck_node((deref node).left)
-            let body_t as ptr[Type] = self.typecheck_node((deref node).body)
+        elif nt == NodeType.MemberExpr:
+            let obj_t as ptr[Type] = self.typecheck_node(node_left(node))
+            let obj_kind as TypeKind = (deref obj_t).kind
+            if obj_kind == TypeKind.Module:
+                let left_name as String = node_name(node_left(node))
+                if (deref (deref self).sema).loaded_modules.has(left_name):
+                    let mod_scope as ptr[Scope] = (deref (deref self).sema).loaded_modules[left_name]
+                    let prop_name as String = node_name(node)
+                    if (deref mod_scope).symbols.has(prop_name):
+                        let member_sym as ptr[Symbol] = (deref mod_scope).symbols[prop_name]
+                        if (deref member_sym).resolved_type != None to ptr[Type]:
+                            ret_type = (deref member_sym).resolved_type
+                        else:
+                            ret_type = make_type(TypeKind.Any)
+                    else:
+                        (deref (deref self).sema).report_error(String.make("module has no member with that name" to cstr), node_span(node))
+                        ret_type = make_type(TypeKind.Any)
+                else:
+                    ret_type = make_type(TypeKind.Any)
+            else:
+                if obj_kind == TypeKind.Struct and (deref obj_t).name.len > 0 to usize:
+                    let struct_name as String = (deref obj_t).name
+                    let struct_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(struct_name)
+                    if struct_sym != None to ptr[Symbol] and (deref struct_sym).decl_node != None to ptr[Node]:
+                        let decl as ptr[Node] = (deref struct_sym).decl_node
+                        if node_body(decl) != None to ptr[Node]:
+                            let body as ptr[Node] = node_body(decl)
+                            let prop_name as String = node_name(node)
+                            if node_kind(body) == NodeType.BlockStmt:
+                                let body_decls as List[ptr[Node]] = node_declarations(body)
+                                let d_count as i64 = body_decls.length()
+                                var d_i as i64 = 0 to i64
+                                while d_i < d_count:
+                                    let field_decl as ptr[Node] = body_decls[d_i]
+                                    if node_kind(field_decl) == NodeType.VarDecl and strcmp(node_name(field_decl).data to cstr, prop_name.data to cstr) == 0:
+                                        if node_inferred_type(field_decl) != None to ptr[Type]:
+                                            ret_type = node_inferred_type(field_decl)
+                                        break
+                                    d_i = d_i + 1 to i64
+                    if ret_type == None to ptr[Type] or (deref ret_type).kind == TypeKind.Void:
+                        ret_type = make_type(TypeKind.Any)
+                else:
+                    ret_type = make_type(TypeKind.Any)
+        elif nt == NodeType.WithStmt:
+            let expr_t as ptr[Type] = self.typecheck_node(node_left(node))
+            let body_t as ptr[Type] = self.typecheck_node(node_body(node))
             ret_type = body_t
-                
+
+        elif nt == NodeType.IfStmt:
+            let dummy_c as ptr[Type] = self.typecheck_node(node_cond(node))
+            let then_t as ptr[Type] = self.typecheck_node(node_then_branch(node))
+            let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
+            let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
+            if option_has_value(else_opt):
+                let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
+                let else_t as ptr[Type] = self.typecheck_node(else_node)
+                // Merge branch types
+                if (deref then_t).kind == (deref else_t).kind:
+                    ret_type = then_t
+                elif (deref then_t).kind == TypeKind.Void or (deref else_t).kind == TypeKind.Void:
+                    ret_type = make_type(TypeKind.Void)
+                elif (deref then_t).kind == TypeKind.Any or (deref else_t).kind == TypeKind.Any:
+                    ret_type = make_type(TypeKind.Any)
+                elif (deref then_t).kind == TypeKind.Unknown or (deref else_t).kind == TypeKind.Unknown:
+                    ret_type = make_type(TypeKind.Unknown)
+                else:
+                    ret_type = make_type(TypeKind.Void)
+            else:
+                ret_type = make_type(TypeKind.Void)
+
+        elif nt == NodeType.UnaryExpr:
+            let operand_t as ptr[Type] = self.typecheck_node(node_left(node))
+            let op as String = node_op(node)
+            if strcmp(op.data to cstr, "not" to cstr) == 0:
+                ret_type = make_type(TypeKind.Boolean)
+            elif strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "+" to cstr) == 0:
+                ret_type = operand_t
+            elif strcmp(op.data to cstr, "ref" to cstr) == 0 or strcmp(op.data to cstr, "ref mut" to cstr) == 0:
+                let payload_t as ptr[Type] = make[Type](1 to usize) to ptr[Type]
+                (deref payload_t) = deref operand_t
+                ret_type = make_ptr_type(payload_t)
+            elif strcmp(op.data to cstr, "deref" to cstr) == 0:
+                if (deref operand_t).kind == TypeKind.RawPointer and (deref operand_t).payload != None to ptr[Type]:
+                    ret_type = (deref operand_t).payload
+                else:
+                    ret_type = make_type(TypeKind.Any)
+            elif strcmp(op.data to cstr, "~" to cstr) == 0:
+                ret_type = operand_t
+            else:
+                ret_type = operand_t
+
+        elif nt == NodeType.CastExpr:
+            let _dummy_op as ptr[Type] = self.typecheck_node(node_left(node))
+            let target_name as String = node_op(node)
+            if target_name.len > 0 to usize:
+                let tmp_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                (deref tmp_annot).name = target_name
+                (deref tmp_annot).lifetime = Empty
+                (deref tmp_annot).generics = Empty
+                (deref tmp_annot).params = Empty
+                (deref tmp_annot).return_type = None to ptr[TypeAnnotation]
+                ret_type = self.resolve_type_annotation(tmp_annot)
+            else:
+                ret_type = make_type(TypeKind.Any)
+
+        elif nt == NodeType.MatchStmt:
+            let subject_t as ptr[Type] = self.typecheck_node(node_left(node))
+            let cases as List[ptr[Node]] = node_declarations(node)
+            let case_count as i64 = cases.length()
+            var c_idx as i64 = 0 to i64
+            while c_idx < case_count:
+                let case_node as ptr[Node] = cases[c_idx]
+                if node_kind(case_node) == NodeType.BinaryExpr:
+                    let pattern as ptr[Node] = node_left(case_node)
+                    let case_body as ptr[Node] = node_right(case_node)
+                    if node_kind(pattern) == NodeType.Identifier:
+                        let pat_name as String = node_name(pattern)
+                        if strcmp(pat_name.data to cstr, "_" to cstr) != 0:
+                            let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(pat_name)
+                            if sym != None to ptr[Symbol]:
+                                (deref sym).resolved_type = subject_t
+                            set_node_inferred_type(pattern, subject_t)
+                    else:
+                        let _dummy_p as ptr[Type] = self.typecheck_node(pattern)
+                    let _dummy_b as ptr[Type] = self.typecheck_node(case_body)
+                c_idx = c_idx + 1 to i64
+            ret_type = make_type(TypeKind.Any)
+
+        elif nt == NodeType.TryStmt:
+            let body_t as ptr[Type] = self.typecheck_node(node_left(node))
+            // Unwrap Result/Option type
+            if (deref body_t).kind == TypeKind.Result or (deref body_t).kind == TypeKind.Option:
+                if (deref body_t).payload != None to ptr[Type]:
+                    ret_type = (deref body_t).payload
+                else:
+                    ret_type = make_type(TypeKind.Any)
+            else:
+                ret_type = body_t
+
+        elif nt == NodeType.ThrowStmt:
+            let _dummy_exc as ptr[Type] = self.typecheck_node(node_left(node))
+            ret_type = make_type(TypeKind.Void)
+
+        elif nt == NodeType.ListLiteral:
+            ret_type = make_type(TypeKind.List)
+            let items as List[ptr[Node]] = node_declarations(node)
+            let item_count as i64 = items.length()
+            if item_count > 0 to i64:
+                let elem_t as ptr[Type] = self.typecheck_node(items[0])
+                (deref ret_type).payload = elem_t
+
+        elif nt == NodeType.DictLiteral:
+            ret_type = make_type(TypeKind.Dict)
+
+        elif nt == NodeType.IndexExpr:
+            let _dummy_coll as ptr[Type] = self.typecheck_node(node_left(node))
+            let _dummy_idx as ptr[Type] = self.typecheck_node(node_right(node))
+            ret_type = make_type(TypeKind.Any)
+
+        elif nt == NodeType.SpreadExpr:
+            let _dummy_spread as ptr[Type] = self.typecheck_node(node_left(node))
+            ret_type = make_type(TypeKind.Any)
+
+        elif nt == NodeType.BooleanLiteral:
+            ret_type = make_type(TypeKind.Boolean)
+
+        elif nt == NodeType.StructDecl:
+            let struct_name as String = node_name(node)
+            ret_type = make_struct_type(struct_name)
+            if node_body(node) != None to ptr[Node]:
+                let dummy_sd as ptr[Type] = self.typecheck_node(node_body(node))
+
+        elif nt == NodeType.EnumDecl:
+            let enum_name as String = node_name(node)
+            ret_type = make_enum_type(enum_name)
+
+        elif nt == NodeType.UnionDecl:
+            let union_name as String = node_name(node)
+            ret_type = make_union_type(union_name)
+            if node_body(node) != None to ptr[Node]:
+                let dummy_ud as ptr[Type] = self.typecheck_node(node_body(node))
+
         let _sep2 as i32 = 0
-        (deref node).inferred_type = ret_type
+        set_node_inferred_type(node, ret_type)
         return ret_type

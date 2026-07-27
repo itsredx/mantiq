@@ -1,0 +1,154 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String, StringBuilder
+from std.collections import List, Dict
+import symbols
+from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import types
+from types import Type, TypeKind, make_type
+import typecheck
+from typecheck import TypeChecker
+import borrowck
+from borrowck import BorrowChecker
+import codegen
+from codegen import LLVMCodegen
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn system(command as cstr) as i32
+extern fn fopen(filename as cstr, mode as cstr) as ptr
+extern fn fclose(stream as ptr) as i32
+extern fn fflush(stream as ptr) as i32
+extern fn fread(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
+extern fn fwrite(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
+extern fn fseek(stream as ptr, offset as i64, origin as i32) as i32
+extern fn ftell(stream as ptr) as i64
+extern fn malloc(size as usize) as ptr
+extern fn memset(s as ptr, c as i32, n as usize) as ptr
+
+// ── File I/O Helper ──────────────────────────────────────────────────────
+fn read_file_to_cstr(path as cstr) as cstr:
+    let f as ptr = fopen(path, "rb" to cstr)
+    if f == None to ptr:
+        return None to cstr
+    let _s1 as i32 = fseek(f, 0 to i64, 2 to i32)
+    let len as i64 = ftell(f)
+    let _s2 as i32 = fseek(f, 0 to i64, 0 to i32)
+    let buf as ptr[u8] = malloc(len to usize + 1 to usize) to ptr[u8]
+    if buf == None to ptr[u8]:
+        fclose(f)
+        return None to cstr
+    let read_count as usize = fread(buf to ptr, 1 to usize, len to usize, f)
+    fclose(f)
+    let end_ptr as ptr[u8] = (buf to usize + read_count) to ptr[u8]
+    deref end_ptr = 0 to u8
+    return buf to cstr
+
+// ── Compiler Pipeline ───────────────────────────────────────────────────
+fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as bool:
+    let lowerer as ptr[Lowerer] = make[Lowerer](1 to usize) to ptr[Lowerer]
+    (deref lowerer) = Lowerer(source = String.make(source_cstr), mode = LanguageMode.Mantiq, path = String.make(path_cstr))
+    let root as ptr[Node] = lowerer.lower_source()
+    if root == None to ptr[Node]:
+        let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
+        return False
+
+    let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    sema(path_cstr)
+    sema.declare_pass(root)
+    sema.resolve_pass(root)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc(sema)
+    let _tc_t as ptr[Type] = tc.typecheck_node(root)
+
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc()
+    bc.walk_ast(root)
+
+    let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    cg()
+    cg.populate_auto_drops_from_borrowck((deref bc).auto_drops)
+    let ir_str as String = cg.generate(root)
+
+    let tmp_ll_path as cstr = "/tmp/mantiq_tmp.ll" to cstr
+    let f_ll as ptr = fopen(tmp_ll_path, "wb" to cstr)
+    if f_ll == None to ptr:
+        let _p2 as i32 = printf("Error: Failed to open temporary LLVM IR file\n" to cstr, "" to cstr)
+        return False
+    let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
+    fclose(f_ll)
+
+    let cmd_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
+    let _sp as i32 = sprintf(cmd_buf, "clang -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || zig cc -O2 /tmp/mantiq_tmp.ll -o %s" to cstr, out_file, out_file, out_file)
+    let res as i32 = system(cmd_buf to cstr)
+    return res == 0
+
+// ── CLI Driver ──────────────────────────────────────────────────────────
+fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
+    let base as usize = argv to usize
+    let offset as usize = idx to usize * 8 to usize
+    let ptr_addr as ptr[cstr] = (base + offset) to ptr[cstr]
+    return deref ptr_addr
+
+fn main(argc as i32, argv as ptr[cstr]) as i32:
+    if argc < 2:
+        let _p3 as i32 = printf("Mantiq Self-Hosting Compiler v0.1.0\nUsage: mantiq <command> [options]\n  build <file.nz> [-o <out>]\n  run <file.nz>\n  version\n" to cstr, "" to cstr)
+        let _f1 as i32 = fflush(None to ptr)
+        return 0 to i32
+
+    let cmd as cstr = get_arg(argv, 1)
+    if strcmp(cmd, "version" to cstr) == 0 or strcmp(cmd, "--version" to cstr) == 0:
+        let _p4 as i32 = printf("Mantiq Self-Hosting Compiler v0.1.0 (Nizam self-host stage-1)\n" to cstr, "" to cstr)
+        let _f2 as i32 = fflush(None to ptr)
+        return 0 to i32
+
+    if strcmp(cmd, "build" to cstr) == 0:
+        if argc < 3:
+            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: mantiq build <file.nz> [-o <out>]\n" to cstr, "" to cstr)
+            return 1 to i32
+        let input_path as cstr = get_arg(argv, 2)
+        var out_path as cstr = "a.out" to cstr
+        if argc >= 5 and strcmp(get_arg(argv, 3), "-o" to cstr) == 0:
+            out_path = get_arg(argv, 4)
+
+        let source_cstr as cstr = read_file_to_cstr(input_path)
+        if source_cstr == None to cstr:
+            let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
+            return 1 to i32
+
+        let ok as bool = compile_source(source_cstr, input_path, out_path)
+        if ok:
+            let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
+            return 0 to i32
+        else:
+            let _p8 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
+            return 1 to i32
+
+    if strcmp(cmd, "run" to cstr) == 0:
+        if argc < 3:
+            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: mantiq run <file.nz>\n" to cstr, "" to cstr)
+            return 1 to i32
+        let input_path as cstr = get_arg(argv, 2)
+        let out_path as cstr = "/tmp/mantiq_run_tmp" to cstr
+        let source_cstr as cstr = read_file_to_cstr(input_path)
+        if source_cstr == None to cstr:
+            let _p10 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
+            return 1 to i32
+
+        let ok as bool = compile_source(source_cstr, input_path, out_path)
+        if ok:
+            let res as i32 = system(out_path)
+            return res
+        else:
+            let _p11 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
+            return 1 to i32
+
+    let _p12 as i32 = printf("Unknown command: %s\nRun 'mantiq' for usage.\n" to cstr, cmd)
+    return 1 to i32

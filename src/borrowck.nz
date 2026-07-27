@@ -5,7 +5,7 @@ from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
 import symbols
-from symbols import Node, Symbol, Scope, SymbolKind, Span
+from symbols import Node, Symbol, Scope, SymbolKind, Span, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_span, node_inferred_type, set_node_inferred_type, set_node_auto_drops
 import types
 from types import Type, TypeKind, is_copy_type
 import sema
@@ -121,6 +121,14 @@ struct BorrowChecker:
             
         if drops.length() > 0 to i64:
             (deref self).auto_drops[node to usize] = drops
+            // Also write drop names to the node itself for codegen consumption
+            let drop_names as List[String] = List[String]()
+            var d_idx as i64 = 0 to i64
+            while d_idx < drops.length():
+                let drop_sym as ptr[Symbol] = drops[d_idx]
+                drop_names.append((deref drop_sym).name)
+                d_idx = d_idx + 1 to i64
+            set_node_auto_drops(node, drop_names)
             
         let dummy_sep2 as i32 = 0
         (deref self).scope_depth = (deref self).scope_depth - 1 to i32
@@ -129,9 +137,9 @@ struct BorrowChecker:
     public fn move_identifier(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
-        if (deref node).node_type != 7: // not Identifier
+        if node_kind(node) != NodeType.Identifier: // not Identifier
             return
-        let name as String = (deref node).name
+        let name as String = node_name(node)
         // First check for use-after-move regardless of type
         self.check_identifier_use(node)
         // Only mark as moved if it's a move type (not Copy)
@@ -147,33 +155,35 @@ struct BorrowChecker:
     public fn check_identifier_use(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
-        if (deref node).node_type != 7: // not Identifier
+        if node_kind(node) != NodeType.Identifier: // not Identifier
             return
-        let name as String = (deref node).name
+        let name as String = node_name(node)
         if (deref self).symbol_states.has(name):
             let info as VarInfo = (deref self).symbol_states[name]
             if info.state == ObjectState.Moved:
-                self.report_error(String.make("use of moved variable" to cstr), (deref node).span)
+                self.report_error(String.make("use of moved variable" to cstr), node_span(node))
             elif info.state == ObjectState.Dropped:
-                self.report_error(String.make("use of dropped variable" to cstr), (deref node).span)
+                self.report_error(String.make("use of dropped variable" to cstr), node_span(node))
 
     public fn walk_ast(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
         
-        let nt as i32 = (deref node).node_type
+        let nt as NodeType = node_kind(node)
         
-        if nt == 1: // Program
-            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
+        if nt == NodeType.Program: // Program
+            let decls_raw as List[ptr[Node]] = node_declarations(node)
+            let decls as ptr[List[ptr[Node]]] = ref decls_raw
             let count as i64 = (deref decls).length()
             var i as i64 = 0 to i64
             while i < count:
                 self.walk_ast((deref decls)[i])
                 i = i + 1 to i64
                 
-        elif nt == 19: // BlockStmt
+        elif nt == NodeType.BlockStmt: // BlockStmt
             self.push_scope()
-            let decls as ptr[List[ptr[Node]]] = ref (deref node).declarations
+            let decls_raw as List[ptr[Node]] = node_declarations(node)
+            let decls as ptr[List[ptr[Node]]] = ref decls_raw
             let count as i64 = (deref decls).length()
             var i as i64 = 0 to i64
             while i < count:
@@ -181,7 +191,7 @@ struct BorrowChecker:
                 i = i + 1 to i64
             self.pop_scope(node)
                 
-        elif nt == 3: // FunDecl
+        elif nt == NodeType.FunDecl: // FunDecl
             let sema_ptr as ptr[Sema] = (deref self).sema
             var parent_scope as ptr[Scope] = None to ptr[Scope]
             if sema_ptr != None to ptr[Sema]:
@@ -193,12 +203,13 @@ struct BorrowChecker:
             self.push_scope()
             
             // Register parameters in current scope stack
-            let params as ptr[List[ptr[Node]]] = ref (deref node).params
+            let params_raw as List[ptr[Node]] = node_params(node)
+            let params as ptr[List[ptr[Node]]] = ref params_raw
             let param_count as i64 = (deref params).length()
             var p_idx as i64 = 0 to i64
             while p_idx < param_count:
                 let param as ptr[Node] = (deref params)[p_idx]
-                let param_name as String = (deref param).name
+                let param_name as String = node_name(param)
                 if sema_ptr != None to ptr[Sema]:
                     let sym as ptr[Symbol] = (deref sema_ptr).lookup_symbol(param_name)
                     if sym != None to ptr[Symbol]:
@@ -208,23 +219,23 @@ struct BorrowChecker:
                     self.mark_owned(param_name, None to ptr[Type])
                 p_idx = p_idx + 1 to i64
                 
-            self.walk_ast((deref node).body)
+            self.walk_ast(node_body(node))
             
             self.pop_scope(node)
             if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
                 (deref sema_ptr).current_scope = parent_scope
                 
-        elif nt == 4: // VarDecl
-            var var_type as ptr[Type] = (deref node).inferred_type
+        elif nt == NodeType.VarDecl: // VarDecl
+            var var_type as ptr[Type] = node_inferred_type(node)
             // If VarDecl inferred_type is Void, try the init node's type
             if var_type != None to ptr[Type]:
                 let k as TypeKind = (deref var_type).kind
                 if k == TypeKind.Void:
-                    let init_check as ptr[Node] = (deref node).left
+                    let init_check as ptr[Node] = node_left(node)
                     if init_check != None to ptr[Node]:
-                        if (deref init_check).inferred_type != None to ptr[Type]:
-                            var_type = (deref init_check).inferred_type
-            let name as String = (deref node).name
+                        if node_inferred_type(init_check) != None to ptr[Type]:
+                            var_type = node_inferred_type(init_check)
+            let name as String = node_name(node)
             self.mark_owned(name, var_type)
             
             let sema_ptr as ptr[Sema] = (deref self).sema
@@ -233,30 +244,31 @@ struct BorrowChecker:
                 if sym != None to ptr[Symbol]:
                     self.add_symbol_to_current_scope(sym)
                     
-            let init as ptr[Node] = (deref node).left
+            let init as ptr[Node] = node_left(node)
             if init != None to ptr[Node]:
-                if (deref init).node_type == 7: // Identifier
+                if node_kind(init) == NodeType.Identifier:
                     self.move_identifier(init)
                 else:
                     self.walk_ast(init)
                     
-        elif nt == 12: // CallExpr
-            self.walk_ast((deref node).left)
-            let args as ptr[List[ptr[Node]]] = ref (deref node).params
+        elif nt == NodeType.CallExpr: // CallExpr
+            self.walk_ast(node_left(node))
+            let args_raw as List[ptr[Node]] = node_params(node)
+            let args as ptr[List[ptr[Node]]] = ref args_raw
             let arg_count as i64 = (deref args).length()
             var a_idx as i64 = 0 to i64
             while a_idx < arg_count:
                 let arg as ptr[Node] = (deref args)[a_idx]
-                if (deref arg).node_type == 7: // Identifier
+                if node_kind(arg) == NodeType.Identifier:
                     self.move_identifier(arg)
                 else:
                     self.walk_ast(arg)
                 a_idx = a_idx + 1 to i64
                 
-        elif nt == 13: // ReturnStmt
-            let return_val as ptr[Node] = (deref node).body
+        elif nt == NodeType.ReturnStmt: // ReturnStmt
+            let return_val as ptr[Node] = node_body(node)
             if return_val != None to ptr[Node]:
-                if (deref return_val).node_type == 7: // Identifier
+                if node_kind(return_val) == NodeType.Identifier:
                     self.move_identifier(return_val)
                 else:
                     self.walk_ast(return_val)
@@ -280,8 +292,8 @@ struct BorrowChecker:
                                 if is_copy_type(t) == False or (deref sym).is_context_manager:
                                     var is_returned as bool = False
                                     if return_val != None to ptr[Node]:
-                                        if (deref return_val).node_type == 7: // Identifier
-                                            if strcmp((deref return_val).name.data to cstr, name.data to cstr) == 0:
+                                        if node_kind(return_val) == NodeType.Identifier:
+                                            if strcmp(node_name(return_val).data to cstr, name.data to cstr) == 0:
                                                 is_returned = True
                                     if not is_returned:
                                         drops.append(sym)
@@ -291,42 +303,50 @@ struct BorrowChecker:
                 
             if drops.length() > 0 to i64:
                 (deref self).auto_drops[node to usize] = drops
+                // Also write drop names to the node for codegen
+                let drop_names as List[String] = List[String]()
+                var d_idx as i64 = 0 to i64
+                while d_idx < drops.length():
+                    let drop_sym as ptr[Symbol] = drops[d_idx]
+                    drop_names.append((deref drop_sym).name)
+                    d_idx = d_idx + 1 to i64
+                set_node_auto_drops(node, drop_names) // Write drop names to the ReturnStmt node for codegen
                     
-        elif nt == 6: // BinaryExpr
-            let op as String = (deref node).op
+        elif nt == NodeType.BinaryExpr: // BinaryExpr
+            let op as String = node_op(node)
             let is_assign as bool = strcmp(op.data to cstr, "=" to cstr) == 0 or strcmp(op.data to cstr, "+=" to cstr) == 0 or strcmp(op.data to cstr, "-=" to cstr) == 0 or strcmp(op.data to cstr, "*=" to cstr) == 0 or strcmp(op.data to cstr, "/=" to cstr) == 0
             if is_assign:
-                let right as ptr[Node] = (deref node).right
-                let left as ptr[Node] = (deref node).left
-                if (deref right).node_type == 7: // Identifier
+                let right as ptr[Node] = node_right(node)
+                let left as ptr[Node] = node_left(node)
+                if node_kind(right) == NodeType.Identifier:
                     self.move_identifier(right)
                 else:
                     self.walk_ast(right)
-                if (deref left).node_type == 7: // Identifier
-                    self.mark_owned((deref left).name, (deref left).inferred_type)
+                if node_kind(left) == NodeType.Identifier:
+                    self.mark_owned(node_name(left), node_inferred_type(left))
             else:
-                self.walk_ast((deref node).left)
-                self.walk_ast((deref node).right)
+                self.walk_ast(node_left(node))
+                self.walk_ast(node_right(node))
                 
-        elif nt == 14: // WhileStmt
-            self.walk_ast((deref node).cond)
-            self.walk_ast((deref node).body)
+        elif nt == NodeType.WhileStmt: // WhileStmt
+            self.walk_ast(node_cond(node))
+            self.walk_ast(node_body(node))
             
-        elif nt == 15: // ForStmt
-            let iter_name as String = (deref node).name
+        elif nt == NodeType.ForStmt: // ForStmt
+            let iter_name as String = node_name(node)
             if iter_name.len > 0 to usize:
                 self.mark_owned(iter_name, None to ptr[Type])
-            self.walk_ast((deref node).left)
-            self.walk_ast((deref node).body)
+            self.walk_ast(node_left(node))
+            self.walk_ast(node_body(node))
             
-        elif nt == 16: // MemberExpr
-            self.walk_ast((deref node).left)
+        elif nt == NodeType.MemberExpr: // MemberExpr
+            self.walk_ast(node_left(node))
             
-        elif nt == 21: // WithStmt
-            let expr as ptr[Node] = (deref node).left
+        elif nt == NodeType.WithStmt: // WithStmt
+            let expr as ptr[Node] = node_left(node)
             if expr != None to ptr[Node]:
                 self.walk_ast(expr)
-                if (deref expr).node_type == 7: // Identifier
+                if node_kind(expr) == NodeType.Identifier:
                     self.move_identifier(expr)
             
             let sema_ptr as ptr[Sema] = (deref self).sema
@@ -339,11 +359,11 @@ struct BorrowChecker:
                     
             self.push_scope()
             
-            let name as String = (deref node).name
+            let name as String = node_name(node)
             if name.len > 0 to usize:
                 var var_type as ptr[Type] = None to ptr[Type]
                 if expr != None to ptr[Node]:
-                    var_type = (deref expr).inferred_type
+                    var_type = node_inferred_type(expr)
                 self.mark_owned(name, var_type)
                 
                 if sema_ptr != None to ptr[Sema]:
@@ -351,7 +371,7 @@ struct BorrowChecker:
                     if sym != None to ptr[Symbol]:
                         self.add_symbol_to_current_scope(sym)
             
-            let body as ptr[Node] = (deref node).body
+            let body as ptr[Node] = node_body(node)
             if body != None to ptr[Node]:
                 self.walk_ast(body)
                 
@@ -359,6 +379,6 @@ struct BorrowChecker:
             if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
                 (deref sema_ptr).current_scope = parent_scope
             
-        elif nt == 5: // IfStmt
-            self.walk_ast((deref node).cond)
-            self.walk_ast((deref node).then_branch)
+        elif nt == NodeType.IfStmt: // IfStmt
+            self.walk_ast(node_cond(node))
+            self.walk_ast(node_then_branch(node))

@@ -2,7 +2,7 @@ import std.collections
 from std.string import String
 from std.collections import List, Dict
 import symbols
-from symbols import Node, TypeAnnotation, LanguageMode, Span, Symbol
+from symbols import Node, NodeType, TypeAnnotation, LanguageMode, Span, Symbol, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_auto_drops, set_node_auto_drops
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
@@ -114,8 +114,8 @@ fn main() -> i32:
     (deref bc13).current_file = String.make("test_borrow13.nz" to cstr)
     bc13.walk_ast(root13)
     
-    let fundecl as ptr[Node] = (deref root13).declarations[0]
-    let body13 as ptr[Node] = (deref fundecl).body
+    let fundecl as ptr[Node] = node_declarations(root13)[0]
+    let body13 as ptr[Node] = node_body(fundecl)
     
     var pass13 as bool = False
     if (deref bc13).auto_drops.has(body13 to usize):
@@ -153,13 +153,13 @@ fn main() -> i32:
     (deref bc14).current_file = String.make("test_borrow14.nz" to cstr)
     bc14.walk_ast(root14)
     
-    let fundecl_f as ptr[Node] = (deref root14).declarations[1]
-    let f_body as ptr[Node] = (deref fundecl_f).body
+    let fundecl_f as ptr[Node] = node_declarations(root14)[1]
+    let f_body as ptr[Node] = node_body(fundecl_f)
     var with_stmt as ptr[Node] = None to ptr[Node]
-    if (deref f_body).node_type == 21: // WithStmt
+    if node_kind(f_body) == NodeType.WithStmt:
         with_stmt = f_body
     else:
-        with_stmt = (deref f_body).declarations[0]
+        with_stmt = node_declarations(f_body)[0]
     
     var pass14 as bool = False
     if (deref bc14).auto_drops.has(with_stmt to usize):

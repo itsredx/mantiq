@@ -244,3 +244,24 @@
 - `04940fe` — `feat: implement LLVM IR code generation with diagnostic test suite`
 - `80a021a` — `fix: handle pass_stmt in lowerer and add clang IR validation tests`
 
+---
+
+## Session: Phase 6 — Tasks 6.4 & 6.5 (Closure Outlining & Scope Auto-Drops)
+**Date**: 2026-07-26
+
+### Work Completed
+1. **Task 6.5: Scope Cleanups (`auto_drops`)**:
+   - Implemented `emit_auto_drops` with null-check branching (`icmp ne ptr %ptr_reg, null` → `br i1 %cond_reg, label %exec, label %skip`).
+   - Integrated `emit_auto_drops` into `emit_return`, `emit_block`, and `emit_with`.
+   - Added **Test 13 (Scope Auto-Drops IR Generation)** to `src/tests/test_codegen.nz`.
+2. **Double-Free / Segfault Resolution in SSA Register Functions**:
+   - Refactored `fresh_temp`, `fresh_label`, `emit_expr`, `emit_binary_expr`, `emit_call_expr`, `emit_unary_expr`, `emit_cast_expr`, `emit_list_literal`, `emit_index_expr` in `src/codegen.nz` to return Copy primitive `ptr[u8]`.
+   - Bypassed bootstrap compiler borrow-checker string drop generation for register/label variables.
+3. **Task 6.4: Closure Outlining & Environment Packing**:
+   - Added `closure_counter` and `fresh_closure_name()` to `LLVMCodegen`.
+   - Implemented `emit_closure_expr(node)`:
+     - Outlines closure body into `self.outlined_out` as `@__closure_N(ptr %env, ...)`.
+     - Allocates fat pointer `{ ptr @__closure_N, ptr %env }` in `self.main_out`.
+   - Added **Test 14 (Closure Outlining IR Generation)** to `src/tests/test_codegen.nz`.
+4. Verified all 14 tests in `test_codegen.nz` pass cleanly with zero errors or segfaults.
+

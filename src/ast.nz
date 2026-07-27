@@ -44,7 +44,23 @@ struct TypeAnnotation:
 // WhileStmt = 14
 // ForStmt = 15
 // MemberExpr = 16
+// UnaryExpr = 17
+// CastExpr = 18
 // WithStmt = 21
+// MatchStmt = 22
+// TryStmt = 23
+// ThrowStmt = 24
+// ListLiteral = 25
+// DictLiteral = 26
+// IndexExpr = 27
+// SpreadExpr = 28
+// BooleanLiteral = 29
+// AwaitExpr = 30
+// ClosureExpr = 31
+// StructDecl = 32
+// EnumDecl = 33
+// UnionDecl = 34
+// FieldDecl = 35
 
 // ── Node ───────────────────────────────────────────────────────────────
 struct Node:

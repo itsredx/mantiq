@@ -3,7 +3,8 @@ import std.collections
 from std.string import String
 from std.collections import List
 from std.collections import Dict
-from std.option import Option
+from std.option import Option, Empty
+from std.mem import make
 import types
 from types import Type
 
@@ -31,34 +32,930 @@ struct TypeAnnotation:
     public var params as Option[List[TypeAnnotation]]
     public var return_type as ptr[TypeAnnotation]
 
-// ── Node ───────────────────────────────────────────────────────────────
-struct Node:
-    public var node_type as i32
-    public var span as Span
-    public var module_name as Option[String]
-    public var inferred_type as ptr[Type]
+// ── NodeType Enum ──────────────────────────────────────────────────────
+enum NodeType:
+    Program
+    ImportDecl
+    FunDecl
+    VarDecl
+    IfStmt
+    ClassDecl
+    BinaryExpr
+    Identifier
+    NumberLiteral
+    StringLiteral
+    MacroDecl
+    MacroInvocation
+    CallExpr
+    ReturnStmt
+    WhileStmt
+    ForStmt
+    MemberExpr
+    UnaryExpr
+    CastExpr
+    BlockStmt
+    WithStmt
+    MatchStmt
+    TryStmt
+    ThrowStmt
+    ListLiteral
+    DictLiteral
+    IndexExpr
+    SpreadExpr
+    BooleanLiteral
+    AwaitExpr
+    ClosureExpr
+    StructDecl
+    EnumDecl
+    UnionDecl
+    FieldDecl
 
-    // Flattened AST Fields
+// ── Per-Variant Data Structs ───────────────────────────────────────────
+// Each node type has exactly the fields it needs, no more.
+
+struct ProgramData:
     public var declarations as List[ptr[Node]]
+
+struct ImportDeclData:
     public var target as String
     public var imported_symbols as List[String]
     public var alias as Option[String]
+
+struct FunDeclData:
     public var name as String
     public var params as List[ptr[Node]]
     public var body as ptr[Node]
     public var is_async as bool
-    public var names as List[String]
+    public var is_extern as bool
+    public var is_variadic as bool
+    public var return_type_annot as ptr[TypeAnnotation]
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
-    public var initializers as Option[List[ptr[Node]]]
+
+struct VarDeclData:
+    public var name as String
+    public var left as ptr[Node]
     public var is_mut as bool
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+
+struct IfStmtData:
     public var cond as ptr[Node]
     public var then_branch as ptr[Node]
     public var else_branch as Option[ptr[Node]]
+
+struct ClassDeclData:
+    public var name as String
+
+struct BinaryExprData:
     public var op as String
     public var left as ptr[Node]
     public var right as ptr[Node]
+
+struct IdentifierData:
+    public var name as String
+
+struct NumberLiteralData:
     public var val as f64
+
+struct StringLiteralData:
     public var str_val as String
+
+struct MacroDeclData:
+    public var name as String
+    public var params as List[ptr[Node]]
+    public var body as ptr[Node]
+
+struct MacroInvocationData:
+    public var name as String
+    public var params as List[ptr[Node]]
+
+struct CallExprData:
+    public var left as ptr[Node]
+    public var params as List[ptr[Node]]
+
+struct ReturnStmtData:
+    public var body as ptr[Node]
+    public var auto_drops as List[String]
+
+struct WhileStmtData:
+    public var cond as ptr[Node]
+    public var body as ptr[Node]
+
+struct ForStmtData:
+    public var name as String
+    public var left as ptr[Node]
+    public var body as ptr[Node]
+    public var is_async as bool
+
+struct MemberExprData:
+    public var left as ptr[Node]
+    public var name as String
+
+struct UnaryExprData:
+    public var op as String
+    public var left as ptr[Node]
+
+struct CastExprData:
+    public var op as String
+    public var left as ptr[Node]
+
+struct BlockStmtData:
+    public var declarations as List[ptr[Node]]
+    public var auto_drops as List[String]
+
+struct WithStmtData:
+    public var left as ptr[Node]
+    public var name as String
+    public var body as ptr[Node]
+
+struct MatchStmtData:
+    public var left as ptr[Node]
+    public var body as ptr[Node]
+    public var else_branch as Option[ptr[Node]]
+
+struct TryStmtData:
+    public var left as ptr[Node]
+    public var name as String
+    public var body as ptr[Node]
+
+struct ThrowStmtData:
+    public var left as ptr[Node]
+
+struct ListLiteralData:
+    public var declarations as List[ptr[Node]]
+
+struct DictLiteralData:
+    public var declarations as List[ptr[Node]]
+
+struct IndexExprData:
+    public var left as ptr[Node]
+    public var right as ptr[Node]
+
+struct SpreadExprData:
+    public var left as ptr[Node]
+
+struct BooleanLiteralData:
+    public var val as f64
+
+struct AwaitExprData:
+    public var left as ptr[Node]
+
+struct ClosureExprData:
+    public var params as List[ptr[Node]]
+    public var body as ptr[Node]
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+
+struct StructDeclData:
+    public var name as String
+    public var body as ptr[Node]
+
+struct EnumDeclData:
+    public var name as String
+    public var declarations as List[ptr[Node]]
+
+struct UnionDeclData:
+    public var name as String
+    public var body as ptr[Node]
+
+struct FieldDeclData:
+    public var name as String
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+
+// ── Node ───────────────────────────────────────────────────────────────
+// Common header for all node types. Variant-specific data is in data ptr.
+struct Node:
+    public var kind as NodeType
+    public var span as Span
+    public var module_name as Option[String]
+    public var inferred_type as ptr[Type]
+    public var data as ptr[u8]
+
+// ── Node Factory ───────────────────────────────────────────────────────
+fn make_node(kind as NodeType, span as Span) as ptr[Node]:
+    let n as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let nk as NodeType = kind
+    (deref n).kind = nk
+    let sp as Span = span
+    (deref n).span = sp
+    (deref n).module_name = Empty
+    (deref n).inferred_type = None to ptr[Type]
+    (deref n).data = None to ptr[u8]
+    return n
+
+// ── Node Accessors ─────────────────────────────────────────────────────
+// Common field accessors (no cast needed):
+
+fn node_span(n as ptr[Node]) as Span:
+    return (deref n).span
+
+fn node_kind(n as ptr[Node]) as NodeType:
+    return (deref n).kind
+
+fn node_inferred_type(n as ptr[Node]) as ptr[Type]:
+    return (deref n).inferred_type
+
+fn set_node_inferred_type(n as ptr[Node], t as ptr[Type]):
+    (deref n).inferred_type = t
+
+fn node_module_name(n as ptr[Node]) as Option[String]:
+    return (deref n).module_name
+
+fn set_node_module_name(n as ptr[Node], m as Option[String]):
+    (deref n).module_name = m
+
+// name accessor (14 node types have it):
+fn node_name(n as ptr[Node]) as String:
+    let k as NodeType = (deref n).kind
+    var r as String = String.make("" to cstr)
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).name
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        r = (deref d).name
+    elif k == NodeType.Identifier:
+        let d as ptr[IdentifierData] = (deref n).data to ptr[IdentifierData]
+        r = (deref d).name
+    elif k == NodeType.MemberExpr:
+        let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
+        r = (deref d).name
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        r = (deref d).name
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        r = (deref d).name
+    elif k == NodeType.UnionDecl:
+        let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
+        r = (deref d).name
+    elif k == NodeType.FieldDecl:
+        let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
+        r = (deref d).name
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        r = (deref d).name
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        r = (deref d).name
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        r = (deref d).name
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        r = (deref d).name
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        r = (deref d).name
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        r = (deref d).name
+    return r
+
+fn node_name_ptr(n as ptr[Node]) as ptr[String]:
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        return ref (deref d).name
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        return ref (deref d).name
+    elif k == NodeType.Identifier:
+        let d as ptr[IdentifierData] = (deref n).data to ptr[IdentifierData]
+        return ref (deref d).name
+    elif k == NodeType.MemberExpr:
+        let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
+        return ref (deref d).name
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        return ref (deref d).name
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        return ref (deref d).name
+    elif k == NodeType.UnionDecl:
+        let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
+        return ref (deref d).name
+    elif k == NodeType.FieldDecl:
+        let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
+        return ref (deref d).name
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        return ref (deref d).name
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        return ref (deref d).name
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        return ref (deref d).name
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        return ref (deref d).name
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        return ref (deref d).name
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        return ref (deref d).name
+    return None to ptr[String]
+
+fn set_node_name(n as ptr[Node], name as String):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).name = name
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        (deref d).name = name
+    elif k == NodeType.Identifier:
+        let d as ptr[IdentifierData] = (deref n).data to ptr[IdentifierData]
+        (deref d).name = name
+    elif k == NodeType.MemberExpr:
+        let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
+        (deref d).name = name
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        (deref d).name = name
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        (deref d).name = name
+    elif k == NodeType.UnionDecl:
+        let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
+        (deref d).name = name
+    elif k == NodeType.FieldDecl:
+        let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
+        (deref d).name = name
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        (deref d).name = name
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        (deref d).name = name
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        (deref d).name = name
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        (deref d).name = name
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        (deref d).name = name
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).name = name
+
+// left accessor (14 node types have it):
+fn node_left(n as ptr[Node]) as ptr[Node]:
+    let k as NodeType = (deref n).kind
+    var r as ptr[Node] = None to ptr[Node]
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        r = (deref d).left
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        r = (deref d).left
+    elif k == NodeType.UnaryExpr:
+        let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
+        r = (deref d).left
+    elif k == NodeType.CastExpr:
+        let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
+        r = (deref d).left
+    elif k == NodeType.MemberExpr:
+        let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
+        r = (deref d).left
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        r = (deref d).left
+    elif k == NodeType.ReturnStmt:
+        let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
+        r = (deref d).body
+    elif k == NodeType.ThrowStmt:
+        let d as ptr[ThrowStmtData] = (deref n).data to ptr[ThrowStmtData]
+        r = (deref d).left
+    elif k == NodeType.SpreadExpr:
+        let d as ptr[SpreadExprData] = (deref n).data to ptr[SpreadExprData]
+        r = (deref d).left
+    elif k == NodeType.AwaitExpr:
+        let d as ptr[AwaitExprData] = (deref n).data to ptr[AwaitExprData]
+        r = (deref d).left
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        r = (deref d).left
+    elif k == NodeType.IndexExpr:
+        let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        r = (deref d).left
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        r = (deref d).left
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        r = (deref d).left
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        r = (deref d).left
+    return r
+
+fn set_node_left(n as ptr[Node], left as ptr[Node]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        (deref d).left = left
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        (deref d).left = left
+    elif k == NodeType.UnaryExpr:
+        let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
+        (deref d).left = left
+    elif k == NodeType.CastExpr:
+        let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
+        (deref d).left = left
+    elif k == NodeType.MemberExpr:
+        let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
+        (deref d).left = left
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        (deref d).left = left
+    elif k == NodeType.ThrowStmt:
+        let d as ptr[ThrowStmtData] = (deref n).data to ptr[ThrowStmtData]
+        (deref d).left = left
+    elif k == NodeType.SpreadExpr:
+        let d as ptr[SpreadExprData] = (deref n).data to ptr[SpreadExprData]
+        (deref d).left = left
+    elif k == NodeType.AwaitExpr:
+        let d as ptr[AwaitExprData] = (deref n).data to ptr[AwaitExprData]
+        (deref d).left = left
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        (deref d).left = left
+    elif k == NodeType.IndexExpr:
+        let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        (deref d).left = left
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        (deref d).left = left
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        (deref d).left = left
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        (deref d).left = left
+
+// right accessor (BinaryExpr, IndexExpr):
+fn node_right(n as ptr[Node]) as ptr[Node]:
+    let k as NodeType = (deref n).kind
+    var r as ptr[Node] = None to ptr[Node]
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        r = (deref d).right
+    elif k == NodeType.IndexExpr:
+        let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        r = (deref d).right
+    return r
+
+fn set_node_right(n as ptr[Node], right as ptr[Node]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        (deref d).right = right
+    elif k == NodeType.IndexExpr:
+        let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        (deref d).right = right
+
+// body accessor (9 node types have it):
+fn node_body(n as ptr[Node]) as ptr[Node]:
+    let k as NodeType = (deref n).kind
+    var r as ptr[Node] = None to ptr[Node]
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).body
+    elif k == NodeType.WhileStmt:
+        let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        r = (deref d).body
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        r = (deref d).body
+    elif k == NodeType.ReturnStmt:
+        let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
+        r = (deref d).body
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        r = (deref d).body
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        r = (deref d).body
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        r = (deref d).body
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        r = (deref d).body
+    elif k == NodeType.UnionDecl:
+        let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
+        r = (deref d).body
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        r = (deref d).body
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        r = (deref d).body
+    return r
+
+fn set_node_body(n as ptr[Node], body as ptr[Node]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).body = body
+    elif k == NodeType.WhileStmt:
+        let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        (deref d).body = body
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        (deref d).body = body
+    elif k == NodeType.ReturnStmt:
+        let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
+        (deref d).body = body
+    elif k == NodeType.WithStmt:
+        let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
+        (deref d).body = body
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        (deref d).body = body
+    elif k == NodeType.TryStmt:
+        let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
+        (deref d).body = body
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        (deref d).body = body
+    elif k == NodeType.UnionDecl:
+        let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
+        (deref d).body = body
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        (deref d).body = body
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).body = body
+
+// declarations accessor (6 node types have it):
+fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
+    let k as NodeType = (deref n).kind
+    var r as List[ptr[Node]] = List[ptr[Node]]()
+    if k == NodeType.Program:
+        let d as ptr[ProgramData] = (deref n).data to ptr[ProgramData]
+        r = (deref d).declarations
+    elif k == NodeType.BlockStmt:
+        let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        r = (deref d).declarations
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        r = (deref d).declarations
+    elif k == NodeType.ListLiteral:
+        let d as ptr[ListLiteralData] = (deref n).data to ptr[ListLiteralData]
+        r = (deref d).declarations
+    elif k == NodeType.DictLiteral:
+        let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
+        r = (deref d).declarations
+    return r
+
+fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.Program:
+        let d as ptr[ProgramData] = (deref n).data to ptr[ProgramData]
+        (deref d).declarations = decls
+    elif k == NodeType.BlockStmt:
+        let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        (deref d).declarations = decls
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        (deref d).declarations = decls
+    elif k == NodeType.ListLiteral:
+        let d as ptr[ListLiteralData] = (deref n).data to ptr[ListLiteralData]
+        (deref d).declarations = decls
+    elif k == NodeType.DictLiteral:
+        let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
+        (deref d).declarations = decls
+
+// params accessor (5 node types have it):
+fn node_params(n as ptr[Node]) as List[ptr[Node]]:
+    let k as NodeType = (deref n).kind
+    var r as List[ptr[Node]] = List[ptr[Node]]()
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).params
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        r = (deref d).params
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        r = (deref d).params
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        r = (deref d).params
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        r = (deref d).params
+    return r
+
+fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).params = params
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        (deref d).params = params
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        (deref d).params = params
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        (deref d).params = params
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).params = params
+
+// op accessor (3 node types have it):
+fn node_op(n as ptr[Node]) as String:
+    let k as NodeType = (deref n).kind
+    var r as String = String.make("" to cstr)
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        r = (deref d).op
+    elif k == NodeType.UnaryExpr:
+        let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
+        r = (deref d).op
+    elif k == NodeType.CastExpr:
+        let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
+        r = (deref d).op
+    return r
+
+fn set_node_op(n as ptr[Node], op as String):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        (deref d).op = op
+    elif k == NodeType.UnaryExpr:
+        let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
+        (deref d).op = op
+    elif k == NodeType.CastExpr:
+        let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
+        (deref d).op = op
+
+// cond accessor (IfStmt, WhileStmt):
+fn node_cond(n as ptr[Node]) as ptr[Node]:
+    let k as NodeType = (deref n).kind
+    var r as ptr[Node] = None to ptr[Node]
+    if k == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        r = (deref d).cond
+    elif k == NodeType.WhileStmt:
+        let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        r = (deref d).cond
+    return r
+
+fn set_node_cond(n as ptr[Node], cond as ptr[Node]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        (deref d).cond = cond
+    elif k == NodeType.WhileStmt:
+        let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        (deref d).cond = cond
+
+// then_branch accessor (IfStmt):
+fn node_then_branch(n as ptr[Node]) as ptr[Node]:
+    var r as ptr[Node] = None to ptr[Node]
+    if (deref n).kind == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        r = (deref d).then_branch
+    return r
+
+fn set_node_then_branch(n as ptr[Node], branch as ptr[Node]):
+    if (deref n).kind == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        (deref d).then_branch = branch
+
+// else_branch accessor (IfStmt, MatchStmt):
+fn node_else_branch(n as ptr[Node]) as Option[ptr[Node]]:
+    let k as NodeType = (deref n).kind
+    var r as Option[ptr[Node]] = Empty
+    if k == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        r = (deref d).else_branch
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        r = (deref d).else_branch
+    return r
+
+fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.IfStmt:
+        let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
+        (deref d).else_branch = branch
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        (deref d).else_branch = branch
+
+// val accessor (NumberLiteral, BooleanLiteral):
+fn node_val(n as ptr[Node]) as f64:
+    let k as NodeType = (deref n).kind
+    if k == NodeType.NumberLiteral:
+        let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
+        return (deref d).val
+    elif k == NodeType.BooleanLiteral:
+        let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
+        return (deref d).val
+    return 0 to f64
+
+fn set_node_val(n as ptr[Node], val as f64):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.NumberLiteral:
+        let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
+        (deref d).val = val
+    elif k == NodeType.BooleanLiteral:
+        let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
+        (deref d).val = val
+
+fn node_str_val(n as ptr[Node]) as String:
+    var r as String = String.make("" to cstr)
+    if (deref n).kind == NodeType.StringLiteral:
+        let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
+        r = (deref d).str_val
+    return r
+
+fn node_str_val_ptr(n as ptr[Node]) as ptr[String]:
+    if (deref n).kind == NodeType.StringLiteral:
+        let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
+        return ref (deref d).str_val
+    return None to ptr[String]
+
+fn set_node_str_val(n as ptr[Node], str_val as String):
+    if (deref n).kind == NodeType.StringLiteral:
+        let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
+        (deref d).str_val = str_val
+
+// is_async accessor (FunDecl, ForStmt):
+fn node_is_async(n as ptr[Node]) as bool:
+    let k as NodeType = (deref n).kind
+    var r as bool = False
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_async
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        r = (deref d).is_async
+    return r
+
+fn set_node_is_async(n as ptr[Node], is_async as bool):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_async = is_async
+    elif k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        (deref d).is_async = is_async
+
+// is_extern accessor (FunDecl):
+fn node_is_extern(n as ptr[Node]) as bool:
+    var r as bool = False
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_extern
+    return r
+
+fn set_node_is_extern(n as ptr[Node], is_extern as bool):
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_extern = is_extern
+
+// is_variadic accessor (FunDecl):
+fn node_is_variadic(n as ptr[Node]) as bool:
+    var r as bool = False
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_variadic
+    return r
+
+fn set_node_is_variadic(n as ptr[Node], is_variadic as bool):
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_variadic = is_variadic
+
+// return_type_annot accessor (FunDecl):
+fn node_return_type_annot(n as ptr[Node]) as ptr[TypeAnnotation]:
+    var r as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).return_type_annot
+    return r
+
+fn set_node_return_type_annot(n as ptr[Node], return_type_annot as ptr[TypeAnnotation]):
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).return_type_annot = return_type_annot
+
+// is_mut accessor (VarDecl):
+fn node_is_mut(n as ptr[Node]) as bool:
+    var r as bool = False
+    if (deref n).kind == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        r = (deref d).is_mut
+    return r
+
+fn set_node_is_mut(n as ptr[Node], is_mut as bool):
+    if (deref n).kind == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        (deref d).is_mut = is_mut
+
+// type_annots accessor (FunDecl, VarDecl, FieldDecl, ClosureExpr):
+fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]]:
+    let k as NodeType = (deref n).kind
+    var r as ptr[List[Option[ptr[TypeAnnotation]]]] = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).type_annots
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        r = (deref d).type_annots
+    elif k == NodeType.FieldDecl:
+        let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
+        r = (deref d).type_annots
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        r = (deref d).type_annots
+    return r
+
+fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).type_annots = type_annots
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        (deref d).type_annots = type_annots
+    elif k == NodeType.FieldDecl:
+        let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
+        (deref d).type_annots = type_annots
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).type_annots = type_annots
+
+// auto_drops accessor (ReturnStmt, BlockStmt):
+fn node_auto_drops(n as ptr[Node]) as List[String]:
+    let k as NodeType = (deref n).kind
+    var r as List[String] = List[String]()
+    if k == NodeType.ReturnStmt:
+        let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
+        r = (deref d).auto_drops
+    elif k == NodeType.BlockStmt:
+        let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        r = (deref d).auto_drops
+    return r
+
+fn set_node_auto_drops(n as ptr[Node], drops as List[String]):
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ReturnStmt:
+        let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
+        (deref d).auto_drops = drops
+    elif k == NodeType.BlockStmt:
+        let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        (deref d).auto_drops = drops
+
+// target accessor (ImportDecl):
+fn node_target(n as ptr[Node]) as String:
+    var r as String = String.make("" to cstr)
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).target
+    return r
+
+fn set_node_target(n as ptr[Node], target as String):
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        (deref d).target = target
+
+// imported_symbols accessor (ImportDecl):
+fn node_imported_symbols(n as ptr[Node]) as List[String]:
+    var r as List[String] = List[String]()
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).imported_symbols
+    return r
+
+fn set_node_imported_symbols(n as ptr[Node], syms as List[String]):
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        (deref d).imported_symbols = syms
+
+// alias accessor (ImportDecl):
+fn node_alias(n as ptr[Node]) as Option[String]:
+    var r as Option[String] = Empty
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).alias
+    return r
+
+fn set_node_alias(n as ptr[Node], alias as Option[String]):
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        (deref d).alias = alias
 
 // ── SymbolKind ─────────────────────────────────────────────────────────
 enum SymbolKind:
