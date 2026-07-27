@@ -898,13 +898,9 @@ struct Lowerer:
                     var placeholder_str as String = String.make("" to cstr)
                     if tok_len >= 3 to i64:
                         placeholder_str = tokens[2]
-                    
-                    // Unconditionally evaluate Some() to avoid compiler codegen bug where
-                    // conditional Some() creates temporary free of unallocated pointer.
-                    let opt_alias as Option[String] = Some(placeholder_str)
-                    
-                    if tok_len >= 3 to i64 and strcmp(tokens[1].data to cstr, "as" to cstr) == 0:
-                        alias = opt_alias
+                        let opt_alias as Option[String] = Some(placeholder_str)
+                        if strcmp(tokens[1].data to cstr, "as" to cstr) == 0:
+                            alias = opt_alias
         
         extern fn free(p as ptr)
         free(buf to ptr)

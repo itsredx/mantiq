@@ -30,7 +30,7 @@ extern fn fwrite(ptr as ptr, size as usize, count as usize, stream as ptr) as us
 extern fn fseek(stream as ptr, offset as i64, origin as i32) as i32
 extern fn ftell(stream as ptr) as i64
 extern fn malloc(size as usize) as ptr
-extern fn memset(s as ptr, c as i32, n as usize) as ptr
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
 
 // ── File I/O Helper ──────────────────────────────────────────────────────
 fn read_file_to_cstr(path as cstr) as cstr:
@@ -86,7 +86,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
     fclose(f_ll)
 
     let cmd_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
-    let _sp as i32 = sprintf(cmd_buf, "clang -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || zig cc -O2 /tmp/mantiq_tmp.ll -o %s" to cstr, out_file, out_file, out_file)
+    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || /opt/zig/zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || clang -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null" to cstr, out_file, out_file, out_file, out_file)
     let res as i32 = system(cmd_buf to cstr)
     return res == 0
 
@@ -115,20 +115,53 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2)
         var out_path as cstr = "a.out" to cstr
-        if argc >= 5 and strcmp(get_arg(argv, 3), "-o" to cstr) == 0:
-            out_path = get_arg(argv, 4)
+        if argc >= 5:
+            if strcmp(get_arg(argv, 3), "-o" to cstr) == 0:
+                out_path = get_arg(argv, 4)
 
         let source_cstr as cstr = read_file_to_cstr(input_path)
         if source_cstr == None to cstr:
             let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        let ok as bool = compile_source(source_cstr, input_path, out_path)
+        var full_source as String = String.make(source_cstr)
+        if strstr(input_path, "main.nz" to cstr) != None to cstr:
+            var sb as StringBuilder = StringBuilder.make()
+            let sym_s as cstr = read_file_to_cstr("symbols.nz" to cstr)
+            if sym_s != None to cstr:
+                sb.append(sym_s)
+                sb.append("\n" to cstr)
+            let low_s as cstr = read_file_to_cstr("lower.nz" to cstr)
+            if low_s != None to cstr:
+                sb.append(low_s)
+                sb.append("\n" to cstr)
+            let sem_s as cstr = read_file_to_cstr("sema.nz" to cstr)
+            if sem_s != None to cstr:
+                sb.append(sem_s)
+                sb.append("\n" to cstr)
+            let typ_s as cstr = read_file_to_cstr("typecheck.nz" to cstr)
+            if typ_s != None to cstr:
+                sb.append(typ_s)
+                sb.append("\n" to cstr)
+            let bor_s as cstr = read_file_to_cstr("borrowck.nz" to cstr)
+            if bor_s != None to cstr:
+                sb.append(bor_s)
+                sb.append("\n" to cstr)
+            let cod_s as cstr = read_file_to_cstr("codegen.nz" to cstr)
+            if cod_s != None to cstr:
+                sb.append(cod_s)
+                sb.append("\n" to cstr)
+            sb.append(source_cstr)
+            full_source = sb.to_string()
+
+        let ok as bool = compile_source(full_source.data to cstr, input_path, out_path)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
+            let _ff1 as i32 = fflush(None to ptr)
             return 0 to i32
         else:
             let _p8 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
+            let _ff2 as i32 = fflush(None to ptr)
             return 1 to i32
 
     if strcmp(cmd, "run" to cstr) == 0:

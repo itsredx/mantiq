@@ -139,7 +139,7 @@ fn type_to_llvm(t as ptr[Type]) as String:
     if k == TypeKind.Dict:
         return String.make("{ ptr, i64, i64 }" to cstr)
     if k == TypeKind.Option:
-        return String.make("{ i8, ptr }" to cstr)
+        return String.make("{ i8, ptr, i64, i64 }" to cstr)
     if k == TypeKind.Result:
         return String.make("{ i8, ptr, ptr }" to cstr)
     if k == TypeKind.Any:
@@ -160,6 +160,24 @@ fn type_to_llvm(t as ptr[Type]) as String:
         append_str(ref sb_union, (deref t).name)
         return sb_union.to_string()
     return String.make("i64" to cstr)
+
+fn type_size(t as ptr[Type]) as i64:
+    if t == None to ptr[Type]:
+        return 256 to i64
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Boolean or k == TypeKind.Char:
+        return 1 to i64
+    if k == TypeKind.I16 or k == TypeKind.U16:
+        return 2 to i64
+    if k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32:
+        return 4 to i64
+    if k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.F64 or k == TypeKind.RawPointer or k == TypeKind.CStr:
+        return 8 to i64
+    if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict:
+        return 24 to i64
+    if k == TypeKind.Option:
+        return 32 to i64
+    return 256 to i64
 
 // ── LLVMCodegen ─────────────────────────────────────────────────────────
 struct LLVMCodegen:
@@ -566,7 +584,43 @@ struct LLVMCodegen:
         if callee_name_ptr != None to ptr[String]:
             let c_name as String = deref callee_name_ptr
             if strcmp(c_name.data to cstr, "make" to cstr) == 0:
-                append_cstr(ref (deref self).main_out, "mantiq_malloc")
+                let call_ret_type as ptr[Type] = node_inferred_type(node)
+                var elem_s as i64 = 256 to i64
+                if call_ret_type != None to ptr[Type]:
+                    let payload as ptr[Type] = (deref call_ret_type).payload
+                    if payload != None to ptr[Type]:
+                        elem_s = type_size(payload)
+                var count_val as ptr[u8] = "1" to ptr[u8]
+                if args.length() > 0 to i64:
+                    let raw_count as ptr[u8] = self.emit_expr(args[0])
+                    let count_type as String = type_to_llvm(node_inferred_type(args[0]))
+                    if strcmp(count_type.data to cstr, "i64" to cstr) != 0 and strcmp(count_type.data to cstr, "ptr" to cstr) != 0:
+                        let ext_reg as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, ext_reg to cstr)
+                        append_cstr(ref (deref self).main_out, " = zext ")
+                        append_str(ref (deref self).main_out, count_type)
+                        append_cstr(ref (deref self).main_out, " ")
+                        append_cstr(ref (deref self).main_out, raw_count to cstr)
+                        append_cstr(ref (deref self).main_out, " to i64\n")
+                        count_val = ext_reg
+                    else:
+                        count_val = raw_count
+                let size_temp as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, size_temp to cstr)
+                append_cstr(ref (deref self).main_out, " = mul i64 ")
+                append_cstr(ref (deref self).main_out, count_val to cstr)
+                append_cstr(ref (deref self).main_out, ", ")
+                append_i64(ref (deref self).main_out, elem_s)
+                append_cstr(ref (deref self).main_out, "\n")
+                
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, reg to cstr)
+                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 ")
+                append_cstr(ref (deref self).main_out, size_temp to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
+                return reg
             else:
                 append_str(ref (deref self).main_out, c_name)
         append_cstr(ref (deref self).main_out, "(")
