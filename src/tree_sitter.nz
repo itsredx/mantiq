@@ -6,7 +6,10 @@ from std.collections import List
 
 // ── TSNode ABI Structure ──────────────────────────────────────────────
 struct TSNode:
-    public var context as List[u32, 4]
+    public var c0 as u32
+    public var c1 as u32
+    public var c2 as u32
+    public var c3 as u32
     public var id as ptr
     public var tree as ptr
 

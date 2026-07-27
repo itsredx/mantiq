@@ -12,12 +12,19 @@ extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strtod(str as cstr, endptr as ptr) as f64
 extern fn printf(format as cstr, val as cstr) as i32
 extern fn fflush(f as ptr) as i32
+extern fn memset(s as ptr, c as i32, n as usize) as ptr
 
 // ── String Slice Helper ──────────────────────────────────────────────────
 fn slice_string(s as String, start as usize, end as usize) as ptr:
+    if end <= start or start >= s.len:
+        let d as ptr[u8] = make[u8](1 to usize) to ptr[u8]
+        d[0] = 0 to u8
+        let res as ptr[String] = make[String](1 to usize) to ptr[String]
+        (deref res) = String(data = d, len = 0 to usize, capacity = 1 to usize)
+        return res to ptr
     let len as usize = end - start
     let cap as usize = len + 1
-    let d as ptr[u8] = make(cap) to ptr[u8]
+    let d as ptr[u8] = make[u8](cap) to ptr[u8]
     var i as usize = 0 to usize
     while i < len:
         d[i] = s.data[start + i]
@@ -65,7 +72,7 @@ struct Lowerer:
             ts_parser_delete(parser)
             return None to ptr[Node]
             
-        var root_ts as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var root_ts as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         ts_tree_root_node_ptr(tree, ref root_ts)
         
         let root_ast as ptr[Node] = self.lower_node(ref root_ts)
@@ -87,7 +94,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var idx as u32 = 1 to u32
         while idx < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, idx, ref child)
             if ts_node_is_named_ptr(ref child):
                 let child_kind as cstr = ts_node_type_ptr(ref child)
@@ -119,11 +126,11 @@ struct Lowerer:
         elif strcmp(kind, "binary_expression" to cstr) == 0:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "expression" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "primary" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "var_decl" to cstr) == 0:
@@ -133,21 +140,21 @@ struct Lowerer:
         elif strcmp(kind, "macro_invocation" to cstr) == 0:
             return self.lower_macro_invocation(ts_node)
         elif strcmp(kind, "block" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "block_body" to cstr) == 0:
             return self.lower_block(ts_node)
         elif strcmp(kind, "collection_item" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "statement" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "expr_stmt" to cstr) == 0:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "fun_decl" to cstr) == 0:
@@ -212,7 +219,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let lowered as ptr[Node] = self.lower_node(ref child)
             if lowered == None to ptr[Node]:
@@ -233,7 +240,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_type as cstr = ts_node_type_ptr(ref child)
@@ -268,7 +275,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let child_kind as cstr = ts_node_type_ptr(ref child)
             if ts_node_is_named_ptr(ref child):
@@ -277,7 +284,7 @@ struct Lowerer:
                     let tv_count as u32 = ts_node_child_count_ptr(ref child)
                     var j as u32 = 0 to u32
                     while j < tv_count:
-                        var tv_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                        var tv_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, j, ref tv_child)
                         if ts_node_is_named_ptr(ref tv_child):
                             let tv_kind as cstr = ts_node_type_ptr(ref tv_child)
@@ -360,17 +367,17 @@ struct Lowerer:
     public fn lower_binary(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         let span as Span = self.get_span(ts_node)
         
-        var left as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var left as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         ts_node_child_ptr(ts_node, 0 to u32, ref left)
         
-        var op as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var op as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         ts_node_child_ptr(ts_node, 1 to u32, ref op)
         let op_span as Span = self.get_span(ref op)
         let slice_ptr as ptr[String] = slice_string((deref self).source_code, op_span.start_byte to usize, op_span.end_byte to usize) to ptr[String]
         let op_str as String = deref slice_ptr
         drop(slice_ptr to ptr)
         
-        var right as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var right as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         ts_node_child_ptr(ts_node, 2 to u32, ref right)
 
         let n as ptr[Node] = make_node(NodeType.BinaryExpr, span)
@@ -389,7 +396,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let c_kind as cstr = ts_node_type_ptr(ref child)
             if strcmp(c_kind, "identifier" to cstr) == 0:
@@ -401,14 +408,14 @@ struct Lowerer:
                 let tp_count as u32 = ts_node_child_count_ptr(ref child)
                 var j as u32 = 0 to u32
                 while j < tp_count:
-                    var tp_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                    var tp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                     ts_node_child_ptr(ref child, j, ref tp_child)
                     let tp_kind as cstr = ts_node_type_ptr(ref tp_child)
                     if strcmp(tp_kind, "param_decl" to cstr) == 0:
                         let pd_count as u32 = ts_node_child_count_ptr(ref tp_child)
                         var k as u32 = 0 to u32
                         while k < pd_count:
-                            var pd_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                            var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                             ts_node_child_ptr(ref tp_child, k, ref pd_child)
                             let pd_child_kind as cstr = ts_node_type_ptr(ref pd_child)
                             if strcmp(pd_child_kind, "identifier" to cstr) == 0:
@@ -419,7 +426,7 @@ struct Lowerer:
                     j = j + 1 to u32
             i = i + 1 to u32
 
-        var body_ts as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var body_ts as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         var body_idx as i32 = count to i32 - 1
         var found_body as bool = False
         while body_idx >= 0:
@@ -446,13 +453,13 @@ struct Lowerer:
 
     public fn lower_macro_invocation(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         var name as String = String.make("" to cstr)
-        var args_node as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+        var args_node as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
         var has_args as bool = False
         
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let c_kind as cstr = ts_node_type_ptr(ref child)
             if strcmp(c_kind, "identifier" to cstr) == 0:
@@ -474,7 +481,7 @@ struct Lowerer:
             let arg_count as u32 = ts_node_child_count_ptr(ref args_node)
             var j as u32 = 0 to u32
             while j < arg_count:
-                var arg_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                var arg_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                 ts_node_child_ptr(ref args_node, j, ref arg_child)
                 if ts_node_is_named_ptr(ref arg_child):
                     args.append(self.lower_node(ref arg_child))
@@ -642,7 +649,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -665,7 +672,6 @@ struct Lowerer:
         return n
 
     public fn lower_fun_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
-        extern fn memset(s as ptr, c as i32, n as usize) as ptr
         let span as Span = self.get_span(ts_node)
         var name as String = String.make("" to cstr)
         let params as List[ptr[Node]] = List[ptr[Node]]()
@@ -680,7 +686,7 @@ struct Lowerer:
             let count as u32 = ts_node_child_count_ptr(ts_node)
             var i as u32 = 0 to u32
             while i < count:
-                var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                 ts_node_child_ptr(ts_node, i, ref child)
                 let c_type as cstr = ts_node_type_ptr(ref child)
                 if strcmp(c_type, "fun_modifier" to cstr) == 0:
@@ -698,7 +704,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ref nf_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ref nf_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -710,7 +716,7 @@ struct Lowerer:
                     let tp_count as u32 = ts_node_child_count_ptr(ref child)
                     var j as u32 = 0 to u32
                     while j < tp_count:
-                        var tp_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                        var tp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, j, ref tp_child)
                         if ts_node_is_named_ptr(ref tp_child):
                             let tp_kind as cstr = ts_node_type_ptr(ref tp_child)
@@ -720,7 +726,7 @@ struct Lowerer:
                                 var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
                                 var annot_idx as u32 = 0 to u32
                                 while annot_idx < pd_count:
-                                    var pd_child_annot as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                                    var pd_child_annot as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                                     ts_node_child_ptr(ref tp_child, annot_idx, ref pd_child_annot)
                                     // Check for ... variadic token (anonymous node)
                                     let pd_ann_child_type as cstr = ts_node_type_ptr(ref pd_child_annot)
@@ -733,7 +739,7 @@ struct Lowerer:
                                     annot_idx = annot_idx + 1 to u32
                                 
                                 while k < pd_count:
-                                    var pd_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                                    var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                                     ts_node_child_ptr(ref tp_child, k, ref pd_child)
                                     if ts_node_is_named_ptr(ref pd_child):
                                         let pd_kind as cstr = ts_node_type_ptr(ref pd_child)
@@ -785,7 +791,7 @@ struct Lowerer:
                     let ra_count as u32 = ts_node_child_count_ptr(ref child)
                     var ra_idx as u32 = 0 to u32
                     while ra_idx < ra_count:
-                        var ra_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                        var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, ra_idx, ref ra_child)
                         if ts_node_is_named_ptr(ref ra_child):
                             let ra_kind as cstr = ts_node_type_ptr(ref ra_child)
@@ -810,7 +816,7 @@ struct Lowerer:
             let count2 as u32 = ts_node_child_count_ptr(ts_node)
             var i2 as u32 = 0 to u32
             while i2 < count2:
-                var child2 as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                var child2 as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                 ts_node_child_ptr(ts_node, i2, ref child2)
                 if ts_node_is_named_ptr(ref child2):
                     let c_kind2 as cstr = ts_node_type_ptr(ref child2)
@@ -923,14 +929,14 @@ struct Lowerer:
         var i as u32 = 0 to u32
         var found_paren as bool = False
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let c_kind as cstr = ts_node_type_ptr(ref child)
             if strcmp(c_kind, "arguments" to cstr) == 0:
                 let arg_count as u32 = ts_node_child_count_ptr(ref child)
                 var j as u32 = 0 to u32
                 while j < arg_count:
-                    var arg_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                    var arg_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                     ts_node_child_ptr(ref child, j, ref arg_child)
                     if ts_node_is_named_ptr(ref arg_child):
                         args.append(self.lower_node(ref arg_child))
@@ -972,7 +978,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -996,7 +1002,7 @@ struct Lowerer:
         var i as u32 = 0 to u32
         var named_count as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1026,7 +1032,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             let c_kind as cstr = ts_node_type_ptr(ref child)
             if strcmp(c_kind, "loop_modifier" to cstr) == 0:
@@ -1069,7 +1075,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1100,7 +1106,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1138,7 +1144,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1151,7 +1157,7 @@ struct Lowerer:
                     let b_count as u32 = ts_node_child_count_ptr(ref child)
                     var b as u32 = 0 to u32
                     while b < b_count:
-                        var b_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                        var b_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, b, ref b_child)
                         if ts_node_is_named_ptr(ref b_child):
                             let b_type as cstr = ts_node_type_ptr(ref b_child)
@@ -1185,7 +1191,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1220,7 +1226,7 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
         while i < count:
-            var child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
@@ -1233,7 +1239,7 @@ struct Lowerer:
                     let b_count as u32 = ts_node_child_count_ptr(ref child)
                     var b as u32 = 0 to u32
                     while b < b_count:
-                        var b_child as TSNode = TSNode(context = [0 to u32, 0 to u32, 0 to u32, 0 to u32], id = None to ptr, tree = None to ptr)
+                        var b_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, b, ref b_child)
                         if ts_node_is_named_ptr(ref b_child):
                             let b_type as cstr = ts_node_type_ptr(ref b_child)
