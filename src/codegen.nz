@@ -8,7 +8,7 @@ from symbols import Node, NodeType, node_kind, node_name, node_name_ptr, node_le
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
-extern fn printf(format as cstr, val as cstr) as i32
+extern fn printf(format as cstr, ...) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
@@ -487,8 +487,7 @@ struct LLVMCodegen:
             if is_float:
                 let _ as i32 = sprintf(buf, "%g" to cstr, val)
             else:
-                let i_val as i64 = val to i64
-                let _ as i32 = sprintf(buf, "%lld" to cstr, i_val)
+                let _ as i32 = sprintf(buf, "%lld" to cstr, val to i64)
             return buf
         elif nt == NodeType.Identifier:
             let id_name_ptr as ptr[String] = node_name_ptr(node)

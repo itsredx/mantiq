@@ -18,7 +18,7 @@ fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
     return s
 
 fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as ptr[Symbol]:
-    let sym as ptr[Symbol] = make[Symbol](1 to usize) to ptr[Symbol]
+    let sym as ptr[Symbol] = make[u8](256 to usize) to ptr[Symbol]
     (deref sym).name = name
     (deref sym).kind = kind
     (deref sym).decl_node = decl_node
@@ -53,7 +53,7 @@ fn read_file_to_str(path as cstr) as String:
     return String(data = buf, len = read_bytes, capacity = cap)
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
-extern fn printf(format as cstr, val as cstr) as i32
+extern fn printf(format as cstr, ...) as i32
 extern fn strdup(s as cstr) as cstr
 
 // ── Sema ───────────────────────────────────────────────────────────────
@@ -77,7 +77,6 @@ struct Sema:
         (deref self).global_scope = gs
         (deref self).current_scope = gs
         
-        // Register built-ins in global scope
         (deref gs).symbols[String.make("printf")] = make_symbol(String.make("printf"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("String")] = make_symbol(String.make("String"), SymbolKind.Struct, None to ptr[Node])
         (deref gs).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, None to ptr[Node])
@@ -122,7 +121,7 @@ struct Sema:
         
         while curr != None to ptr[Scope]:
             if (deref curr).symbols.has(name):
-                if crossed_function:
+                if crossed_function and (deref sym).kind == SymbolKind.Variable:
                     let r as i32 = printf("Detected closure capture: variable '%s' captured from outer scope!\n" to cstr, name.data to cstr)
                 break
                 

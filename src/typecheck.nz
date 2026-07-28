@@ -40,7 +40,12 @@ struct TypeChecker:
         (deref self).inferred_return_type = None to ptr[Type]
 
     public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
-        let name as cstr = (deref annot).name.data to cstr
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        let name_data as ptr[u8] = (deref annot).name.data
+        let name_len as usize = (deref annot).name.len
+        if name_data == None to ptr[u8] or name_len == 0 to usize:
+            return make_type(TypeKind.Void)
+        let name as cstr = name_data to cstr
         if strcmp(name, "i8" to cstr) == 0:
             return make_type(TypeKind.I8)
         elif strcmp(name, "i16" to cstr) == 0:
@@ -313,7 +318,7 @@ struct TypeChecker:
         return monomorphized
 
     public fn typecheck_node(self as ptr[TypeChecker], node as ptr[Node]) as ptr[Type]:
-        extern fn memset(s as ptr, c as i32, n as usize) as ptr
+        extern fn memset(s as ptr, c: i32, n: usize) as ptr
         if node == None to ptr[Node]:
             return make_type(TypeKind.Void)
             
@@ -379,19 +384,22 @@ struct TypeChecker:
             let sema_ptr as ptr[Sema] = (deref self).sema
             let parent_scope as ptr[Scope] = (deref sema_ptr).current_scope
             var child_scope as ptr[Scope] = None to ptr[Scope]
-            if (deref sema_ptr).fn_scopes.has(node to usize):
-                child_scope = (deref sema_ptr).fn_scopes[node to usize]
+            
+            let fn_key as usize = node_span(node).start_row to usize * 1000 to usize + node_span(node).start_col to usize
+            if (deref sema_ptr).fn_scopes.has(fn_key):
+                child_scope = (deref sema_ptr).fn_scopes[fn_key]
             else:
                 child_scope = make_scope(parent_scope, node)
-            let sema_ptr_val as ptr[Sema] = sema_ptr
-            let sema_curr_scope_ptr as ptr[ptr[Scope]] = ref (deref sema_ptr_val).current_scope
-            deref sema_curr_scope_ptr = child_scope
+                (deref sema_ptr).fn_scopes[fn_key] = child_scope
+            
+            let saved_scope as ptr[Scope] = (deref sema_ptr).current_scope
+            (deref sema_ptr).current_scope = child_scope
             
             let f_type as ptr[Type] = make_type(TypeKind.Function)
             
             // Use return type annotation if available
             let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(node)
-            if ret_annot != None to ptr[TypeAnnotation]:
+            if ret_annot != None to ptr[TypeAnnotation] and (deref ret_annot).name.len > 0 to usize:
                 (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
             else:
                 (deref f_type).return_type = make_type(TypeKind.Void)
@@ -459,7 +467,6 @@ struct TypeChecker:
             let self_ref_ret_back as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
             deref self_ref_ret_back = saved_ret
             
-            let _sep as i32 = 0
             (deref sema_ptr).current_scope = parent_scope
             
             let f_name as cstr = node_name(node).data to cstr

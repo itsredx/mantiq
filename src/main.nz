@@ -3,7 +3,7 @@ import std.collections
 from std.string import String, StringBuilder
 from std.collections import List, Dict
 import symbols
-from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode
+from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, node_name
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
@@ -53,7 +53,12 @@ fn read_file_to_cstr(path as cstr) as cstr:
 // ── Compiler Pipeline ───────────────────────────────────────────────────
 fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as bool:
     let lowerer as ptr[Lowerer] = make[Lowerer](1 to usize) to ptr[Lowerer]
-    (deref lowerer) = Lowerer(source = String.make(source_cstr), mode = LanguageMode.Mantiq, path = String.make(path_cstr))
+    (deref lowerer).source_code = String.make(source_cstr)
+    (deref lowerer).mode = LanguageMode.Mantiq
+    (deref lowerer).file_path = String.make(path_cstr)
+    (deref lowerer).macros = Dict[String, MacroDef]()
+    (deref lowerer).macro_args = Dict[String, ptr[Node]]()
+    (deref lowerer).next_hygiene_id = 1 to i64
     let root as ptr[Node] = lowerer.lower_source()
     if root == None to ptr[Node]:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
@@ -61,7 +66,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
 
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     sema(path_cstr)
+
     sema.declare_pass(root)
+
     sema.resolve_pass(root)
 
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
@@ -86,7 +93,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
     fclose(f_ll)
 
     let cmd_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
-    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || /opt/zig/zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null || clang -O2 /tmp/mantiq_tmp.ll -o %s 2>/dev/null" to cstr, out_file, out_file, out_file, out_file)
+    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || /opt/zig/zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || clang -O2 /tmp/mantiq_tmp.ll -o %s 2>&1" to cstr, out_file, out_file, out_file, out_file)
     let res as i32 = system(cmd_buf to cstr)
     return res == 0
 

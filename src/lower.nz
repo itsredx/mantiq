@@ -10,7 +10,7 @@ from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_man
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strtod(str as cstr, endptr as ptr) as f64
-extern fn printf(format as cstr, val as cstr) as i32
+extern fn printf(format as cstr, ...) as i32
 extern fn fflush(f as ptr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 
@@ -130,9 +130,15 @@ struct Lowerer:
             ts_node_child_ptr(ts_node, 0 to u32, ref child)
             return self.lower_node(ref child)
         elif strcmp(kind, "primary" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
+            let p_count as u32 = ts_node_child_count_ptr(ts_node)
+            var p_idx as u32 = 0 to u32
+            var p_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            while p_idx < p_count:
+                ts_node_child_ptr(ts_node, p_idx, ref p_child)
+                if ts_node_is_named_ptr(ref p_child):
+                    return self.lower_node(ref p_child)
+                p_idx = p_idx + 1 to u32
+            return None to ptr[Node]
         elif strcmp(kind, "var_decl" to cstr) == 0:
             return self.lower_var_decl(ts_node)
         elif strcmp(kind, "macro_decl" to cstr) == 0:
@@ -722,6 +728,7 @@ struct Lowerer:
                             let tp_kind as cstr = ts_node_type_ptr(ref tp_child)
                             if strcmp(tp_kind, "param_decl" to cstr) == 0 or strcmp(tp_kind, "typed_var" to cstr) == 0:
                                 let pd_count as u32 = ts_node_child_count_ptr(ref tp_child)
+                                var this_has_variadic as bool = False
                                 var k as u32 = 0 to u32
                                 var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
                                 var annot_idx as u32 = 0 to u32
@@ -732,11 +739,16 @@ struct Lowerer:
                                     let pd_ann_child_type as cstr = ts_node_type_ptr(ref pd_child_annot)
                                     if strcmp(pd_ann_child_type, "..." to cstr) == 0:
                                         is_variadic_fn = True
+                                        this_has_variadic = True
                                     if ts_node_is_named_ptr(ref pd_child_annot):
                                         let pd_kind as cstr = ts_node_type_ptr(ref pd_child_annot)
                                         if strcmp(pd_kind, "type_annotation" to cstr) == 0:
                                             annot = self.lower_type_annotation(ref pd_child_annot)
                                     annot_idx = annot_idx + 1 to u32
+                                
+                                if this_has_variadic:
+                                    j = j + 1 to u32
+                                    continue
                                 
                                 while k < pd_count:
                                     var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
@@ -798,10 +810,9 @@ struct Lowerer:
                             if strcmp(ra_kind, "identifier" to cstr) == 0:
                                 let ra_span as Span = self.get_span(ref ra_child)
                                 let ra_slice as ptr[String] = slice_string((deref self).source_code, ra_span.start_byte to usize, ra_span.end_byte to usize) to ptr[String]
-                                let type_name as String = deref ra_slice
-                                drop(ra_slice to ptr)
                                 ret_type_annot = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-                                (deref ret_type_annot).name = type_name
+                                (deref ret_type_annot).name = deref ra_slice
+                                drop(ra_slice to ptr)
                                 (deref ret_type_annot).lifetime = Empty
                                 (deref ret_type_annot).generics = Empty
                                 (deref ret_type_annot).params = Empty

@@ -12,7 +12,7 @@ import sema
 from sema import Sema
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
-extern fn printf(format as cstr, val as cstr) as i32
+extern fn printf(format as cstr, ...) as i32
 extern fn malloc(size as usize) as ptr
 
 

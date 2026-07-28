@@ -1,1 +1,340 @@
-// Error handling for the compiler
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from std.option import Option, Empty
+from std.mem import make
+import symbols
+from symbols import Span
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
+extern fn malloc(size as usize) as ptr
+extern fn free(ptr as ptr)
+extern fn strlen(str as cstr) as usize
+
+// ── ANSI Color Formatting Tokens ─────────────────────────────────────────
+fn color_reset() as cstr:
+    return "\x1b[0m" to cstr
+
+fn color_bold() as cstr:
+    return "\x1b[1m" to cstr
+
+fn color_red() as cstr:
+    return "\x1b[1;31m" to cstr
+
+fn color_yellow() as cstr:
+    return "\x1b[1;33m" to cstr
+
+fn color_cyan() as cstr:
+    return "\x1b[1;36m" to cstr
+
+fn color_blue() as cstr:
+    return "\x1b[1;34m" to cstr
+
+fn color_magenta() as cstr:
+    return "\x1b[1;35m" to cstr
+
+fn color_dim() as cstr:
+    return "\x1b[2m" to cstr
+
+// ── Diagnostic Severity ──────────────────────────────────────────────────
+enum Severity:
+    Error
+    Warning
+    Note
+    Help
+    Panic
+    ICE
+
+// ── Label Kind ───────────────────────────────────────────────────────────
+enum LabelKind:
+    Primary
+    Secondary
+
+// ── Span Label ───────────────────────────────────────────────────────────
+struct Label:
+    public var span as Span
+    public var message as String
+    public var kind as LabelKind
+
+    public fn primary(span as Span, message as String) as Label:
+        return Label(span = span, message = message, kind = LabelKind.Primary)
+
+    public fn secondary(span as Span, message as String) as Label:
+        return Label(span = span, message = message, kind = LabelKind.Secondary)
+
+// ── Code Suggestion ──────────────────────────────────────────────────────
+struct Suggestion:
+    public var span as Span
+    public var replacement as String
+    public var message as String
+
+    public fn make(span as Span, replacement as String, message as String) as Suggestion:
+        return Suggestion(span = span, replacement = replacement, message = message)
+
+// ── Diagnostic Struct ───────────────────────────────────────────────────
+struct Diagnostic:
+    public var severity as Severity
+    public var code as Option[String]
+    public var message as String
+    public var file_path as String
+    public var primary_span as Span
+    public var labels as List[Label]
+    public var friendly_explanation as Option[String]
+    public var help_hints as List[String]
+    public var notes as List[String]
+    public var suggestions as List[Suggestion]
+
+    public fn new(severity as Severity, message as String, file_path as String, span as Span) as Diagnostic:
+        return Diagnostic(
+            severity = severity,
+            code = None to Option[String],
+            message = message,
+            file_path = file_path,
+            primary_span = span,
+            labels = List[Label](),
+            friendly_explanation = None to Option[String],
+            help_hints = List[String](),
+            notes = List[String](),
+            suggestions = List[Suggestion]()
+        )
+
+    public fn with_code(self as ptr[Diagnostic], code_str as cstr):
+        (deref self).code = Option[String](value = String.make(code_str))
+
+    public fn add_label(self as ptr[Diagnostic], label as Label):
+        (deref self).labels.append(label)
+
+    public fn add_primary_label(self as ptr[Diagnostic], span as Span, message as String):
+        (deref self).labels.append(Label.primary(span, message))
+
+    public fn add_secondary_label(self as ptr[Diagnostic], span as Span, message as String):
+        (deref self).labels.append(Label.secondary(span, message))
+
+    public fn set_explanation(self as ptr[Diagnostic], explanation as String):
+        (deref self).friendly_explanation = Option[String](value = explanation)
+
+    public fn add_help(self as ptr[Diagnostic], hint as String):
+        (deref self).help_hints.append(hint)
+
+    public fn add_note(self as ptr[Diagnostic], note as String):
+        (deref self).notes.append(note)
+
+    public fn add_suggestion(self as ptr[Diagnostic], span as Span, replacement as String, message as String):
+        (deref self).suggestions.append(Suggestion.make(span, replacement, message))
+
+// ── Diagnostic Engine ────────────────────────────────────────────────────
+struct DiagnosticEngine:
+    public var diagnostics as List[ptr[Diagnostic]]
+    public var error_count as u32
+    public var warning_count as u32
+    public var panic_count as u32
+    public var use_color as bool
+
+    public fn __init__(self as ptr[DiagnosticEngine]):
+        (deref self).diagnostics = List[ptr[Diagnostic]]()
+        (deref self).error_count = 0 to u32
+        (deref self).warning_count = 0 to u32
+        (deref self).panic_count = 0 to u32
+        (deref self).use_color = true
+
+    public fn add(self as ptr[DiagnosticEngine], diag as ptr[Diagnostic]):
+        (deref self).diagnostics.append(diag)
+        if (deref diag).severity == Severity.Error:
+            (deref self).error_count = (deref self).error_count + 1 to u32
+        else:
+            if (deref diag).severity == Severity.Warning:
+                (deref self).warning_count = (deref self).warning_count + 1 to u32
+            else:
+                if (deref diag).severity == Severity.Panic:
+                    (deref self).panic_count = (deref self).panic_count + 1 to u32
+
+    public fn has_errors(self as ptr[DiagnosticEngine]) as bool:
+        return (deref self).error_count > 0 to u32 or (deref self).panic_count > 0 to u32
+
+    public fn report_error(self as ptr[DiagnosticEngine], code as cstr, message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
+        (deref diag) = Diagnostic.new(Severity.Error, message, file_path, span)
+        if strlen(code) > 0 to usize:
+            diag.with_code(code)
+        (deref self).add(diag)
+        return diag
+
+    public fn report_warning(self as ptr[DiagnosticEngine], code as cstr, message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
+        (deref diag) = Diagnostic.new(Severity.Warning, message, file_path, span)
+        if strlen(code) > 0 to usize:
+            diag.with_code(code)
+        (deref self).add(diag)
+        return diag
+
+    public fn report_panic(self as ptr[DiagnosticEngine], message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
+        (deref diag) = Diagnostic.new(Severity.Panic, message, file_path, span)
+        (deref self).add(diag)
+        return diag
+
+    public fn report_ice(self as ptr[DiagnosticEngine], message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
+        (deref diag) = Diagnostic.new(Severity.ICE, message, file_path, span)
+        (deref self).add(diag)
+        return diag
+
+    // ── Diagnostic Formatter / Output Renderer ───────────────────────────
+    public fn render_diagnostic(self as ptr[DiagnosticEngine], diag as ptr[Diagnostic], source_code as cstr):
+        let color as bool = (deref self).use_color
+
+        // 1. Header Line: severity badge [code]: headline message
+        let tag_color as cstr = color_red()
+        let tag_name as cstr = "error"
+        if (deref diag).severity == Severity.Warning:
+            tag_color = color_yellow()
+            tag_name = "warning"
+        else:
+            if (deref diag).severity == Severity.Note:
+                tag_color = color_blue()
+                tag_name = "note"
+            else:
+                if (deref diag).severity == Severity.Help:
+                    tag_color = color_cyan()
+                    tag_name = "help"
+                else:
+                    if (deref diag).severity == Severity.Panic:
+                        tag_color = color_magenta()
+                        tag_name = "panic!"
+                    else:
+                        if (deref diag).severity == Severity.ICE:
+                            tag_color = color_red()
+                            tag_name = "internal compiler error"
+
+        if color:
+            let _r as i32 = printf("%s%s%s" to cstr, color_bold(), tag_color, tag_name)
+            if (deref diag).code.is_some():
+                let _r2 as i32 = printf("[%s]" to cstr, (deref diag).code.unwrap().data to cstr)
+            let _r3 as i32 = printf("%s: %s%s%s\n" to cstr, color_reset(), color_bold(), (deref diag).message.data to cstr, color_reset())
+        else:
+            let _r as i32 = printf("%s: %s\n" to cstr, tag_name, (deref diag).message.data to cstr)
+
+        // 2. Location pointer: --> file.nz:row:col
+        let row as u32 = (deref diag).primary_span.start_row + 1 to u32
+        let col as u32 = (deref diag).primary_span.start_col + 1 to u32
+
+        if color:
+            let _r as i32 = printf("  %s-->%s %s:%d:%d\n" to cstr, color_blue(), color_reset(), (deref diag).file_path.data to cstr, row, col)
+            let _r2 as i32 = printf("   %s|%s\n" to cstr, color_blue(), color_reset())
+        else:
+            let _r as i32 = printf("  --> %s:%d:%d\n   |\n" to cstr, (deref diag).file_path.data to cstr, row, col)
+
+        // 3. Source Line Snippet & Carets
+        if source_code != None to cstr:
+            let line_num as u32 = 1 to u32
+            let idx as usize = 0 to usize
+            let len as usize = strlen(source_code)
+
+            // Line scanner to find primary span line
+            while idx < len:
+                if line_num == row:
+                    // Read till end of line
+                    let line_end as usize = idx
+                    while line_end < len and (deref (source_code to usize + line_end) to ptr[u8]) != 10 to u8:
+                        line_end = line_end + 1 to usize
+
+                    // Print source line context
+                    if color:
+                        let _r as i32 = printf("%2d %s|%s " to cstr, line_num, color_blue(), color_reset())
+                    else:
+                        let _r as i32 = printf("%2d | " to cstr, line_num)
+
+                    let p as usize = idx
+                    while p < line_end:
+                        let ch as u8 = deref (source_code to usize + p) to ptr[u8]
+                        let _r as i32 = printf("%c" to cstr, ch to i32)
+                        p = p + 1 to usize
+                    let _r2 as i32 = printf("\n" to cstr)
+
+                    // Caret line
+                    if color:
+                        let _r as i32 = printf("   %s|%s " to cstr, color_blue(), color_reset())
+                    else:
+                        let _r as i32 = printf("   | ")
+
+                    let space_i as u32 = 1 to u32
+                    while space_i < col:
+                        let _r as i32 = printf(" " to cstr)
+                        space_i = space_i + 1 to u32
+
+                    let span_len as u32 = (deref diag).primary_span.end_col - (deref diag).primary_span.start_col
+                    if span_len < 1 to u32:
+                        span_len = 1 to u32
+
+                    if color:
+                        let _r as i32 = printf("%s" to cstr, tag_color)
+
+                    let caret_i as u32 = 0 to u32
+                    while caret_i < span_len:
+                        let _r as i32 = printf("^" to cstr)
+                        caret_i = caret_i + 1 to u32
+
+                    if color:
+                        let _r as i32 = printf("%s" to cstr, color_reset())
+                    let _r_end as i32 = printf("\n" to cstr)
+                    break
+                
+                if (deref (source_code to usize + idx) to ptr[u8]) == 10 to u8:
+                    line_num = line_num + 1 to u32
+                idx = idx + 1 to usize
+
+        // 4. Friendly Explanation Block
+        if (deref diag).friendly_explanation.is_some():
+            if color:
+                let _r as i32 = printf("   %s=%s %sWhy this happened:%s %s\n" to cstr, color_blue(), color_reset(), color_bold(), color_reset(), (deref diag).friendly_explanation.unwrap().data to cstr)
+            else:
+                let _r as i32 = printf("   = Why this happened: %s\n" to cstr, (deref diag).friendly_explanation.unwrap().data to cstr)
+
+        // 5. Help Hints ("How to fix")
+        let h_idx as usize = 0 to usize
+        let h_count as usize = (deref diag).help_hints.len
+        while h_idx < h_count:
+            let hint as String = (deref diag).help_hints.get(h_idx)
+            if color:
+                let _r as i32 = printf("   %s=%s %s%sHelp:%s %s\n" to cstr, color_blue(), color_reset(), color_bold(), color_cyan(), color_reset(), hint.data to cstr)
+            else:
+                let _r as i32 = printf("   = Help: %s\n" to cstr, hint.data to cstr)
+            h_idx = h_idx + 1 to usize
+
+        // 6. Notes
+        let n_idx as usize = 0 to usize
+        let n_count as usize = (deref diag).notes.len
+        while n_idx < n_count:
+            let note as String = (deref diag).notes.get(n_idx)
+            if color:
+                let _r as i32 = printf("   %s=%s %sNote:%s %s\n" to cstr, color_blue(), color_reset(), color_bold(), color_reset(), note.data to cstr)
+            else:
+                let _r as i32 = printf("   = Note: %s\n" to cstr, note.data to cstr)
+            n_idx = n_idx + 1 to usize
+
+        // 7. Suggestions ("Suggested fix")
+        let s_idx as usize = 0 to usize
+        let s_count as usize = (deref diag).suggestions.len
+        while s_idx < s_count:
+            let sug as Suggestion = (deref diag).suggestions.get(s_idx)
+            if color:
+                let _r as i32 = printf("   %s=%s %s%sSuggested fix:%s %s -> `%s`\n" to cstr, color_blue(), color_reset(), color_bold(), color_yellow(), color_reset(), sug.message.data to cstr, sug.replacement.data to cstr)
+            else:
+                let _r as i32 = printf("   = Suggested fix: %s -> `%s`\n" to cstr, sug.message.data to cstr, sug.replacement.data to cstr)
+            s_idx = s_idx + 1 to usize
+
+        if color:
+            let _r as i32 = printf("   %s|\n%s" to cstr, color_blue(), color_reset())
+        else:
+            let _r as i32 = printf("   |\n" to cstr)
+
+    public fn emit_all(self as ptr[DiagnosticEngine], source_code as cstr):
+        let i as usize = 0 to usize
+        let count as usize = (deref self).diagnostics.len
+        while i < count:
+            let diag as ptr[Diagnostic] = (deref self).diagnostics.get(i)
+            (deref self).render_diagnostic(diag, source_code)
+            i = i + 1 to usize
