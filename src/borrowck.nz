@@ -37,7 +37,7 @@ struct BorrowChecker:
     public var sema as ptr[Sema]
     public var scope_depth as i32
 
-    public fn __init__(self as ptr[BorrowChecker]):
+    public fn init_bc(self as ptr[BorrowChecker]):
         (deref self).errors = List[String]()
         (deref self).current_file = String.make("" to cstr)
         (deref self).symbol_states = Dict[String, VarInfo]()
@@ -146,7 +146,11 @@ struct BorrowChecker:
         // Look up the type from symbol_states (stored at declaration time)
         if (deref self).symbol_states.has(name):
             let info as VarInfo = (deref self).symbol_states[name]
-            let t as ptr[Type] = info.var_type
+            var t as ptr[Type] = info.var_type
+            if t == None to ptr[Type] and (deref self).sema != None to ptr[Sema]:
+                let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(name)
+                if sym != None to ptr[Symbol]:
+                    t = ref (deref sym).sym_type
             if t != None to ptr[Type]:
                 if is_copy_type(t):
                     return

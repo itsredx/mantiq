@@ -3,7 +3,7 @@ import std.collections
 from std.string import String, StringBuilder
 from std.collections import List, Dict
 import symbols
-from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, node_name
+from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
@@ -40,49 +40,44 @@ fn read_file_to_cstr(path as cstr) as cstr:
     let _s1 as i32 = fseek(f, 0 to i64, 2 to i32)
     let len as i64 = ftell(f)
     let _s2 as i32 = fseek(f, 0 to i64, 0 to i32)
-    let buf as ptr[u8] = malloc(len to usize + 1 to usize) to ptr[u8]
-    if buf == None to ptr[u8]:
+    let buf as ptr = malloc(len to usize + 1 to usize)
+    if buf == None to ptr:
         fclose(f)
         return None to cstr
-    let read_count as usize = fread(buf to ptr, 1 to usize, len to usize, f)
+    let read_count as usize = fread(buf, 1 to usize, len to usize, f)
     fclose(f)
-    let end_ptr as ptr[u8] = (buf to usize + read_count) to ptr[u8]
-    deref end_ptr = 0 to u8
+    let end_ptr as ptr = (buf to usize + read_count) to ptr
+    deref (end_ptr to ptr[u8]) = 0 to u8
     return buf to cstr
 
 // ── Compiler Pipeline ───────────────────────────────────────────────────
 fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as bool:
-    let lowerer as ptr[Lowerer] = make[Lowerer](1 to usize) to ptr[Lowerer]
-    (deref lowerer).source_code = String.make(source_cstr)
-    (deref lowerer).mode = LanguageMode.Mantiq
-    (deref lowerer).file_path = String.make(path_cstr)
-    (deref lowerer).macros = Dict[String, MacroDef]()
-    (deref lowerer).macro_args = Dict[String, ptr[Node]]()
-    (deref lowerer).next_hygiene_id = 1 to i64
-    let root as ptr[Node] = lowerer.lower_source()
-    if root == None to ptr[Node]:
+    let lowerer as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
+    let root as ptr[Node] = (deref lowerer).lower_source()
+    if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
         return False
 
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    sema(path_cstr)
-
+    (deref sema).init_sema(path_cstr)
+    (deref sema).root_ast = root
     sema.declare_pass(root)
-
     sema.resolve_pass(root)
 
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    tc(sema)
-    let _tc_t as ptr[Type] = tc.typecheck_node(root)
+    (deref tc).init_tc(sema)
+    let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
 
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc()
-    bc.walk_ast(root)
+    (deref bc).init_bc()
+    (deref bc).sema = sema
+    (deref bc).current_file = (deref sema).current_file
+    (deref bc).walk_ast(root)
 
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
-    cg()
-    cg.populate_auto_drops_from_borrowck((deref bc).auto_drops)
-    let ir_str as String = cg.generate(root)
+    (deref cg).init_cg()
+    (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
+    let ir_str as String = (deref cg).generate(root)
 
     let tmp_ll_path as cstr = "/tmp/mantiq_tmp.ll" to cstr
     let f_ll as ptr = fopen(tmp_ll_path, "wb" to cstr)
@@ -93,7 +88,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
     fclose(f_ll)
 
     let cmd_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
-    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || /opt/zig/zig cc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || gcc -O2 /tmp/mantiq_tmp.ll -o %s 2>&1 || clang -O2 /tmp/mantiq_tmp.ll -o %s 2>&1" to cstr, out_file, out_file, out_file, out_file)
+    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, out_file, out_file, out_file)
     let res as i32 = system(cmd_buf to cstr)
     return res == 0
 
@@ -101,8 +96,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     let base as usize = argv to usize
     let offset as usize = idx to usize * 8 to usize
-    let ptr_addr as ptr[cstr] = (base + offset) to ptr[cstr]
-    return deref ptr_addr
+    let ptr_addr as ptr = (base + offset) to ptr
+    return deref (ptr_addr to ptr[cstr])
 
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     if argc < 2:
@@ -131,37 +126,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        var full_source as String = String.make(source_cstr)
-        if strstr(input_path, "main.nz" to cstr) != None to cstr:
-            var sb as StringBuilder = StringBuilder.make()
-            let sym_s as cstr = read_file_to_cstr("symbols.nz" to cstr)
-            if sym_s != None to cstr:
-                sb.append(sym_s)
-                sb.append("\n" to cstr)
-            let low_s as cstr = read_file_to_cstr("lower.nz" to cstr)
-            if low_s != None to cstr:
-                sb.append(low_s)
-                sb.append("\n" to cstr)
-            let sem_s as cstr = read_file_to_cstr("sema.nz" to cstr)
-            if sem_s != None to cstr:
-                sb.append(sem_s)
-                sb.append("\n" to cstr)
-            let typ_s as cstr = read_file_to_cstr("typecheck.nz" to cstr)
-            if typ_s != None to cstr:
-                sb.append(typ_s)
-                sb.append("\n" to cstr)
-            let bor_s as cstr = read_file_to_cstr("borrowck.nz" to cstr)
-            if bor_s != None to cstr:
-                sb.append(bor_s)
-                sb.append("\n" to cstr)
-            let cod_s as cstr = read_file_to_cstr("codegen.nz" to cstr)
-            if cod_s != None to cstr:
-                sb.append(cod_s)
-                sb.append("\n" to cstr)
-            sb.append(source_cstr)
-            full_source = sb.to_string()
-
-        let ok as bool = compile_source(full_source.data to cstr, input_path, out_path)
+        let ok as bool = compile_source(source_cstr, input_path, out_path)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
             let _ff1 as i32 = fflush(None to ptr)

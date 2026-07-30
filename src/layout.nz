@@ -1,0 +1,26 @@
+import std.string
+from types import Type, TypeKind
+
+enum Endianness:
+    Little
+    Big
+
+struct Target:
+    arch as String
+    os as String
+    env as String
+    pointer_size as usize
+    endianness as Endianness
+    data_layout as String
+    triple as String
+
+    public fn x86_64_linux() -> Target:
+        return Target(arch="x86_64" to String, os="linux" to String, env="gnu" to String, pointer_size=8 to usize, endianness=Endianness.Little, data_layout="e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to String, triple="x86_64-unknown-linux-gnu" to String)
+    
+
+public fn get_align(t as Type, target as Target) as usize:
+    pass
+
+
+public fn get_size(t as Type, target as Target) as usize:
+    pass

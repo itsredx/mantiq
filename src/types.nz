@@ -64,8 +64,11 @@ struct Type:
     public var return_type as ptr[Type]
 
 // ── Helper Constructors ──────────────────────────────────────────────────
+extern fn memset(ptr as ptr[u8], val as i32, num as usize) as ptr[u8]
+
 fn make_type(kind as TypeKind) as ptr[Type]:
     let t as ptr[Type] = make[u8](256 to usize) to ptr[Type]
+    let _ as ptr[u8] = memset(t to ptr[u8], 0 to i32, 256 to usize)
     (deref t).kind = kind
     (deref t).payload = None to ptr[Type]
     (deref t).return_type = None to ptr[Type]
@@ -134,7 +137,28 @@ fn is_copy_type(t as ptr[Type]) as bool:
         return True
     if k == TypeKind.Char:
         return True
+    if k == TypeKind.String:
+        return True
+    if k == TypeKind.CStr:
+        return True
+    if k == TypeKind.AsciiStr:
+        return True
+    if k == TypeKind.Utf8Str:
+        return True
+    if k == TypeKind.WebStr:
+        return True
+    if k == TypeKind.RangeStr:
+        return True
+    if k == TypeKind.Function:
+        return True
+    if k == TypeKind.Closure:
+        return True
     if k == TypeKind.RawPointer:
+        return True
+    if k == TypeKind.Option:
+        let pt as ptr[Type] = (deref t).payload
+        if pt != None to ptr[Type]:
+            return is_copy_type(pt)
         return True
     return False
 

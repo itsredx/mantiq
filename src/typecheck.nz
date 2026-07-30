@@ -34,13 +34,14 @@ struct TypeChecker:
     public var current_function_return as Option[ptr[Type]]
     public var inferred_return_type as ptr[Type]
 
-    public fn __init__(self as ptr[TypeChecker], sema as ptr[Sema]):
+    public fn init_tc(self as ptr[TypeChecker], sema as ptr[Sema]):
         (deref self).sema = sema
         (deref self).current_function_return = Empty
         (deref self).inferred_return_type = None to ptr[Type]
 
     public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
         extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
         let name_data as ptr[u8] = (deref annot).name.data
         let name_len as usize = (deref annot).name.len
         if name_data == None to ptr[u8] or name_len == 0 to usize:
@@ -129,6 +130,65 @@ struct TypeChecker:
         elif strcmp(name, "Result" to cstr) == 0:
             return make_type(TypeKind.Result)
 
+        if strncmp(name, "Dict[" to cstr, 5 to usize) == 0:
+            return make_type(TypeKind.Dict)
+
+        // Handle ptr[T], List[T], Option[T] string representations
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+        extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+        extern fn free(p as ptr)
+        if strncmp(name, "ptr[" to cstr, 4 to usize) == 0 and name_len > 5 to usize:
+            let inner_len as usize = name_len - 5 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m1 as ptr = memcpy(inner_buf to ptr, (name_data to usize + 4 to usize) to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            return make_ptr_type(elem_type)
+
+        if strncmp(name, "List[" to cstr, 5 to usize) == 0 and name_len > 6 to usize:
+            let inner_len as usize = name_len - 6 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m2 as ptr = memcpy(inner_buf to ptr, (name_data to usize + 5 to usize) to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            let t as ptr[Type] = make_type(TypeKind.List)
+            (deref t).payload = elem_type
+            return t
+
+        if strncmp(name, "Option[" to cstr, 7 to usize) == 0 and name_len > 8 to usize:
+            let inner_len as usize = name_len - 8 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m3 as ptr = memcpy(inner_buf to ptr, (name_data to usize + 7 to usize) to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            let t as ptr[Type] = make_type(TypeKind.Option)
+            (deref t).payload = elem_type
+            return t
+
         // Handle ptr[T]
         if strcmp(name, "ptr" to cstr) == 0:
             let opt_gen as ptr[u8] = (ref (deref annot).generics) to ptr[u8]
@@ -152,10 +212,45 @@ struct TypeChecker:
             elif (deref sym).kind == SymbolKind.Union:
                 return make_union_type(String.make(name))
 
-        return make_type(TypeKind.Unknown)
+        return make_struct_type(String.make(name))
 
     public fn check_nizam_import(self as ptr[TypeChecker], name as cstr, span as Span):
         if (deref (deref self).sema).mode to i32 == LanguageMode.Nizam to i32:
+            extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+            extern fn free(p as ptr)
+            extern fn strchr(s as cstr, c as i32) as cstr
+            extern fn strtok(str as cstr, delim as cstr) as cstr
+
+            let bracket_pos as cstr = strchr(name, '[' to i32)
+            if bracket_pos != None to cstr:
+                let i as usize = (bracket_pos to usize) - (name to usize)
+                if i > 0 to usize:
+                    let base_buf as ptr[u8] = make[u8](i + 1 to usize) to ptr[u8]
+                    let _mb as ptr = memcpy(base_buf to ptr, name to ptr, i)
+                    base_buf[i] = 0 to u8
+                    self.check_nizam_import(base_buf to cstr, span)
+                    free(base_buf to ptr)
+
+                let close_bracket as cstr = strchr(bracket_pos, ']' to i32)
+                if close_bracket != None to cstr:
+                    let inner_len as usize = (close_bracket to usize) - (bracket_pos to usize) - 1 to usize
+                    if inner_len > 0 to usize:
+                        let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+                        let _mi as ptr = memcpy(inner_buf to ptr, (bracket_pos to usize + 1 to usize) to ptr, inner_len)
+                        inner_buf[inner_len] = 0 to u8
+                        // Split comma-separated generic params and check each individually
+                        let tok as cstr = strtok(inner_buf to cstr, "," to cstr)
+                        while tok != None to cstr:
+                            // Trim leading whitespace
+                            while (deref (tok to ptr[u8])) == 32 to u8:
+                                tok = (tok to usize + 1 to usize) to cstr
+                            if (deref (tok to ptr[u8])) != 0 to u8:
+                                self.check_nizam_import(tok, span)
+                            tok = strtok(None to cstr, "," to cstr)
+                        free(inner_buf to ptr)
+
+                return
+
             var skip as bool = False
             if strcmp(name, "i8" to cstr) == 0 or strcmp(name, "i16" to cstr) == 0 or strcmp(name, "i32" to cstr) == 0 or strcmp(name, "i64" to cstr) == 0 or strcmp(name, "i128" to cstr) == 0 or strcmp(name, "isize" to cstr) == 0:
                 skip = True
@@ -163,7 +258,7 @@ struct TypeChecker:
                 skip = True
             elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
                 skip = True
-            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0:
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
                 skip = True
                 
             let name_ptr as ptr[u8] = name to ptr[u8]
@@ -173,7 +268,6 @@ struct TypeChecker:
                     skip = True
                     
             if not skip:
-                // Check if name is imported in semantic analyzer
                 let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
                 var report as bool = False
                 if sym == None to ptr[Symbol]:
@@ -198,7 +292,8 @@ struct TypeChecker:
         
         if fk == tk:
             if fk == TypeKind.RawPointer:
-                return self.is_implicitly_convertible((deref from_t).payload, (deref to_t).payload)
+                let res as bool = self.is_implicitly_convertible((deref from_t).payload, (deref to_t).payload)
+                return res
             return True
             
         if fk == TypeKind.Unknown or tk == TypeKind.Unknown or fk == TypeKind.Error or tk == TypeKind.Error:
@@ -366,12 +461,19 @@ struct TypeChecker:
                     
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
+                        extern fn printf(format as cstr, ...) as i32
+                        let _apk as i32 = printf("VAR INIT MISMATCH var=%s annot_kind=%d init_kind=%d\n" to cstr, name, (deref annotated_type).kind to i32, (deref init_type).kind to i32)
                         (deref (deref self).sema).report_error(String.make("type mismatch in variable initialization" to cstr), node_span(node))
                 else:
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     annotated_type = init_type
             
-            let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
+            var sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
+            if sym == None to ptr[Symbol]:
+                sym = make_symbol(String.make(name), SymbolKind.Variable, node)
+                let curr_s as ptr[Scope] = (deref (deref self).sema).current_scope
+                if curr_s != None to ptr[Scope]:
+                    (deref curr_s).symbols[String.make(name)] = sym
             if sym != None to ptr[Symbol] and annotated_type != None to ptr[Type]:
                 (deref sym).resolved_type = annotated_type
             if annotated_type != None to ptr[Type]:
@@ -385,12 +487,11 @@ struct TypeChecker:
             let parent_scope as ptr[Scope] = (deref sema_ptr).current_scope
             var child_scope as ptr[Scope] = None to ptr[Scope]
             
-            let fn_key as usize = node_span(node).start_row to usize * 1000 to usize + node_span(node).start_col to usize
-            if (deref sema_ptr).fn_scopes.has(fn_key):
-                child_scope = (deref sema_ptr).fn_scopes[fn_key]
+            if (deref sema_ptr).fn_scopes.has(node to usize):
+                child_scope = (deref sema_ptr).fn_scopes[node to usize]
             else:
                 child_scope = make_scope(parent_scope, node)
-                (deref sema_ptr).fn_scopes[fn_key] = child_scope
+                (deref sema_ptr).fn_scopes[node to usize] = child_scope
             
             let saved_scope as ptr[Scope] = (deref sema_ptr).current_scope
             (deref sema_ptr).current_scope = child_scope
@@ -399,8 +500,11 @@ struct TypeChecker:
             
             // Use return type annotation if available
             let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(node)
-            if ret_annot != None to ptr[TypeAnnotation] and (deref ret_annot).name.len > 0 to usize:
-                (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
+            if ret_annot != None to ptr[TypeAnnotation]:
+                if (deref ret_annot).name.len > 0 to usize:
+                    (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
+                else:
+                    (deref f_type).return_type = make_type(TypeKind.Void)
             else:
                 (deref f_type).return_type = make_type(TypeKind.Void)
             let f_params as ptr[List[Type]] = ref (deref f_type).param_types
@@ -511,22 +615,20 @@ struct TypeChecker:
                     if node_kind(right) == NodeType.NumberLiteral:
                         set_node_inferred_type(right, left_t)
                 let right_t as ptr[Type] = self.typecheck_node(right)
-                if not self.is_implicitly_convertible(right_t, left_t):
-                    (deref (deref self).sema).report_error(String.make("type mismatch in assignment" to cstr), node_span(node))
                 ret_type = left_t
             else:
                 let left_t as ptr[Type] = self.typecheck_node(left)
                 let right_t as ptr[Type] = self.typecheck_node(right)
-                
-                if not self.is_implicitly_convertible(left_t, right_t):
-                    (deref (deref self).sema).report_error(String.make("type mismatch in binary expression" to cstr), node_span(node))
                 
                 let lk as TypeKind = (deref left_t).kind
                 let rk as TypeKind = (deref right_t).kind
                 let left_is_default_lit as bool = node_kind(left) == NodeType.NumberLiteral and lk == TypeKind.I32
                 let right_is_default_lit as bool = node_kind(right) == NodeType.NumberLiteral and rk == TypeKind.I32
                 
-                if left_is_default_lit and not right_is_default_lit:
+                let op_str as cstr = node_op(node).data to cstr
+                if strcmp(op_str, "==" to cstr) == 0 or strcmp(op_str, "!=" to cstr) == 0 or strcmp(op_str, "<" to cstr) == 0 or strcmp(op_str, ">" to cstr) == 0 or strcmp(op_str, "<=" to cstr) == 0 or strcmp(op_str, ">=" to cstr) == 0 or strcmp(op_str, "and" to cstr) == 0 or strcmp(op_str, "or" to cstr) == 0:
+                    ret_type = make_type(TypeKind.Boolean)
+                elif left_is_default_lit and not right_is_default_lit:
                     set_node_inferred_type(left, right_t)
                     ret_type = right_t
                 elif right_is_default_lit and not left_is_default_lit:
@@ -543,24 +645,30 @@ struct TypeChecker:
             let arg_count as i64 = args.length()
             var a_idx as i64 = 0 to i64
             
-            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function:
-                let params as ptr[List[Type]] = ref (deref callee_t).param_types
-                let expected_count as i64 = (deref params).length()
-                while a_idx < arg_count:
-                    let arg_node as ptr[Node] = args[a_idx]
-                    if a_idx < expected_count:
-                        let expected_t as ptr[Type] = ref (deref params)[a_idx]
-                        if node_kind(arg_node) == NodeType.NumberLiteral:
-                            set_node_inferred_type(arg_node, expected_t)
-                    let dummy_a as ptr[Type] = self.typecheck_node(arg_node)
-                    a_idx = a_idx + 1 to i64
-            else:
-                while a_idx < arg_count:
-                    let dummy_a as ptr[Type] = self.typecheck_node(args[a_idx])
-                    a_idx = a_idx + 1 to i64
+            if callee_t != None to ptr[Type]:
+                if (deref callee_t).kind == TypeKind.Function:
+                    let params as ptr[List[Type]] = ref (deref callee_t).param_types
+                    let expected_count as i64 = (deref params).length()
+                    while a_idx < arg_count:
+                        let arg_node as ptr[Node] = args[a_idx]
+                        if a_idx < expected_count:
+                            let expected_t as ptr[Type] = ref (deref params)[a_idx]
+                            if node_kind(arg_node) == NodeType.NumberLiteral:
+                                set_node_inferred_type(arg_node, expected_t)
+                        let dummy_a as ptr[Type] = self.typecheck_node(arg_node)
+                        a_idx = a_idx + 1 to i64
+                else:
+                    while a_idx < arg_count:
+                        let dummy_a as ptr[Type] = self.typecheck_node(args[a_idx])
+                        a_idx = a_idx + 1 to i64
             
-            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
-                ret_type = (deref callee_t).return_type
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "make" to cstr) == 0:
+                ret_type = make_ptr_type(make_type(TypeKind.Any))
+            elif callee_t != None to ptr[Type]:
+                if (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
+                    ret_type = (deref callee_t).return_type
+                else:
+                    ret_type = make_type(TypeKind.Any)
             else:
                 ret_type = make_type(TypeKind.Any)
                 
@@ -615,22 +723,23 @@ struct TypeChecker:
                 if obj_kind == TypeKind.Struct and (deref obj_t).name.len > 0 to usize:
                     let struct_name as String = (deref obj_t).name
                     let struct_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(struct_name)
-                    if struct_sym != None to ptr[Symbol] and (deref struct_sym).decl_node != None to ptr[Node]:
-                        let decl as ptr[Node] = (deref struct_sym).decl_node
-                        if node_body(decl) != None to ptr[Node]:
-                            let body as ptr[Node] = node_body(decl)
-                            let prop_name as String = node_name(node)
-                            if node_kind(body) == NodeType.BlockStmt:
-                                let body_decls as List[ptr[Node]] = node_declarations(body)
-                                let d_count as i64 = body_decls.length()
-                                var d_i as i64 = 0 to i64
-                                while d_i < d_count:
-                                    let field_decl as ptr[Node] = body_decls[d_i]
-                                    if node_kind(field_decl) == NodeType.VarDecl and strcmp(node_name(field_decl).data to cstr, prop_name.data to cstr) == 0:
-                                        if node_inferred_type(field_decl) != None to ptr[Type]:
-                                            ret_type = node_inferred_type(field_decl)
-                                        break
-                                    d_i = d_i + 1 to i64
+                    if struct_sym != None to ptr[Symbol]:
+                        if (deref struct_sym).decl_node != None to ptr[Node]:
+                            let decl as ptr[Node] = (deref struct_sym).decl_node
+                            if node_body(decl) != None to ptr[Node]:
+                                let body as ptr[Node] = node_body(decl)
+                                let prop_name as String = node_name(node)
+                                if node_kind(body) == NodeType.BlockStmt:
+                                    let body_decls as List[ptr[Node]] = node_declarations(body)
+                                    let d_count as i64 = body_decls.length()
+                                    var d_i as i64 = 0 to i64
+                                    while d_i < d_count:
+                                        let field_decl as ptr[Node] = body_decls[d_i]
+                                        if node_kind(field_decl) == NodeType.VarDecl and strcmp(node_name(field_decl).data to cstr, prop_name.data to cstr) == 0:
+                                            if node_inferred_type(field_decl) != None to ptr[Type]:
+                                                ret_type = node_inferred_type(field_decl)
+                                            break
+                                        d_i = d_i + 1 to i64
                     if ret_type == None to ptr[Type] or (deref ret_type).kind == TypeKind.Void:
                         ret_type = make_type(TypeKind.Any)
                 else:

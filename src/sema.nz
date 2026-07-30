@@ -5,7 +5,7 @@ from std.collections import List
 from std.collections import Dict
 from std.option import Option
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 
@@ -61,17 +61,21 @@ struct Sema:
     public var current_scope as ptr[Scope]
     public var global_scope as ptr[Scope]
     public var loaded_modules as Dict[String, ptr[Scope]]
+    public var module_asts as Dict[String, ptr[Node]]
     public var fn_scopes as Dict[usize, ptr[Scope]]
     public var errors as List[String]
     public var current_file as String
     public var mode as LanguageMode
+    public var root_ast as ptr[Node]
 
-    public fn __init__(self as ptr[Sema], file_path as cstr):
+    public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
         (deref self).current_file = String.make(file_path)
         (deref self).errors = List[String]()
         (deref self).loaded_modules = Dict[String, ptr[Scope]]()
+        (deref self).module_asts = Dict[String, ptr[Node]]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
+        (deref self).root_ast = None to ptr[Node]
         
         let gs as ptr[Scope] = make_scope(None to ptr[Scope], None to ptr[Node])
         (deref self).global_scope = gs
@@ -149,6 +153,32 @@ struct Sema:
                 s_idx = s_idx + 1 to i64
             return
         
+        if strcmp(target.data to cstr, "std.option" to cstr) == 0:
+            let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
+            (deref (deref self).current_scope).symbols[target] = mod_sym
+            
+            let count as i64 = node_imported_symbols(node).length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                let builtin_sym as ptr[Symbol] = make_symbol(s_name, SymbolKind.Function, node)
+                (deref (deref self).current_scope).symbols[s_name] = builtin_sym
+                s_idx = s_idx + 1 to i64
+            return
+        
+        if strcmp(target.data to cstr, "std.result" to cstr) == 0:
+            let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
+            (deref (deref self).current_scope).symbols[target] = mod_sym
+            
+            let count as i64 = node_imported_symbols(node).length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                let builtin_sym as ptr[Symbol] = make_symbol(s_name, SymbolKind.Function, node)
+                (deref (deref self).current_scope).symbols[s_name] = builtin_sym
+                s_idx = s_idx + 1 to i64
+            return
+        
         let path_buf as ptr[u8] = strdup(target.data to cstr) to ptr[u8]
         var idx as i64 = 0 to i64
         while path_buf[idx] != 0 to u8:
@@ -208,6 +238,12 @@ struct Sema:
         sb4.append(".nz" to cstr)
         let path4 as String = sb4.to_string()
         
+        let sb5 as StringBuilder = StringBuilder.make()
+        sb5.append("../" to cstr)
+        sb5.append(path_buf to cstr)
+        sb5.append(".nz" to cstr)
+        let path5 as String = sb5.to_string()
+        
         content = read_file_to_str(path1.data to cstr)
         if content.len > 0 to usize:
             resolved_path = path1
@@ -223,6 +259,86 @@ struct Sema:
                     content = read_file_to_str(path4.data to cstr)
                     if content.len > 0 to usize:
                         resolved_path = path4
+                    else:
+                        content = read_file_to_str(path5.data to cstr)
+                        if content.len > 0 to usize:
+                            resolved_path = path5
+
+                // If still not found, walk up from the source file looking for a project root
+                if content.len == 0 to usize:
+                    extern fn free(p as ptr)
+                    // Walk up from file's parent directory trying <dir>/<path>.nz
+                    var search_dir_end as i64 = last_slash
+                    while search_dir_end > 0 to i64 and content.len == 0 to usize:
+                        // Find the previous '/' to go up one level
+                        search_dir_end = search_dir_end - 1 to i64
+                        while search_dir_end > 0 to i64 and file_path.data[search_dir_end to usize] != 47 to u8:
+                            search_dir_end = search_dir_end - 1 to i64
+                        if search_dir_end > 0 to i64:
+                            let dir_len as usize = (search_dir_end + 1 to i64) to usize
+                            let probe_buf as ptr[u8] = make(1024 to usize) to ptr[u8]
+                            var pi as usize = 0 to usize
+                            while pi < dir_len:
+                                probe_buf[pi] = file_path.data[pi]
+                                pi = pi + 1 to usize
+                            var pj as i64 = 0 to i64
+                            while path_buf[pj] != 0 to u8:
+                                probe_buf[pi] = path_buf[pj to usize]
+                                pi = pi + 1 to usize
+                                pj = pj + 1 to i64
+                            probe_buf[pi] = 46 to u8
+                            pi = pi + 1 to usize
+                            probe_buf[pi] = 110 to u8
+                            pi = pi + 1 to usize
+                            probe_buf[pi] = 122 to u8
+                            pi = pi + 1 to usize
+                            probe_buf[pi] = 0 to u8
+
+                            content = read_file_to_str(probe_buf to cstr)
+                            if content.len > 0 to usize:
+                                let path_len as usize = pi
+                                let path_buf_new as ptr[u8] = make(path_len + 1 to usize) to ptr[u8]
+                                pi = 0 to usize
+                                while pi < path_len:
+                                    path_buf_new[pi] = probe_buf[pi]
+                                    pi = pi + 1 to usize
+                                path_buf_new[path_len] = 0 to u8
+                                resolved_path = String(data = path_buf_new, len = path_len, capacity = path_len + 1 to usize)
+                            else:
+                                // Also try <dir>/src/<path>.nz
+                                pi = dir_len
+                                probe_buf[pi] = 115 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 114 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 99 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 47 to u8
+                                pi = pi + 1 to usize
+                                pj = 0 to i64
+                                while path_buf[pj] != 0 to u8:
+                                    probe_buf[pi] = path_buf[pj to usize]
+                                    pi = pi + 1 to usize
+                                    pj = pj + 1 to i64
+                                probe_buf[pi] = 46 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 110 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 122 to u8
+                                pi = pi + 1 to usize
+                                probe_buf[pi] = 0 to u8
+
+                                content = read_file_to_str(probe_buf to cstr)
+                                if content.len > 0 to usize:
+                                    let path_len as usize = pi
+                                    let path_buf_new as ptr[u8] = make(path_len + 1 to usize) to ptr[u8]
+                                    pi = 0 to usize
+                                    while pi < path_len:
+                                        path_buf_new[pi] = probe_buf[pi]
+                                        pi = pi + 1 to usize
+                                    path_buf_new[path_len] = 0 to u8
+                                    resolved_path = String(data = path_buf_new, len = path_len, capacity = path_len + 1 to usize)
+                            free(probe_buf to ptr)
                         
         extern fn free(p as ptr)
         free(path_buf to ptr)
@@ -235,6 +351,9 @@ struct Sema:
             path3.deinit()
         if resolved_path.data != path4.data:
             path4.deinit()
+        if resolved_path.data != path5.data:
+            path5.deinit()
+        // path6/path7 are already deinit'd inside the block if not resolved
                         
         if content.len == 0 to usize:
             self.report_error(String.make("cannot find module" to cstr), node_span(node))
@@ -273,8 +392,27 @@ struct Sema:
         (deref self).current_scope = mod_scope
         (deref self).current_file = resolved_path
         
+        if strcmp(target.data to cstr, "std.collections" to cstr) == 0:
+            (deref mod_scope).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, node)
+            (deref mod_scope).symbols[String.make("Dict")] = make_symbol(String.make("Dict"), SymbolKind.Struct, node)
+        
         self.declare_pass(root_ast to ptr[Node])
         (deref self).loaded_modules[module_key] = mod_scope
+        (deref self).module_asts[module_key] = root_ast
+        
+        // Merge module declarations into root AST
+        let root_prog as ptr[Node] = (deref self).root_ast
+        if root_prog != None to ptr[Node] and node_kind(root_prog) == NodeType.Program:
+            if node_kind(root_ast) == NodeType.Program:
+                let root_decls as List[ptr[Node]] = node_declarations(root_prog)
+                let mod_decls as List[ptr[Node]] = node_declarations(root_ast)
+                let dc as i64 = mod_decls.length()
+                var di as i64 = 0 to i64
+                while di < dc:
+                    root_decls.append(mod_decls[di])
+                    di = di + 1 to i64
+                set_node_declarations(root_prog, root_decls)
+        
         (deref self).current_scope = saved_scope
         (deref self).current_file = saved_file
         let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
@@ -299,11 +437,11 @@ struct Sema:
             
         let nt as NodeType = node_kind(node)
         if nt == NodeType.Program:
-            let decls as List[ptr[Node]] = node_declarations(node)
-            let count as i64 = decls.length()
+            let count as i64 = node_declarations(node).length()
             var i as i64 = 0 to i64
             while i < count:
-                self.declare_pass(decls[i])
+                let cur as List[ptr[Node]] = node_declarations(node)
+                self.declare_pass(cur[i])
                 i = i + 1 to i64
         elif nt == NodeType.BlockStmt:
             let decls as List[ptr[Node]] = node_declarations(node)
@@ -421,6 +559,14 @@ struct Sema:
                 self.declare_pass(node_body(node))
             let self_ref_ud as ptr[Sema] = self
             (deref self_ref_ud).current_scope = parent_scope
+        elif nt == NodeType.WhileStmt:
+            if node_body(node) != None to ptr[Node]:
+                self.declare_pass(node_body(node))
+        elif nt == NodeType.ForStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.declare_pass(node_left(node))
+            if node_body(node) != None to ptr[Node]:
+                self.declare_pass(node_body(node))
         elif nt == NodeType.WithStmt:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
@@ -491,7 +637,8 @@ struct Sema:
             else:
                 self.check_closure_capture(String.make(name), resolved)
         elif nt == NodeType.BinaryExpr:
-            if strcmp(node_op(node).data to cstr, "." to cstr) == 0:
+            let op as cstr = node_op(node).data to cstr
+            if strcmp(op, "." to cstr) == 0:
                 let left as ptr[Node] = node_left(node)
                 let right as ptr[Node] = node_right(node)
                 if node_kind(left) == NodeType.Identifier and node_kind(right) == NodeType.Identifier:
@@ -499,14 +646,20 @@ struct Sema:
                     let sym_name as cstr = node_name(right).data to cstr
                     
                     let mod_sym as ptr[Symbol] = self.lookup_symbol(String.make(mod_name))
-                    if mod_sym != None to ptr[Symbol] and (deref mod_sym).kind == SymbolKind.Module:
-                        let mod_scope as ptr[Scope] = (deref self).loaded_modules[String.make(mod_name)]
-                        if (deref mod_scope).symbols.has(String.make(sym_name)):
-                            let target_sym as ptr[Symbol] = (deref mod_scope).symbols[String.make(sym_name)]
+                    if mod_sym != None to ptr[Symbol]:
+                        if (deref mod_sym).kind == SymbolKind.Module:
+                            let mod_scope as ptr[Scope] = (deref self).loaded_modules[String.make(mod_name)]
+                            if (deref mod_scope).symbols.has(String.make(sym_name)):
+                                let target_sym as ptr[Symbol] = (deref mod_scope).symbols[String.make(sym_name)]
+                            else:
+                                self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
                         else:
-                            self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
+                            self.report_error(String.make("module not found" to cstr), node_span(node))
                     else:
                         self.report_error(String.make("module not found" to cstr), node_span(node))
+            elif strcmp(op, "=" to cstr) == 0:
+                // Skip resolving LHS of assignment (struct field name in named args / struct literals)
+                self.resolve_pass(node_right(node))
             else:
                 self.resolve_pass(node_left(node))
                 self.resolve_pass(node_right(node))
