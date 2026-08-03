@@ -134,6 +134,22 @@ struct BorrowChecker:
         (deref self).scope_depth = (deref self).scope_depth - 1 to i32
 
     // Check identifier for use-after-move, then mark as moved only if it's a move type
+    public fn is_local(self as ptr[BorrowChecker], name as String) as bool:
+        let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
+        let depth as i64 = (deref self).scope_depth to i64
+        var s_idx as i64 = depth - 1
+        while s_idx >= 0 to i64:
+            let scope as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[s_idx]
+            let sym_count as i64 = (deref scope).length()
+            var i as i64 = 0 to i64
+            while i < sym_count:
+                let sym as ptr[Symbol] = (deref scope)[i]
+                if strcmp((deref sym).name.data to cstr, name.data to cstr) == 0:
+                    return True
+                i = i + 1 to i64
+            s_idx = s_idx - 1 to i64
+        return False
+
     public fn move_identifier(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
@@ -142,6 +158,9 @@ struct BorrowChecker:
         let name as String = node_name(node)
         // First check for use-after-move regardless of type
         self.check_identifier_use(node)
+        // Only mark as moved if it's a local variable (not a module/global constant)
+        if not self.is_local(name):
+            return
         // Only mark as moved if it's a move type (not Copy)
         // Look up the type from symbol_states (stored at declaration time)
         if (deref self).symbol_states.has(name):
@@ -165,9 +184,11 @@ struct BorrowChecker:
         if (deref self).symbol_states.has(name):
             let info as VarInfo = (deref self).symbol_states[name]
             if info.state == ObjectState.Moved:
-                self.report_error(String.make("use of moved variable" to cstr), node_span(node))
+                if self.is_local(name):
+                    self.report_error(String.make("use of moved variable" to cstr), node_span(node))
             elif info.state == ObjectState.Dropped:
-                self.report_error(String.make("use of dropped variable" to cstr), node_span(node))
+                if self.is_local(name):
+                    self.report_error(String.make("use of dropped variable" to cstr), node_span(node))
 
     public fn walk_ast(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:

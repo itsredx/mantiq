@@ -87,8 +87,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
     let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
     fclose(f_ll)
 
-    let cmd_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
-    let _sp as i32 = sprintf(cmd_buf, "zig cc -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang -O2 /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, out_file, out_file, out_file)
+    let cmd_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
+    let _sp as i32 = sprintf(cmd_buf, "zig cc /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, out_file, out_file, out_file)
     let res as i32 = system(cmd_buf to cstr)
     return res == 0
 
