@@ -131,6 +131,7 @@ struct MacroInvocationData:
 struct CallExprData:
     public var left as ptr[Node]
     public var params as List[ptr[Node]]
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
 
 struct ReturnStmtData:
     public var body as ptr[Node]
@@ -264,53 +265,56 @@ fn set_node_module_name(n as ptr[Node], m as Option[String]):
 
 // name accessor (14 node types have it):
 fn node_name(n as ptr[Node]) as String:
+    if n == None to ptr[Node]:
+        return String.make("" to cstr)
     let k as NodeType = (deref n).kind
-    var r as String = String.make("" to cstr)
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.VarDecl:
         let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.Identifier:
         let d as ptr[IdentifierData] = (deref n).data to ptr[IdentifierData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.MemberExpr:
         let d as ptr[MemberExprData] = (deref n).data to ptr[MemberExprData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.StructDecl:
         let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.EnumDecl:
         let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.UnionDecl:
         let d as ptr[UnionDeclData] = (deref n).data to ptr[UnionDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.FieldDecl:
         let d as ptr[FieldDeclData] = (deref n).data to ptr[FieldDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.MacroDecl:
         let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.MacroInvocation:
         let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.WithStmt:
         let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.TryStmt:
         let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.ForStmt:
         let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
-        r = (deref d).name
+        return (deref d).name
     elif k == NodeType.ClassDecl:
         let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
-        r = (deref d).name
-    return r
+        return (deref d).name
+    return String.make("" to cstr)
 
 fn node_name_ptr(n as ptr[Node]) as ptr[String]:
+    if n == None to ptr[Node]:
+        return None to ptr[String]
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -673,18 +677,34 @@ fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
 
 // op accessor (3 node types have it):
 fn node_op(n as ptr[Node]) as String:
+    if n == None to ptr[Node]:
+        return String.make("" to cstr)
     let k as NodeType = (deref n).kind
-    var r as String = String.make("" to cstr)
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
-        r = (deref d).op
+        return (deref d).op
     elif k == NodeType.UnaryExpr:
         let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
-        r = (deref d).op
+        return (deref d).op
     elif k == NodeType.CastExpr:
         let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
-        r = (deref d).op
-    return r
+        return (deref d).op
+    return String.make("" to cstr)
+
+fn node_op_ptr(n as ptr[Node]) as ptr[String]:
+    if n == None to ptr[Node]:
+        return None to ptr[String]
+    let k as NodeType = (deref n).kind
+    if k == NodeType.BinaryExpr:
+        let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
+        return ref (deref d).op
+    elif k == NodeType.UnaryExpr:
+        let d as ptr[UnaryExprData] = (deref n).data to ptr[UnaryExprData]
+        return ref (deref d).op
+    elif k == NodeType.CastExpr:
+        let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
+        return ref (deref d).op
+    return None to ptr[String]
 
 fn set_node_op(n as ptr[Node], op as String):
     let k as NodeType = (deref n).kind
@@ -880,6 +900,9 @@ fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]]:
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         r = (deref d).type_annots
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        r = (deref d).type_annots
     return r
 
 fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
@@ -895,6 +918,9 @@ fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeA
         (deref d).type_annots = type_annots
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).type_annots = type_annots
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
         (deref d).type_annots = type_annots
 
 // auto_drops accessor (ReturnStmt, BlockStmt):

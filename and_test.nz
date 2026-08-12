@@ -1,0 +1,11 @@
+from std.string import String
+
+struct Holder:
+    public var sname as ptr[String]
+
+fn main() as i32:
+    var h as Holder = Holder(sname = None to ptr[String])
+    var out as String = String.make("" to cstr)
+    if h.sname != None to ptr[String] and (deref h.sname).data != None:
+        out = deref h.sname
+    return 0

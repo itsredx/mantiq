@@ -1279,6 +1279,9 @@ struct Lowerer:
         let span as Span = self.get_span(ts_node)
         var callee as ptr[Node] = None to ptr[Node]
         let args as List[ptr[Node]] = List[ptr[Node]]()
+        var callee_start_byte as usize = 0 to usize
+        var generic_end_byte as usize = 0 to usize
+        var has_generic as bool = False
         
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
@@ -1301,8 +1304,11 @@ struct Lowerer:
             elif strcmp(c_kind, ")" to cstr) == 0:
                 break
             elif strcmp(c_kind, "generic_params" to cstr) == 0:
-                pass
+                has_generic = True
+                generic_end_byte = ts_node_end_byte_ptr(ref child) to usize
             elif callee == None to ptr[Node]:
+                if callee_start_byte == 0 to usize:
+                    callee_start_byte = ts_node_start_byte_ptr(ref child) to usize
                 callee = self.lower_node(ref child)
             i = i + 1 to u32
         
@@ -1310,6 +1316,23 @@ struct Lowerer:
         let data as ptr[CallExprData] = make[CallExprData](1 to usize) to ptr[CallExprData]
         (deref data).left = callee
         (deref data).params = args
+        (deref data).type_annots = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+        if has_generic and callee_start_byte > 0 to usize and generic_end_byte > callee_start_byte:
+            let g_slice as ptr[String] = slice_string((deref self).source_code, callee_start_byte, generic_end_byte) to ptr[String]
+            let g_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref g_annot).name = deref g_slice
+            (deref g_annot).lifetime = Empty
+            (deref g_annot).generics = Empty
+            (deref g_annot).params = Empty
+            (deref g_annot).return_type = None to ptr[TypeAnnotation]
+            (deref g_annot).is_ref = False
+            (deref g_annot).is_mut = False
+            drop(g_slice to ptr)
+            let g_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+            (deref g_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+            let g_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref g_wrapper).list
+            (deref g_annots_ptr).append(Some(g_annot))
+            (deref data).type_annots = g_annots_ptr
         (deref n).data = data to ptr[u8]
         return n
 

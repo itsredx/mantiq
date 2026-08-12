@@ -12,6 +12,8 @@ import sema
 from sema import Sema, make_scope, make_symbol
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
 
 struct OptionLayout:
     public var has_val as u8
@@ -42,8 +44,6 @@ struct TypeChecker:
         (deref self).current_struct_type = None to ptr[Type]
 
     public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
-        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
-        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
         let name_data as ptr[u8] = (deref annot).name.data
         let name_len as usize = (deref annot).name.len
         if name_data == None to ptr[u8] or name_len == 0 to usize:
@@ -123,6 +123,9 @@ struct TypeChecker:
                     let d_val_type as ptr[Type] = self.resolve_type_annotation(d_val_annot)
                     let d_t as ptr[Type] = make_type(TypeKind.Dict)
                     (deref d_t).payload = d_val_type
+                    if (deref d_gen_list).length() > 0 to i64:
+                        let d_key_annot as TypeAnnotation = (deref d_gen_list)[0]
+                        (deref d_t).name = d_key_annot.name
                     return d_t
             let d_t as ptr[Type] = make_type(TypeKind.Dict)
             (deref d_t).payload = make_type(TypeKind.Any)
@@ -173,11 +176,24 @@ struct TypeChecker:
                     (deref v_annot).params = Empty
                     (deref v_annot).return_type = None to ptr[TypeAnnotation]
                     let v_type as ptr[Type] = self.resolve_type_annotation(v_annot)
+                    let k_len as usize = (comma_pos to usize) - (inner_buf to usize)
+                    var k_off as usize = 0 to usize
+                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off) to ptr[u8])) == 32 to u8:
+                        k_off = k_off + 1 to usize
+                        k_len = k_len - 1 to usize
+                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off + k_len - 1 to usize) to ptr[u8])) == 32 to u8:
+                        k_len = k_len - 1 to usize
+                    let t2 as ptr[Type] = make_type(TypeKind.Dict)
+                    if k_len > 0 to usize:
+                        let k_buf as ptr[u8] = make[u8](k_len + 1 to usize) to ptr[u8]
+                        let _mk as ptr = memcpy(k_buf to ptr, (inner_buf to usize + k_off) to ptr, k_len)
+                        k_buf[k_len] = 0 to u8
+                        (deref t2).name = String.make(k_buf to cstr)
+                        free(k_buf to ptr)
+                    (deref t2).payload = v_type
                     free(v_buf to ptr)
                     free(v_annot to ptr)
                     free(inner_buf to ptr)
-                    let t2 as ptr[Type] = make_type(TypeKind.Dict)
-                    (deref t2).payload = v_type
                     return t2
             free(inner_buf to ptr)
             let t2 as ptr[Type] = make_type(TypeKind.Dict)
@@ -731,6 +747,23 @@ struct TypeChecker:
         elif nt == NodeType.CallExpr:
             let callee as ptr[Node] = node_left(node)
             let callee_t as ptr[Type] = self.typecheck_node(callee)
+            var generic_ctor_t as ptr[Type] = None to ptr[Type]
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+                let gc_name as String = node_name(callee)
+                if gc_name.data != None to ptr[u8]:
+                    let gc_cstr as cstr = gc_name.data to cstr
+                    if strcmp(gc_cstr, "Dict" to cstr) == 0 or strcmp(gc_cstr, "List" to cstr) == 0 or strcmp(gc_cstr, "Set" to cstr) == 0:
+                        let gc_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+                        if gc_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                            let gc_annots as List[Option[ptr[TypeAnnotation]]] = deref gc_annots_ptr
+                            if gc_annots.length() > 0 to i64:
+                                let gc_opt as Option[ptr[TypeAnnotation]] = gc_annots[0]
+                                let gc_opt_ref as ptr[u8] = (ref gc_opt) to ptr[u8]
+                                if option_has_value(gc_opt_ref):
+                                    let gc_val_p as ptr[u8] = option_value(gc_opt_ref)
+                                    let gc_pa as ptr[TypeAnnotation] = gc_val_p to ptr[TypeAnnotation]
+                                    if gc_pa != None to ptr[TypeAnnotation]:
+                                        generic_ctor_t = self.resolve_type_annotation(gc_pa)
             
             let args as List[ptr[Node]] = node_params(node)
             let arg_count as i64 = args.length()
@@ -804,6 +837,8 @@ struct TypeChecker:
                 ret_type = some_t
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "make" to cstr) == 0:
                 ret_type = make_ptr_type(make_type(TypeKind.Any))
+            elif generic_ctor_t != None to ptr[Type]:
+                ret_type = generic_ctor_t
             elif callee_t != None to ptr[Type]:
                 if (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
                     ret_type = (deref callee_t).return_type

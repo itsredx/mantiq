@@ -5,7 +5,7 @@ from std.collections import List, Dict
 import symbols
 from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr
+from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr
 import sema
 from sema import Sema
 import types
@@ -31,6 +31,9 @@ extern fn fseek(stream as ptr, offset as i64, origin as i32) as i32
 extern fn ftell(stream as ptr) as i64
 extern fn malloc(size as usize) as ptr
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
+extern fn getpid() as i32
+extern fn compiler_lib_dir() as cstr
+extern fn strlen(s as cstr) as usize
 
 // ── File I/O Helper ──────────────────────────────────────────────────────
 fn read_file_to_cstr(path as cstr) as cstr:
@@ -50,9 +53,41 @@ fn read_file_to_cstr(path as cstr) as cstr:
     deref (end_ptr to ptr[u8]) = 0 to u8
     return buf to cstr
 
+// ── Mode Detection Helpers ─────────────────────────────────────────────
+fn str_ends_with(haystack as cstr, suffix as cstr) as bool:
+    if haystack == None to cstr or suffix == None to cstr:
+        return False
+    let hl as usize = strlen(haystack)
+    let sl as usize = strlen(suffix)
+    if sl > hl:
+        return False
+    return strcmp((haystack to usize + (hl - sl)) to cstr, suffix) == 0
+
+fn str_contains(haystack as cstr, needle as cstr) as bool:
+    if haystack == None to cstr or needle == None to cstr:
+        return False
+    return strstr(haystack, needle) != None to cstr
+
+fn detect_mode(input_path as cstr, default_mode as i32) as i32:
+    if input_path != None to cstr:
+        if str_ends_with(input_path, ".nz" to cstr):
+            return LanguageMode.Nizam to i32
+        elif str_ends_with(input_path, ".mq" to cstr):
+            return LanguageMode.Mantiq to i32
+    return default_mode
+
+fn compiler_name(mode as i32) as cstr:
+    if mode == LanguageMode.Nizam to i32:
+        return "Nizam" to cstr
+    return "Mantiq" to cstr
+
 // ── Compiler Pipeline ───────────────────────────────────────────────────
-fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as bool:
-    let lowerer as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
+fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32) as bool:
+    var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
+    if mode == LanguageMode.Nizam to i32:
+        lowerer = make_lowerer_from_cstr(source_cstr, path_cstr)
+    else:
+        lowerer = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
     let root as ptr[Node] = (deref lowerer).lower_source()
     if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
@@ -79,16 +114,23 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr) as b
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
     let ir_str as String = (deref cg).generate(root)
 
-    let tmp_ll_path as cstr = "/tmp/mantiq_tmp.ll" to cstr
-    let f_ll as ptr = fopen(tmp_ll_path, "wb" to cstr)
+    let ll_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
+    let _ll0 as i32 = sprintf(ll_buf, "%s.ll" to cstr, out_file)
+    let ll_path as cstr = ll_buf to cstr
+    let f_ll as ptr = fopen(ll_path, "wb" to cstr)
     if f_ll == None to ptr:
-        let _p2 as i32 = printf("Error: Failed to open temporary LLVM IR file\n" to cstr, "" to cstr)
+        let _p2 as i32 = printf("Error: Failed to open LLVM IR file %s\n" to cstr, ll_path)
         return False
     let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
     fclose(f_ll)
 
-    let cmd_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
-    let _sp as i32 = sprintf(cmd_buf, "zig cc /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang /tmp/mantiq_tmp.ll -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, out_file, out_file, out_file)
+    let lib_dir as cstr = compiler_lib_dir()
+    let cmd_buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
+    var _sp as i32 = 0
+    if lib_dir == None to cstr:
+        _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, ll_path, out_file, ll_path, out_file, ll_path, out_file)
+    else:
+        _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file)
     let res as i32 = system(cmd_buf to cstr)
     return res == 0
 
@@ -100,20 +142,27 @@ fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     return deref (ptr_addr to ptr[cstr])
 
 fn main(argc as i32, argv as ptr[cstr]) as i32:
+    var default_mode as i32 = LanguageMode.Mantiq to i32
+    var bin_name as cstr = "mantiq" to cstr
+    if argc >= 1 and str_contains(get_arg(argv, 0), "nizam" to cstr):
+        default_mode = LanguageMode.Nizam to i32
+        bin_name = "nizam" to cstr
+    let self_name as cstr = compiler_name(default_mode)
+
     if argc < 2:
-        let _p3 as i32 = printf("Mantiq Self-Hosting Compiler v0.1.0\nUsage: mantiq <command> [options]\n  build <file.nz> [-o <out>]\n  run <file.nz>\n  version\n" to cstr, "" to cstr)
+        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>]\n  run <file.nz>\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
 
     let cmd as cstr = get_arg(argv, 1)
     if strcmp(cmd, "version" to cstr) == 0 or strcmp(cmd, "--version" to cstr) == 0:
-        let _p4 as i32 = printf("Mantiq Self-Hosting Compiler v0.1.0 (Nizam self-host stage-1)\n" to cstr, "" to cstr)
+        let _p4 as i32 = printf("%s Self-Hosting Compiler v0.1.0\n" to cstr, self_name)
         let _f2 as i32 = fflush(None to ptr)
         return 0 to i32
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:
-            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: mantiq build <file.nz> [-o <out>]\n" to cstr, "" to cstr)
+            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>]\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2)
         var out_path as cstr = "a.out" to cstr
@@ -121,12 +170,13 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             if strcmp(get_arg(argv, 3), "-o" to cstr) == 0:
                 out_path = get_arg(argv, 4)
 
+        let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
         if source_cstr == None to cstr:
             let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        let ok as bool = compile_source(source_cstr, input_path, out_path)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
             let _ff1 as i32 = fflush(None to ptr)
@@ -138,16 +188,20 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "run" to cstr) == 0:
         if argc < 3:
-            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: mantiq run <file.nz>\n" to cstr, "" to cstr)
+            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz>\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2)
-        let out_path as cstr = "/tmp/mantiq_run_tmp" to cstr
+        let pidv as i32 = getpid()
+        let rt_buf as ptr[u8] = malloc(256 to usize) to ptr[u8]
+        let _rt0 as i32 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d" to cstr, pidv)
+        let out_path as cstr = rt_buf to cstr
+        let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
         if source_cstr == None to cstr:
             let _p10 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        let ok as bool = compile_source(source_cstr, input_path, out_path)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode)
         if ok:
             let res as i32 = system(out_path)
             return res
@@ -155,5 +209,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p11 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
             return 1 to i32
 
-    let _p12 as i32 = printf("Unknown command: %s\nRun 'mantiq' for usage.\n" to cstr, cmd)
+    let _p12 as i32 = printf("Unknown command: %s\nRun '%s' for usage.\n" to cstr, cmd, bin_name)
     return 1 to i32
+
+
+    

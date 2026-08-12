@@ -125,8 +125,6 @@ struct Sema:
         
         while curr != None to ptr[Scope]:
             if (deref curr).symbols.has(name):
-                if crossed_function and (deref sym).kind == SymbolKind.Variable:
-                    let r as i32 = printf("Detected closure capture: variable '%s' captured from outer scope!\n" to cstr, name.data to cstr)
                 break
                 
             if (deref curr).closure_node != None to ptr[Node]:

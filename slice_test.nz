@@ -1,0 +1,17 @@
+from std.string import String
+from std.mem import make
+
+fn copy_bytes(s as String, start as usize, end as usize) as ptr:
+    let len as usize = end - start
+    let d as ptr[u8] = make[u8](len + 1) to ptr[u8]
+    var i as usize = 0 to usize
+    while i < len:
+        d[i] = s.data[start + i]
+        i = i + 1 to usize
+    d[len] = 0 to u8
+    return d to ptr
+
+fn main() as i32:
+    let s as String = String.make("hello" to cstr)
+    let p as ptr = copy_bytes(s, 0, 3)
+    return 0

@@ -160,6 +160,8 @@ fn is_copy_type(t as ptr[Type]) as bool:
         if pt != None to ptr[Type]:
             return is_copy_type(pt)
         return True
+    if k == TypeKind.Enum:
+        return True
     return False
 
 fn is_move_type(t as ptr[Type]) as bool:
