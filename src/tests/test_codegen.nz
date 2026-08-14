@@ -1,6 +1,7 @@
 // ── Imports ─────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
+import std.string
+from std.string import String, StringBuilder
 from std.collections import List
 import symbols
 from symbols import Node, NodeType, Span, make_node, set_node_val, set_node_body, ClosureExprData, NumberLiteralData
@@ -28,20 +29,20 @@ extern fn system(cmd as cstr) as i32
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 
 fn gen_ir(source as cstr, file as cstr) as String:
-    let lr as Lowerer = make_lowerer_mantiq_from_cstr(source, file)
-    let root as ptr[Node] = lr.lower_source()
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source, file)
+    let root as ptr[Node] = (deref lr).lower_source()
     let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     let dm0 as ptr = memset(s to ptr, 0 to i32, 96 to usize)
-    s(file)
+    (deref s).init_sema(file)
     s.declare_pass(root)
     s.resolve_pass(root)
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     let dm1 as ptr = memset(tc to ptr, 0 to i32, 24 to usize)
-    tc(s)
+    (deref tc).init_tc(s)
     tc.typecheck_node(root)
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     let dm2 as ptr = memset(cg to ptr, 0 to i32, 256 to usize)
-    cg()
+    (deref cg).init_cg()
     return cg.generate(root)
 
 fn run_one(source as cstr, file as cstr, check as cstr) as bool:
@@ -146,7 +147,7 @@ fn main() -> i32:
     cg_drops.append(String.make("s" to cstr))
     let cg13 as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     let dm13 as ptr = memset(cg13 to ptr, 0 to i32, 256 to usize)
-    cg13()
+    (deref cg13).init_cg()
     cg13.emit_auto_drops(cg_drops)
     let ir13 as String = (deref cg13).main_out.to_string()
     if strstr(ir13.data to cstr, "mantiq_free" to cstr) != None to cstr:
@@ -157,7 +158,7 @@ fn main() -> i32:
     // Test 14: Closure Outlining IR Generation (Task 6.4)
     let cg14 as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     let dm14 as ptr = memset(cg14 to ptr, 0 to i32, 256 to usize)
-    cg14()
+    (deref cg14).init_cg()
     let dummy_span as Span = Span(0 to u32, 0 to u32, 0 to u32, 0 to u32, 0 to u32, 0 to u32)
     let closure_node as ptr[Node] = make_node(NodeType.ClosureExpr, dummy_span)
     let cd14 as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]

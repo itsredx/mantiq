@@ -137,19 +137,15 @@ struct Lowerer:
             return self.lower_string(ts_node)
         elif strcmp(kind, "binary_expression" to cstr) == 0:
             return self.lower_binary(ts_node)
-        elif strcmp(kind, "expression" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
-        elif strcmp(kind, "primary" to cstr) == 0:
-            let p_count as u32 = ts_node_child_count_ptr(ts_node)
-            var p_idx as u32 = 0 to u32
-            var p_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            while p_idx < p_count:
-                ts_node_child_ptr(ts_node, p_idx, ref p_child)
-                if ts_node_is_named_ptr(ref p_child):
-                    return self.lower_node(ref p_child)
-                p_idx = p_idx + 1 to u32
+        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "primary" to cstr) == 0 or strcmp(kind, "collection_item" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0:
+            let count as u32 = ts_node_child_count_ptr(ts_node)
+            var i as u32 = 0 to u32
+            while i < count:
+                var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                ts_node_child_ptr(ts_node, i, ref child)
+                if ts_node_is_named_ptr(ref child):
+                    return self.lower_node(ref child)
+                i = i + 1 to u32
             return None to ptr[Node]
         elif strcmp(kind, "var_decl" to cstr) == 0:
             return self.lower_var_decl(ts_node)
@@ -157,31 +153,15 @@ struct Lowerer:
             return self.lower_macro_decl(ts_node)
         elif strcmp(kind, "macro_invocation" to cstr) == 0:
             return self.lower_macro_invocation(ts_node)
-        elif strcmp(kind, "block" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
-        elif strcmp(kind, "block_body" to cstr) == 0:
+        elif strcmp(kind, "block_body" to cstr) == 0 or strcmp(kind, "block" to cstr) == 0:
             return self.lower_block(ts_node)
-        elif strcmp(kind, "collection_item" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
-        elif strcmp(kind, "statement" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
-        elif strcmp(kind, "expr_stmt" to cstr) == 0:
-            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-            ts_node_child_ptr(ts_node, 0 to u32, ref child)
-            return self.lower_node(ref child)
         elif strcmp(kind, "fun_decl" to cstr) == 0:
             return self.lower_fun_decl(ts_node)
         elif strcmp(kind, "named_function" to cstr) == 0:
             return self.lower_fun_decl(ts_node)
         elif strcmp(kind, "function_definition" to cstr) == 0:
             return self.lower_fun_decl(ts_node)
-        elif strcmp(kind, "import_decl" to cstr) == 0:
+        elif strcmp(kind, "import_decl" to cstr) == 0 or strcmp(kind, "import_stmt" to cstr) == 0:
             return self.lower_import(ts_node)
         elif strcmp(kind, "link_decl" to cstr) == 0:
             return self.lower_import(ts_node)
@@ -203,7 +183,7 @@ struct Lowerer:
             (deref data).val = 0 to f64
             (deref n).data = data to ptr[u8]
             return n
-        elif strcmp(kind, "assignment" to cstr) == 0:
+        elif strcmp(kind, "assignment" to cstr) == 0 or strcmp(kind, "assignment_expression" to cstr) == 0 or strcmp(kind, "assign_stmt" to cstr) == 0 or strcmp(kind, "augmented_assignment" to cstr) == 0:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "class_decl" to cstr) == 0:
             let m as i32 = (deref self).mode to i32
@@ -958,8 +938,10 @@ struct Lowerer:
             let count as i64 = decls.length()
             if count == 1 to i64:
                 let r2 as i32 = printf("Program has 1 declaration!\n" to cstr, "" to cstr)
-                let expr as ptr[Node] = decls[0]
-                if node_kind(expr) == NodeType.BinaryExpr:
+                var expr as ptr[Node] = decls[0]
+                if node_kind(expr) == NodeType.VarDecl:
+                    expr = node_left(expr)
+                if expr != None to ptr[Node] and node_kind(expr) == NodeType.BinaryExpr:
                     let r3 as i32 = printf("Child is BinaryExpr!\n" to cstr, "" to cstr)
                     let r4 as i32 = printf("Operator is: %s\n" to cstr, node_op(expr).data to cstr)
                     
@@ -1023,25 +1005,41 @@ struct Lowerer:
         var is_variadic_fn as bool = False
         var ret_type_annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
         
+        let src_len as usize = (deref self).source_code.len
+        let src_buf as ptr[u8] = (deref self).source_code.data
+        let sb as usize = span.start_byte to usize
+        if src_buf != None to ptr[u8]:
+            var cur_sb as usize = sb
+            while cur_sb < src_len and (src_buf[cur_sb] == 32 to u8 or src_buf[cur_sb] == 9 to u8 or src_buf[cur_sb] == 10 to u8 or src_buf[cur_sb] == 13 to u8):
+                cur_sb = cur_sb + 1 to usize
+            if cur_sb + 6 to usize <= src_len:
+                if src_buf[cur_sb] == 101 to u8 and src_buf[cur_sb + 1 to usize] == 120 to u8 and src_buf[cur_sb + 2 to usize] == 116 to u8 and src_buf[cur_sb + 3 to usize] == 101 to u8 and src_buf[cur_sb + 4 to usize] == 114 to u8 and src_buf[cur_sb + 5 to usize] == 110 to u8:
+                    is_extern_fn = True
+            var prev_b as usize = sb
+            while prev_b > 0 and (src_buf[prev_b - 1] == 32 to u8 or src_buf[prev_b - 1] == 9 to u8 or src_buf[prev_b - 1] == 10 to u8 or src_buf[prev_b - 1] == 13 to u8):
+                prev_b = prev_b - 1 to usize
+            if prev_b >= 6:
+                if src_buf[prev_b - 6] == 101 to u8 and src_buf[prev_b - 5] == 120 to u8 and src_buf[prev_b - 4] == 116 to u8 and src_buf[prev_b - 3] == 101 to u8 and src_buf[prev_b - 2] == 114 to u8 and src_buf[prev_b - 1] == 110 to u8:
+                    is_extern_fn = True
+
         var nf_node as TSNode = deref ts_node
         let kind as cstr = ts_node_type_ptr(ts_node)
-        if strcmp(kind, "fun_decl" to cstr) == 0:
+        if strcmp(kind, "fun_decl" to cstr) == 0 or strcmp(kind, "function_definition" to cstr) == 0 or strcmp(kind, "named_function" to cstr) == 0:
             let count as u32 = ts_node_child_count_ptr(ts_node)
             var i as u32 = 0 to u32
             while i < count:
                 var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                 ts_node_child_ptr(ts_node, i, ref child)
                 let c_type as cstr = ts_node_type_ptr(ref child)
-                if strcmp(c_type, "fun_modifier" to cstr) == 0:
-                    let mod_span as Span = self.get_span(ref child)
-                    let mod_slice as ptr[String] = slice_string((deref self).source_code, mod_span.start_byte to usize, mod_span.end_byte to usize) to ptr[String]
-                    let mod_text as String = deref mod_slice
-                    drop(mod_slice to ptr)
-                    if strcmp(mod_text.data to cstr, "extern" to cstr) == 0:
+                let c_start as usize = ts_node_start_byte_ptr(ref child) to usize
+                let c_end as usize = ts_node_end_byte_ptr(ref child) to usize
+                if c_end - c_start == 6 and src_buf != None to ptr[u8]:
+                    if src_buf[c_start] == 101 to u8 and src_buf[c_start + 1 to usize] == 120 to u8 and src_buf[c_start + 2 to usize] == 116 to u8 and src_buf[c_start + 3 to usize] == 101 to u8 and src_buf[c_start + 4 to usize] == 114 to u8 and src_buf[c_start + 5 to usize] == 110 to u8:
                         is_extern_fn = True
+                elif strcmp(c_type, "fun_modifier" to cstr) == 0 or strcmp(c_type, "extern" to cstr) == 0:
+                    is_extern_fn = True
                 elif strcmp(c_type, "named_function" to cstr) == 0 or strcmp(c_type, "function_definition" to cstr) == 0:
                     nf_node = child
-                    break
                 i = i + 1 to u32
         
         let count as u32 = ts_node_child_count_ptr(ref nf_node)
@@ -1134,9 +1132,6 @@ struct Lowerer:
                 elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
                     body_ast = self.lower_node(ref child)
                 elif strcmp(c_kind, "return_annotation" to cstr) == 0:
-                    // Extract the return type annotation
-                    // The return_annotation has children: 'as'/'->' token, then _type_desc
-                    // _type_desc expands to an identifier (via _base_type), not type_annotation
                     let ra_count as u32 = ts_node_child_count_ptr(ref child)
                     var ra_idx as u32 = 0 to u32
                     var ra_name_start as usize = 0 to usize
@@ -1145,13 +1140,9 @@ struct Lowerer:
                         var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                         ts_node_child_ptr(ref child, ra_idx, ref ra_child)
                         if ts_node_is_named_ptr(ref ra_child):
-                            let ra_kind as cstr = ts_node_type_ptr(ref ra_child)
-                            if strcmp(ra_kind, "identifier" to cstr) == 0:
-                                if ra_name_start == 0 to usize:
-                                    ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
-                                ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
-                            elif strcmp(ra_kind, "generic_params" to cstr) == 0:
-                                ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
+                            if ra_name_start == 0 to usize:
+                                ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
+                            ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
                         ra_idx = ra_idx + 1 to u32
                     if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
                         let ra_slice as ptr[String] = slice_string((deref self).source_code, ra_name_start, ra_name_end) to ptr[String]
@@ -1345,9 +1336,16 @@ struct Lowerer:
         let is_return as bool = text_len >= 6 and text_ptr[span.start_byte to usize] == 114 to u8 and text_ptr[span.start_byte to usize + 1] == 101 to u8 and text_ptr[span.start_byte to usize + 2] == 116 to u8 and text_ptr[span.start_byte to usize + 3] == 117 to u8 and text_ptr[span.start_byte to usize + 4] == 114 to u8 and text_ptr[span.start_byte to usize + 5] == 110 to u8
         
         if not is_return:
+            let is_break as bool = text_len >= 5 and text_ptr[span.start_byte to usize] == 98 to u8 and text_ptr[span.start_byte to usize + 1] == 114 to u8 and text_ptr[span.start_byte to usize + 2] == 101 to u8 and text_ptr[span.start_byte to usize + 3] == 97 to u8 and text_ptr[span.start_byte to usize + 4] == 107 to u8
+            let is_continue as bool = text_len >= 8 and text_ptr[span.start_byte to usize] == 99 to u8 and text_ptr[span.start_byte to usize + 1] == 111 to u8 and text_ptr[span.start_byte to usize + 2] == 110 to u8 and text_ptr[span.start_byte to usize + 3] == 116 to u8
             let n as ptr[Node] = make_node(NodeType.Identifier, span)
             let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
-            (deref data).name = String.make("UNSUPPORTED_JUMP" to cstr)
+            if is_break:
+                (deref data).name = String.make("break" to cstr)
+            elif is_continue:
+                (deref data).name = String.make("continue" to cstr)
+            else:
+                (deref data).name = String.make("UNSUPPORTED_JUMP" to cstr)
             (deref n).data = data to ptr[u8]
             return n
         
@@ -1456,16 +1454,12 @@ struct Lowerer:
             var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
-                let c_kind as cstr = ts_node_type_ptr(ref child)
-                if strcmp(c_kind, "identifier" to cstr) == 0:
-                    if obj_node == None to ptr[Node]:
-                        obj_node = self.lower_node(ref child)
-                    else:
-                        let slice_ptr as ptr[String] = slice_string((deref self).source_code, ts_node_start_byte_ptr(ref child) to usize, ts_node_end_byte_ptr(ref child) to usize) to ptr[String]
-                        prop_name = deref slice_ptr
-                        drop(slice_ptr to ptr)
-                elif strcmp(c_kind, "identifier" to cstr) != 0:
+                if obj_node == None to ptr[Node]:
                     obj_node = self.lower_node(ref child)
+                else:
+                    let slice_ptr as ptr[String] = slice_string((deref self).source_code, ts_node_start_byte_ptr(ref child) to usize, ts_node_end_byte_ptr(ref child) to usize) to ptr[String]
+                    prop_name = deref slice_ptr
+                    drop(slice_ptr to ptr)
             i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.MemberExpr, span)

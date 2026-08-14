@@ -6,7 +6,7 @@ from symbols import Node, NodeType, TypeAnnotation, LanguageMode, Span, make_nod
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
-from sema import Sema
+from sema import Sema, make_scope, make_symbol, Scope, Symbol, SymbolKind
 import types
 from types import Type, TypeKind, make_type
 import typecheck
@@ -20,12 +20,11 @@ fn main() -> i32:
 
     // Test Scenario 1: Correct Scoping & Shadowing
     let src1 as cstr = "let x = 42\nfn f():\n    let x = 10\n    let y = x\n" to cstr
-    let lowerer1 as Lowerer = make_lowerer_mantiq_from_cstr(src1, "test1.nz" to cstr)
-    let root1 as ptr[Node] = lowerer1.lower_source()
+    let lowerer1 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src1, "test1.nz" to cstr)
+    let root1 as ptr[Node] = (deref lowerer1).lower_source()
     
     let s1 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s1 as ptr = memset(s1 to ptr, 0 to i32, 96 to usize)
-    s1("test1.nz" to cstr)
+    (deref s1).init_sema("test1.nz" to cstr)
     
     s1.declare_pass(root1)
     s1.resolve_pass(root1)
@@ -37,12 +36,11 @@ fn main() -> i32:
 
     // Test Scenario 2: Duplicate Declaration Detection
     let src2 as cstr = "let x = 42\nlet x = 10\n" to cstr
-    let lowerer2 as Lowerer = make_lowerer_mantiq_from_cstr(src2, "test2.nz" to cstr)
-    let root2 as ptr[Node] = lowerer2.lower_source()
+    let lowerer2 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src2, "test2.nz" to cstr)
+    let root2 as ptr[Node] = (deref lowerer2).lower_source()
     
     let s2 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s2 as ptr = memset(s2 to ptr, 0 to i32, 96 to usize)
-    s2("test2.nz" to cstr)
+    (deref s2).init_sema("test2.nz" to cstr)
     
     s2.declare_pass(root2)
     s2.resolve_pass(root2)
@@ -54,12 +52,11 @@ fn main() -> i32:
 
     // Test Scenario 3: Undeclared Variable Detection
     let src3 as cstr = "fn g():\n    let y = z\n" to cstr
-    let lowerer3 as Lowerer = make_lowerer_mantiq_from_cstr(src3, "test3.nz" to cstr)
-    let root3 as ptr[Node] = lowerer3.lower_source()
+    let lowerer3 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src3, "test3.nz" to cstr)
+    let root3 as ptr[Node] = (deref lowerer3).lower_source()
     
     let s3 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s3 as ptr = memset(s3 to ptr, 0 to i32, 96 to usize)
-    s3("test3.nz" to cstr)
+    (deref s3).init_sema("test3.nz" to cstr)
     
     s3.declare_pass(root3)
     s3.resolve_pass(root3)
@@ -71,12 +68,11 @@ fn main() -> i32:
 
     // Test Scenario 4: Closure Capture Detection
     let src4 as cstr = "fn outer():\n    let a = 1\n    fn inner():\n        let b = a\n" to cstr
-    let lowerer4 as Lowerer = make_lowerer_mantiq_from_cstr(src4, "test4.nz" to cstr)
-    let root4 as ptr[Node] = lowerer4.lower_source()
+    let lowerer4 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src4, "test4.nz" to cstr)
+    let root4 as ptr[Node] = (deref lowerer4).lower_source()
     
     let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s4 as ptr = memset(s4 to ptr, 0 to i32, 96 to usize)
-    s4("test4.nz" to cstr)
+    (deref s4).init_sema("test4.nz" to cstr)
     
     s4.declare_pass(root4)
     s4.resolve_pass(root4)
@@ -84,12 +80,16 @@ fn main() -> i32:
 
     // Test Scenario 5: Cross-Module Resolution
     let src5 as cstr = "from test_module import pi\nlet res = pi\n" to cstr
-    let lowerer5 as Lowerer = make_lowerer_mantiq_from_cstr(src5, "test5.nz" to cstr)
-    let root5 as ptr[Node] = lowerer5.lower_source()
+    let lowerer5 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src5, "test5.nz" to cstr)
+    let root5 as ptr[Node] = (deref lowerer5).lower_source()
     
     let s5 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s5 as ptr = memset(s5 to ptr, 0 to i32, 96 to usize)
-    s5("test5.nz" to cstr)
+    (deref s5).init_sema("test5.nz" to cstr)
+    
+    let mod_scope as ptr[Scope] = make_scope(None to ptr[Scope], None to ptr[Node])
+    let pi_sym as ptr[Symbol] = make_symbol(String.make("pi" to cstr), SymbolKind.Variable, None to ptr[Node])
+    (deref mod_scope).symbols[String.make("pi" to cstr)] = pi_sym
+    (deref s5).loaded_modules[String.make("test_module" to cstr)] = mod_scope
     
     s5.declare_pass(root5)
     s5.resolve_pass(root5)
@@ -101,28 +101,23 @@ fn main() -> i32:
 
     // Run typecheck on existing ASTs to verify no unexpected crashes
     let tc1 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc1 as ptr = memset(tc1 to ptr, 0 to i32, 24 to usize)
-    tc1(s1)
+    (deref tc1).init_tc(s1)
     tc1.typecheck_node(root1)
 
     let tc2 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc2 as ptr = memset(tc2 to ptr, 0 to i32, 24 to usize)
-    tc2(s2)
+    (deref tc2).init_tc(s2)
     tc2.typecheck_node(root2)
 
     let tc3 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc3 as ptr = memset(tc3 to ptr, 0 to i32, 24 to usize)
-    tc3(s3)
+    (deref tc3).init_tc(s3)
     tc3.typecheck_node(root3)
 
     let tc4 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc4 as ptr = memset(tc4 to ptr, 0 to i32, 24 to usize)
-    tc4(s4)
+    (deref tc4).init_tc(s4)
     tc4.typecheck_node(root4)
 
     let tc5 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc5 as ptr = memset(tc5 to ptr, 0 to i32, 24 to usize)
-    tc5(s5)
+    (deref tc5).init_tc(s5)
     tc5.typecheck_node(root5)
 
     // Test Scenario 6: Type checking & literal inference
@@ -130,13 +125,10 @@ fn main() -> i32:
     let span6 as Span = Span(start_byte = 0 to u32, end_byte = 100 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 1 to u32, end_col = 100 to u32)
 
     let node6 as ptr[Node] = make_node(NodeType.VarDecl, span6)
-    let data6 as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
-    (deref node6).data = data6 to ptr[u8]
     set_node_name(node6, String.make("x" to cstr))
     
     // Type annotation: f64
     let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-    let dummy_memset_annot as ptr = memset(annot to ptr, 0 to i32, 88 to usize)
     (deref annot).name = String.make("f64" to cstr)
     (deref annot).is_ref = False
     (deref annot).is_mut = False
@@ -146,7 +138,6 @@ fn main() -> i32:
     (deref annot).return_type = None to ptr[TypeAnnotation]
     
     let wrapper6 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
-    let dummy_memset_6 as ptr = memset(wrapper6 to ptr, 0 to i32, 24 to usize)
     (deref wrapper6).list = List[Option[ptr[TypeAnnotation]]]()
     let annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper6).list
     (deref annots).append(Some(annot))
@@ -154,21 +145,17 @@ fn main() -> i32:
     
     // Initializer literal: 42
     let init6 as ptr[Node] = make_node(NodeType.NumberLiteral, span6)
-    let init6_data as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
-    (deref init6).data = init6_data to ptr[u8]
     set_node_val(init6, 42 to f64)
     set_node_left(node6, init6)
     
     let s6 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s6 as ptr = memset(s6 to ptr, 0 to i32, 96 to usize)
-    s6("test6.nz" to cstr)
+    (deref s6).init_sema("test6.nz" to cstr)
     (deref s6).mode = LanguageMode.Mantiq
     s6.declare_pass(node6)
     s6.resolve_pass(node6)
     
     let tc6 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc6 as ptr = memset(tc6 to ptr, 0 to i32, 24 to usize)
-    tc6(s6)
+    (deref tc6).init_tc(s6)
     let tc_res as ptr[Type] = tc6.typecheck_node(node6)
     
     // Verify that the inferred type of the initializer literal was coerced to F64
@@ -182,17 +169,12 @@ fn main() -> i32:
     let span7 as Span = Span(start_byte = 0 to u32, end_byte = 200 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 10 to u32, end_col = 0 to u32)
 
     let template as ptr[Node] = make_node(NodeType.FunDecl, span7)
-    let template_data as ptr[FunDeclData] = make[FunDeclData](1 to usize) to ptr[FunDeclData]
-    (deref template).data = template_data to ptr[u8]
     set_node_name(template, String.make("min" to cstr))
     
     let p1 as ptr[Node] = make_node(NodeType.VarDecl, span7)
-    let p1_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
-    (deref p1).data = p1_data to ptr[u8]
     set_node_name(p1, String.make("a" to cstr))
     
     let p1_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-    let dummy_memset_p1_annot as ptr = memset(p1_annot to ptr, 0 to i32, 88 to usize)
     (deref p1_annot).name = String.make("T" to cstr)
     (deref p1_annot).is_ref = False
     (deref p1_annot).is_mut = False
@@ -202,19 +184,15 @@ fn main() -> i32:
     (deref p1_annot).return_type = None to ptr[TypeAnnotation]
     
     let wrapper7_1 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
-    let dummy_memset_7_1 as ptr = memset(wrapper7_1 to ptr, 0 to i32, 24 to usize)
     (deref wrapper7_1).list = List[Option[ptr[TypeAnnotation]]]()
     let p1_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_1).list
     (deref p1_annots).append(Some(p1_annot))
     set_node_type_annots(p1, p1_annots)
 
     let p2 as ptr[Node] = make_node(NodeType.VarDecl, span7)
-    let p2_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
-    (deref p2).data = p2_data to ptr[u8]
     set_node_name(p2, String.make("b" to cstr))
     
     let wrapper7_2 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
-    let dummy_memset_7_2 as ptr = memset(wrapper7_2 to ptr, 0 to i32, 24 to usize)
     (deref wrapper7_2).list = List[Option[ptr[TypeAnnotation]]]()
     let p2_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_2).list
     (deref p2_annots).append(Some(p1_annot)) // Reuse T annotation
@@ -226,14 +204,12 @@ fn main() -> i32:
     set_node_params(template, params7)
 
     let s7 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s7 as ptr = memset(s7 to ptr, 0 to i32, 96 to usize)
-    s7("test7.nz" to cstr)
+    (deref s7).init_sema("test7.nz" to cstr)
     s7.declare_pass(template)
     s7.resolve_pass(template)
 
     let tc7 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc7 as ptr = memset(tc7 to ptr, 0 to i32, 24 to usize)
-    tc7(s7)
+    (deref tc7).init_tc(s7)
     tc7.typecheck_node(template)
 
     // Now, monomorphize min with T = i32
@@ -258,18 +234,16 @@ fn main() -> i32:
 
     // Test Scenario 12: Literal Type Inference (destination type known)
     let src12 as cstr = "fn f(x as f64):\n    let a = 1\nfn main():\n    f(42)\n    let y as f64 = 0.0\n    y = 24\n" to cstr
-    let lowerer12 as Lowerer = make_lowerer_mantiq_from_cstr(src12, "test12.nz" to cstr)
-    let root12 as ptr[Node] = lowerer12.lower_source()
+    let lowerer12 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src12, "test12.nz" to cstr)
+    let root12 as ptr[Node] = (deref lowerer12).lower_source()
     
     let s12 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_memset_s12 as ptr = memset(s12 to ptr, 0 to i32, 96 to usize)
-    s12("test12.nz" to cstr)
+    (deref s12).init_sema("test12.nz" to cstr)
     s12.declare_pass(root12)
     s12.resolve_pass(root12)
     
     let tc12 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_memset_tc12 as ptr = memset(tc12 to ptr, 0 to i32, 24 to usize)
-    tc12(s12)
+    (deref tc12).init_tc(s12)
     tc12.typecheck_node(root12)
     
     // Let's traverse to find the CallExpr "f(42)" and Assignment "y = 24"

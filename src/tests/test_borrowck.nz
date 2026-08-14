@@ -18,15 +18,13 @@ extern fn printf(format as cstr, val as cstr) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
 fn main() -> i32:
-    extern fn memset(s as ptr, c as i32, n as usize) as ptr
-
     // Test Scenario 1: Move on assignment, then use → use-after-move error
     let src1 as cstr = "fn f():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
-    let lowerer1 as Lowerer = make_lowerer_mantiq_from_cstr(src1, "test_borrow1.nz" to cstr)
+    let lowerer1 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src1, "test_borrow1.nz" to cstr)
     let root1 as ptr[Node] = lowerer1.lower_source()
     
     let bc1 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc1()
+    bc1.init_bc()
     (deref bc1).current_file = String.make("test_borrow1.nz" to cstr)
     bc1.walk_ast(root1)
     
@@ -37,11 +35,11 @@ fn main() -> i32:
 
     // Test Scenario 2: No move violation - clean usage
     let src2 as cstr = "fn g():\n    let x = 42\n    let y = x\n" to cstr
-    let lowerer2 as Lowerer = make_lowerer_mantiq_from_cstr(src2, "test_borrow2.nz" to cstr)
+    let lowerer2 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src2, "test_borrow2.nz" to cstr)
     let root2 as ptr[Node] = lowerer2.lower_source()
     
     let bc2 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc2()
+    bc2.init_bc()
     (deref bc2).current_file = String.make("test_borrow2.nz" to cstr)
     bc2.walk_ast(root2)
     
@@ -52,11 +50,11 @@ fn main() -> i32:
 
     // Test Scenario 3: Move on assignment, then reassignment (should be ok - new owned value)
     let src3 as cstr = "fn h():\n    let x = 42\n    let y = x\n    let x = 10\n" to cstr
-    let lowerer3 as Lowerer = make_lowerer_mantiq_from_cstr(src3, "test_borrow3.nz" to cstr)
+    let lowerer3 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src3, "test_borrow3.nz" to cstr)
     let root3 as ptr[Node] = lowerer3.lower_source()
     
     let bc3 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc3()
+    bc3.init_bc()
     (deref bc3).current_file = String.make("test_borrow3.nz" to cstr)
     bc3.walk_ast(root3)
     
@@ -68,22 +66,20 @@ fn main() -> i32:
     // Test Scenario 4: Copy type (i32) - multiple uses should NOT trigger move error
     // Run type checker so inferred_type is set on nodes
     let src4 as cstr = "fn k():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
-    let lowerer4 as Lowerer = make_lowerer_mantiq_from_cstr(src4, "test_borrow4.nz" to cstr)
+    let lowerer4 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src4, "test_borrow4.nz" to cstr)
     let root4 as ptr[Node] = lowerer4.lower_source()
     
     let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_s4 as ptr = memset(s4 to ptr, 0 to i32, 96 to usize)
-    s4("test_borrow4.nz" to cstr)
+    s4.init_sema("test_borrow4.nz" to cstr)
     s4.declare_pass(root4)
     s4.resolve_pass(root4)
     
     let tc4 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_tc4 as ptr = memset(tc4 to ptr, 0 to i32, 24 to usize)
-    tc4(s4)
+    tc4.init_tc(s4)
     tc4.typecheck_node(root4)
     
     let bc4 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc4()
+    bc4.init_bc()
     (deref bc4).current_file = String.make("test_borrow4.nz" to cstr)
     bc4.walk_ast(root4)
     
@@ -94,22 +90,20 @@ fn main() -> i32:
 
     // Test Scenario 13: Auto-drops injection
     let src13 as cstr = "fn f():\n    let x as String = String()\n    let y as i32 = 42\n" to cstr
-    let lowerer13 as Lowerer = make_lowerer_mantiq_from_cstr(src13, "test_borrow13.nz" to cstr)
+    let lowerer13 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src13, "test_borrow13.nz" to cstr)
     let root13 as ptr[Node] = lowerer13.lower_source()
     
     let s13 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_s13 as ptr = memset(s13 to ptr, 0 to i32, 96 to usize)
-    s13("test_borrow13.nz" to cstr)
+    s13.init_sema("test_borrow13.nz" to cstr)
     s13.declare_pass(root13)
     s13.resolve_pass(root13)
     
     let tc13 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_tc13 as ptr = memset(tc13 to ptr, 0 to i32, 24 to usize)
-    tc13(s13)
+    tc13.init_tc(s13)
     tc13.typecheck_node(root13)
     
     let bc13 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc13()
+    bc13.init_bc()
     (deref bc13).sema = s13
     (deref bc13).current_file = String.make("test_borrow13.nz" to cstr)
     bc13.walk_ast(root13)
@@ -133,22 +127,20 @@ fn main() -> i32:
 
     // Test Scenario 14: Context manager with-stmt
     let src14 as cstr = "fn open() as i32:\n    return 0\n\nfn f():\n    with open() as resource:\n        let x = 10\n" to cstr
-    let lowerer14 as Lowerer = make_lowerer_mantiq_from_cstr(src14, "test_borrow14.nz" to cstr)
+    let lowerer14 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src14, "test_borrow14.nz" to cstr)
     let root14 as ptr[Node] = lowerer14.lower_source()
     
     let s14 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dummy_s14 as ptr = memset(s14 to ptr, 0 to i32, 96 to usize)
-    s14("test_borrow14.nz" to cstr)
+    s14.init_sema("test_borrow14.nz" to cstr)
     s14.declare_pass(root14)
     s14.resolve_pass(root14)
     
     let tc14 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dummy_tc14 as ptr = memset(tc14 to ptr, 0 to i32, 24 to usize)
-    tc14(s14)
+    tc14.init_tc(s14)
     tc14.typecheck_node(root14)
     
     let bc14 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    bc14()
+    bc14.init_bc()
     (deref bc14).sema = s14
     (deref bc14).current_file = String.make("test_borrow14.nz" to cstr)
     bc14.walk_ast(root14)

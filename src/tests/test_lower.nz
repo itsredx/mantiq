@@ -2,7 +2,7 @@
 import std.collections
 from std.string import String
 from std.collections import List, Dict
-from ast import Node, LanguageMode
+from symbols import Node, LanguageMode
 from lower import Lowerer, MacroDef
 
 // ── Main Entry ─────────────────────────────────────────────────────────
@@ -11,7 +11,7 @@ fn main():
     let path as String = String.make("test.nz" to cstr)
 
     // Instantiate Lowerer
-    var lower as Lowerer = Lowerer(source = source, mode = LanguageMode.Nizam, path = path)
+    var lower as Lowerer = Lowerer(source_code = source, mode = LanguageMode.Nizam, file_path = path, macros = Dict[String, MacroDef](), macro_args = Dict[String, ptr[Node]](), next_hygiene_id = 1 to i64)
 
     // Verify fields
     print("Lowerer fields verified:")

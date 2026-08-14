@@ -816,6 +816,13 @@ struct TypeChecker:
                                     ret_type = make_type(TypeKind.I64)
                                 elif strcmp(coll_mname.data to cstr, "clear") == 0:
                                     ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "get") == 0:
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        ret_type = (deref coll_recv_t).payload
+                                    elif coll_recv_t != None to ptr[Type] and (deref coll_recv_t).kind == TypeKind.RawPointer and (deref coll_recv_t).payload != None to ptr[Type] and (deref (deref coll_recv_t).payload).payload != None to ptr[Type]:
+                                        ret_type = (deref (deref coll_recv_t).payload).payload
+                                    else:
+                                        ret_type = make_type(TypeKind.Any)
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.String:

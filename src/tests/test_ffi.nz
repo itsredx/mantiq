@@ -35,15 +35,14 @@ fn main():
         return
 
     // Get root node (via pointer parameter)
-    let ctx as List[u32, 4] = [0 to u32, 0 to u32, 0 to u32, 0 to u32]
-    var root as TSNode = TSNode(context = ctx, id = None to ptr, tree = None to ptr)
+    var root as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
     ts_tree_root_node_ptr(tree, ref root)
 
     // Get type of root node
     let root_type as cstr = ts_node_type_ptr(ref root)
     
     print("Parsed root node successfully!")
-    print(String(root_type))
+    print(root_type)
 
     // Clean up parser
     ts_parser_delete(parser)
