@@ -9,7 +9,6 @@ Lib dir:  /home/red-x/projects/desktop/mantiq_nizam/mantiq
 zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
 zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
 zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
-/home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_types.nz:333:17: error: type mismatch in variable initialization
 Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_types.nz -> /tmp/test_types
 [RUNNING]  /tmp/test_types ...
 === Running test_types.nz (Type System Parity Tests) ===
@@ -80,7 +79,9 @@ AST instantiation successful!
 
 ------------------------------------------------------------
 [BUILDING] src/tests/test_error.nz ...
-/home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_error.nz:265:25: error: type mismatch in variable initialization
+zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
 Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_error.nz -> /tmp/test_error
 [RUNNING]  /tmp/test_error ...
 === Running error.nz Unit Tests ===

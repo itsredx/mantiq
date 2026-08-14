@@ -371,7 +371,7 @@ struct TypeChecker:
                 return res
             return True
             
-        if fk == TypeKind.Unknown or tk == TypeKind.Unknown or fk == TypeKind.Error or tk == TypeKind.Error:
+        if fk == TypeKind.Unknown or tk == TypeKind.Unknown or fk == TypeKind.Error or tk == TypeKind.Error or fk == TypeKind.Void or tk == TypeKind.Void:
             return True
             
         // Any conversions
