@@ -1,0 +1,150 @@
+============================================================
+    Mantiq / Nizam Self-Hosted Compiler Test Suite Runner   
+============================================================
+Compiler: /home/red-x/projects/desktop/mantiq_nizam/mantiq/nizam
+Lib dir:  /home/red-x/projects/desktop/mantiq_nizam/mantiq
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_types.nz ...
+zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
+/home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_types.nz:333:17: error: type mismatch in variable initialization
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_types.nz -> /tmp/test_types
+[RUNNING]  /tmp/test_types ...
+=== Running test_types.nz (Type System Parity Tests) ===
+
+Test 1 (Signed Integers): PASSED!
+Test 2 (Unsigned Integers): PASSED!
+Test 3 (Floats): PASSED!
+Test 4 (Strings and Chars): PASSED!
+Test 5 (Special and Quantum Types): PASSED!
+Test 6 (Copy/Move Classification): PASSED!
+Test 7 (Pointer and Composite Constructors): PASSED!
+
+[PASS] All test_types.nz tests passed successfully!
+[SUCCESS]  src/tests/test_types.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_abi.nz ...
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_abi.nz -> /tmp/test_abi
+[RUNNING]  /tmp/test_abi ...
+=== Running test_abi.nz (ABI & Layout Parity Tests) ===
+
+Test 1 (Target Constants): PASSED!
+Test 2 (Primitive Layout Sizes and Alignment): PASSED!
+Test 3 (String and Collection Sizes): PASSED!
+i32: mode=0 is_struct=0
+opt: mode=2 is_struct=1
+res: mode=1 is_struct=1
+Test 4 (Argument ABI Classification): PASSED!
+Test 5 (Return ABI Classification): PASSED!
+
+[PASS] All test_abi.nz tests passed successfully!
+[SUCCESS]  src/tests/test_abi.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_std.nz ...
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_std.nz -> /tmp/test_std
+[RUNNING]  /tmp/test_std ...
+=== Running test_std.nz (Standard Library Parity Tests) ===
+
+Test 1 (String Creation, Length & Comparison): PASSED!
+Test 2 (List Operations - Append, Length, Indexing): PASSED!
+Test 3 (List Iteration & Sum Aggregation): PASSED!
+Test 4 (Memory Allocation - make & drop): PASSED!
+Test 5 (String Buffer Construction): PASSED!
+
+[PASS] All test_std.nz tests passed successfully!
+[SUCCESS]  src/tests/test_std.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_magic.nz ...
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_magic.nz -> /tmp/test_magic
+[RUNNING]  /tmp/test_magic ...
+=== Running test_magic.nz (Magic Methods & Operator Overload Tests) ===
+
+Test 1 (Vector Addition __add__): PASSED!
+Test 2 (Vector Subtraction __sub__): PASSED!
+Test 3 (Vector Dot Product & Length Squared): PASSED!
+
+[PASS] All test_magic.nz tests passed successfully!
+[SUCCESS]  src/tests/test_magic.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_ast.nz ...
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_ast.nz -> /tmp/test_ast
+[RUNNING]  /tmp/test_ast ...
+AST instantiation successful!
+[SUCCESS]  src/tests/test_ast.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_error.nz ...
+/home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_error.nz:265:25: error: type mismatch in variable initialization
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_error.nz -> /tmp/test_error
+[RUNNING]  /tmp/test_error ...
+=== Running error.nz Unit Tests ===
+
+  \x1b[38;2;88;91;112m╭─ \x1b[38;2;243;139;168m\x1b[1m ✖ERROR[E0308] \x1b[0m: \x1b[1mmismatched types: expected `i32`, found `String`\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:2:24\x1b[0m
+  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 2\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m      let count as i32 = "42"
+  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m                         \x1b[38;2;243;139;168m\x1b[1m▲▲▲▲ \x1b[38;2;243;139;168mmismatched types: expected `i32`, found `String`\x1b[0m
+  \x1b[38;2;88;91;112m├─ \x1b[38;2;249;226;175m💡 Why this happened \x1b[38;2;88;91;112m────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mNizam requires strict type compatibility during variable assignment.\x1b[0m
+  \x1b[38;2;88;91;112m├─ \x1b[38;2;148;226;213m⚡ How to fix \x1b[38;2;88;91;112m───────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mTo convert a `String` to `i32`, call `.parse_i32()` on the string value.\x1b[0m
+  \x1b[38;2;88;91;112m├─ \x1b[38;2;250;179;135m🔧 Suggested Fix \x1b[38;2;88;91;112m────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m    Replace string literal with integer literal \x1b[38;2;250;179;135m➜\x1b[0m  `\x1b[38;2;166;227;161m42\x1b[0m`
+  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+
+  \x1b[38;2;88;91;112m╭─ \x1b[38;2;250;179;135m\x1b[1m ⚡WARNING[W0012] \x1b[0m: \x1b[1munused variable `count`\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:3:12\x1b[0m
+  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 3\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m      return count
+  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m             \x1b[38;2;250;179;135m\x1b[1m▲▲▲▲▲ \x1b[38;2;250;179;135munused variable `count`\x1b[0m
+  \x1b[38;2;88;91;112m├─ \x1b[38;2;180;190;254m📌 Note \x1b[38;2;88;91;112m───────────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mIf this is intended, prefix variable with an underscore: `_count`\x1b[0m
+  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+
+  \x1b[38;2;88;91;112m╭─ \x1b[38;2;203;166;247m\x1b[1m 💥PANIC! \x1b[0m: \x1b[1mindex out of bounds: the len is 3 but the index is 5\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:1:2\x1b[0m
+  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 1\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m  fn calculate_total(items as List[Item]) as i32:
+  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m   \x1b[38;2;203;166;247m\x1b[1m▲▲▲▲▲▲▲▲▲ \x1b[38;2;203;166;247mindex out of bounds: the len is 3 but the index is 5\x1b[0m
+  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+
+
+[PASS] error.nz Unit Tests Completed Successfully! (Errors: 1, Warnings: 1, Panics: 1)
+[SUCCESS]  src/tests/test_error.nz PASSED!
+
+------------------------------------------------------------
+[BUILDING] src/tests/test_macro.nz ...
+Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_macro.nz -> /tmp/test_macro
+[RUNNING]  /tmp/test_macro ...
+Error: 'class' is a Mantiq-only feature. Use 'struct' in Nizam strict mode.
+Nizam strict mode successfully rejected class definition!
+Mantiq mode successfully allowed class definition!
+Declarations count: 4
+Decl index node_type: twice
+Decl index node_type: make_local
+Decl index node_type: res
+res VarDecl variable name: res
+twice!(5) expanded to BinaryExpr!
+twice!(5) arguments successfully substituted (5 + 5)!
+Decl index node_type: res2
+res2 VarDecl variable name: res2
+make_local!(10) expanded to BlockStmt!
+Mangled local variable name in block: y_mac2
+Hygienic macro expansion and mangling verified successfully!
+[SUCCESS]  src/tests/test_macro.nz PASSED!
+
+============================================================
+                TEST SUITE SUMMARY RESULTS                  
+============================================================
+Total Suites:  7
+Passed Suites: 7
+Failed Suites: 0
+
+>>> ALL SELF-HOSTED COMPILER TEST SUITES PASSED (100% PARITY) <<<
+============================================================

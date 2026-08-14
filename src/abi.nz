@@ -1,0 +1,48 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.string
+from std.string import String
+from types import Type, TypeKind
+from layout import Target, get_size
+
+// ── PassMode ─────────────────────────────────────────────────────────────
+enum PassMode:
+    Direct
+    ByVal
+    Coerce
+
+// ── ABISignature ─────────────────────────────────────────────────────────
+struct ABISignature:
+    public var mode as PassMode
+    public var llvm_type as String
+    public var is_struct as bool
+
+// ── ABI Classification Functions ─────────────────────────────────────────
+fn get_arg_abi(t as ptr[Type], target as Target) as ABISignature:
+    if t == None to ptr[Type]:
+        return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task:
+        return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
+    
+    let sz as usize = get_size(t, target)
+    if sz <= 8:
+        return ABISignature(mode = PassMode.Coerce, llvm_type = String.make("i64" to cstr), is_struct = True)
+    elif sz <= 16:
+        return ABISignature(mode = PassMode.Coerce, llvm_type = String.make("{ i64, i64 }" to cstr), is_struct = True)
+    else:
+        return ABISignature(mode = PassMode.ByVal, llvm_type = String.make("ptr" to cstr), is_struct = True)
+
+fn get_ret_abi(t as ptr[Type], target as Target) as ABISignature:
+    if t == None to ptr[Type]:
+        return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task:
+        return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
+    
+    let sz as usize = get_size(t, target)
+    if sz <= 8:
+        return ABISignature(mode = PassMode.Coerce, llvm_type = String.make("i64" to cstr), is_struct = True)
+    elif sz <= 16:
+        return ABISignature(mode = PassMode.Coerce, llvm_type = String.make("{ i64, i64 }" to cstr), is_struct = True)
+    else:
+        return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = True)

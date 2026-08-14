@@ -1,0 +1,86 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+from types import Type, TypeKind, make_type, make_ptr_type
+from layout import Target, Endianness, get_size, get_align
+from abi import PassMode, ABISignature, get_arg_abi, get_ret_abi
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+// ── Main Unit Test Runner ────────────────────────────────────────────────
+fn main() -> i32:
+    let _h as i32 = printf("=== Running test_abi.nz (ABI & Layout Parity Tests) ===\n\n" to cstr)
+
+    let target as Target = Target.x86_64_linux()
+
+    // ── Test 1: Target Constants ──────────────────────────────────────────
+    if target.pointer_size == 8 to usize and target.endianness == Endianness.Little:
+        let _r as i32 = printf("Test 1 (Target Constants): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 1 (Target Constants): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 2: Primitive Layout Sizes & Alignments ────────────────────────
+    let t_i32 as ptr[Type] = make_type(TypeKind.I32)
+    let t_f64 as ptr[Type] = make_type(TypeKind.F64)
+    let t_bool as ptr[Type] = make_type(TypeKind.Boolean)
+    let t_ptr as ptr[Type] = make_ptr_type(t_i32)
+
+    let sz_i32 as usize = get_size(t_i32, target)
+    let al_i32 as usize = get_align(t_i32, target)
+    let sz_f64 as usize = get_size(t_f64, target)
+    let al_f64 as usize = get_align(t_f64, target)
+    let sz_bool as usize = get_size(t_bool, target)
+    let al_bool as usize = get_align(t_bool, target)
+    let sz_ptr as usize = get_size(t_ptr, target)
+
+    if sz_i32 == 4 to usize and al_i32 == 4 to usize and sz_f64 == 8 to usize and al_f64 == 8 to usize and sz_bool == 1 to usize and al_bool == 1 to usize and sz_ptr == 8 to usize:
+        let _r as i32 = printf("Test 2 (Primitive Layout Sizes and Alignment): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 2 (Primitive Layout Sizes and Alignment): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 3: String & Collection Sizes ─────────────────────────────────
+    let t_str as ptr[Type] = make_type(TypeKind.String)
+    let t_opt as ptr[Type] = make_type(TypeKind.Option)
+    let t_res as ptr[Type] = make_type(TypeKind.Result)
+
+    let sz_str as usize = get_size(t_str, target)
+    let sz_opt as usize = get_size(t_opt, target)
+    let sz_res as usize = get_size(t_res, target)
+
+    if sz_str == 24 to usize and sz_opt == 16 to usize and sz_res == 24 to usize:
+        let _r as i32 = printf("Test 3 (String and Collection Sizes): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 3 (String and Collection Sizes): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 4: Argument ABI Classification ───────────────────────────────
+    let abi_i32 as ABISignature = get_arg_abi(t_i32, target)
+    let abi_opt as ABISignature = get_arg_abi(t_opt, target)
+    let abi_res as ABISignature = get_arg_abi(t_res, target)
+
+    let _d1 as i32 = printf("i32: mode=%d is_struct=%d\n" to cstr, abi_i32.mode to i32, abi_i32.is_struct to i32)
+    let _d2 as i32 = printf("opt: mode=%d is_struct=%d\n" to cstr, abi_opt.mode to i32, abi_opt.is_struct to i32)
+    let _d3 as i32 = printf("res: mode=%d is_struct=%d\n" to cstr, abi_res.mode to i32, abi_res.is_struct to i32)
+    if abi_i32.mode == PassMode.Direct and not abi_i32.is_struct and abi_opt.mode == PassMode.Coerce and abi_opt.is_struct and abi_res.mode == PassMode.ByVal and abi_res.is_struct:
+        let _r as i32 = printf("Test 4 (Argument ABI Classification): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 4 (Argument ABI Classification): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 5: Return ABI Classification ─────────────────────────────────
+    let ret_f64 as ABISignature = get_ret_abi(t_f64, target)
+    let ret_opt as ABISignature = get_ret_abi(t_opt, target)
+    let ret_res as ABISignature = get_ret_abi(t_res, target)
+
+    if ret_f64.mode == PassMode.Direct and not ret_f64.is_struct and ret_opt.mode == PassMode.Coerce and ret_opt.is_struct and ret_res.mode == PassMode.Direct and ret_res.is_struct:
+        let _r as i32 = printf("Test 5 (Return ABI Classification): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 5 (Return ABI Classification): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_abi.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

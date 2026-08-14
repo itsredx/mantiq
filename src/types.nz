@@ -65,6 +65,7 @@ struct Type:
 
 // ── Helper Constructors ──────────────────────────────────────────────────
 extern fn memset(ptr as ptr[u8], val as i32, num as usize) as ptr[u8]
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
 fn make_type(kind as TypeKind) as ptr[Type]:
     let t as ptr[Type] = make[u8](256 to usize) to ptr[Type]
@@ -159,6 +160,13 @@ fn is_copy_type(t as ptr[Type]) as bool:
             return is_copy_type(pt)
         return True
     if k == TypeKind.Enum:
+        return True
+    if k == TypeKind.Struct:
+        let sn as ptr[u8] = (deref t).name.data
+        if sn != None to ptr[u8]:
+            let s_cstr as cstr = sn to cstr
+            if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0:
+                return False
         return True
     return False
 

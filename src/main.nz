@@ -138,8 +138,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     let base as usize = argv to usize
     let offset as usize = idx to usize * 8 to usize
-    let ptr_addr as ptr = (base + offset) to ptr
-    return deref (ptr_addr to ptr[cstr])
+    let ptr_addr as ptr[cstr] = (base + offset) to ptr[cstr]
+    return deref ptr_addr
 
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     var default_mode as i32 = LanguageMode.Mantiq to i32

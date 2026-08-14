@@ -35,4 +35,6 @@ extern fn ts_node_start_row_ptr(node as ptr[TSNode]) as u32
 extern fn ts_node_start_col_ptr(node as ptr[TSNode]) as u32
 extern fn ts_node_end_row_ptr(node as ptr[TSNode]) as u32
 extern fn ts_node_end_col_ptr(node as ptr[TSNode]) as u32
+extern fn ts_node_child_by_field_name_ptr(node as ptr[TSNode], name as cstr, name_length as u32, out_node as ptr[TSNode])
+extern fn ts_node_is_null_ptr(node as ptr[TSNode]) as bool
 

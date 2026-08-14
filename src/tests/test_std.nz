@@ -1,0 +1,86 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+import std.string
+import std.mem
+from std.string import String
+from std.collections import List, Dict
+from std.mem import make, drop
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strlen(s as cstr) as usize
+
+// ── Main Standard Library Test Runner ─────────────────────────────────────
+fn main() -> i32:
+    let _h as i32 = printf("=== Running test_std.nz (Standard Library Parity Tests) ===\n\n" to cstr)
+
+    // ── Test 1: String Creation, Length & Comparison ─────────────────────
+    let s1 as String = String.make("Hello" to cstr)
+    let s2 as String = String.make("World" to cstr)
+    let s3 as String = String.make("Hello" to cstr)
+
+    if s1.len == 5 to usize and s2.len == 5 to usize and strcmp(s1.data to cstr, s3.data to cstr) == 0 and strcmp(s1.data to cstr, s2.data to cstr) != 0:
+        let _r as i32 = printf("Test 1 (String Creation, Length & Comparison): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 1 (String Creation, Length & Comparison): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 2: List Operations (Append, Length, Indexing) ────────────────
+    let list as List[i64] = List[i64]()
+    list.append(10 to i64)
+    list.append(20 to i64)
+    list.append(30 to i64)
+
+    if list.length() == 3 to i64 and list[0 to i64] == 10 to i64 and list[1 to i64] == 20 to i64 and list[2 to i64] == 30 to i64:
+        let _r as i32 = printf("Test 2 (List Operations - Append, Length, Indexing): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 2 (List Operations - Append, Length, Indexing): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 3: List Iteration & Aggregation ──────────────────────────────
+    var sum as i64 = 0 to i64
+    var idx as i64 = 0 to i64
+    let cnt as i64 = list.length()
+    while idx < cnt:
+        sum = sum + list[idx]
+        idx = idx + 1 to i64
+
+    if sum == 60 to i64:
+        let _r as i32 = printf("Test 3 (List Iteration & Sum Aggregation): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 3 (List Iteration & Sum Aggregation): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 4: Dynamic Memory Allocation (make & drop) ──────────────────
+    let raw_buf as ptr[i32] = make[i32](4 to usize) to ptr[i32]
+    raw_buf[0] = 100 to i32
+    raw_buf[1] = 200 to i32
+    raw_buf[2] = 300 to i32
+    raw_buf[3] = 400 to i32
+
+    if raw_buf[0] == 100 to i32 and raw_buf[1] == 200 to i32 and raw_buf[2] == 300 to i32 and raw_buf[3] == 400 to i32:
+        drop(raw_buf to ptr)
+        let _r as i32 = printf("Test 4 (Memory Allocation - make & drop): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 4 (Memory Allocation - make & drop): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 5: String Buffer Manipulation ────────────────────────────────
+    let str_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+    str_buf[0] = 78 to u8  // 'N'
+    str_buf[1] = 105 to u8 // 'i'
+    str_buf[2] = 122 to u8 // 'z'
+    str_buf[3] = 97 to u8  // 'a'
+    str_buf[4] = 109 to u8 // 'm'
+    str_buf[5] = 0 to u8
+
+    let nizam_str as String = String(data = str_buf, len = 5 to usize, capacity = 16 to usize)
+    if nizam_str.len == 5 to usize and strcmp(nizam_str.data to cstr, "Nizam" to cstr) == 0:
+        let _r as i32 = printf("Test 5 (String Buffer Construction): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 5 (String Buffer Construction): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_std.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

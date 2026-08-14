@@ -1,11 +1,12 @@
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
-from symbols import Node, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_val
+from symbols import Node, NodeType, node_kind, node_name_ptr, node_left, node_right, node_body, node_declarations, node_val
 from std.collections import List
+from std.string import String
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn printf(format as cstr, val as cstr) as i32
 
-fn main():
+fn main() -> i32:
     let src_nizam as cstr = "class MyClass:\n    var val as i32\n" to cstr
     var lower_nizam as ptr[Lowerer] = make_lowerer_from_cstr(src_nizam, "test_nizam.nz" to cstr)
     let root_nizam as ptr = (deref lower_nizam).lower_source() to ptr
@@ -28,7 +29,7 @@ fn main():
     let root_macro_ast as ptr = (deref lower_macro).lower_source() to ptr
     if root_macro_ast == None:
         let r3 as i32 = printf("FAILED: CST to AST lowering with macros returned null!\n" to cstr, "" to cstr)
-        return
+        return 1 to i32
 
     let root as ptr[Node] = root_macro_ast to ptr[Node]
     let decls_list as List[ptr[Node]] = node_declarations(root)
@@ -36,7 +37,7 @@ fn main():
 
     if decls_len == 0:
         let r4 as i32 = printf("FAILED: root declarations is empty!\n" to cstr, "" to cstr)
-        return
+        return 1 to i32
 
     let r_len as i32 = printf("Declarations count: %d\n" to cstr, decls_len to cstr)
 
@@ -44,14 +45,15 @@ fn main():
     while idx < decls_len:
         let decl as ptr[Node] = decls_list[idx]
         let nt as NodeType = node_kind(decl)
-        let name_info as String = node_name(decl)
-        let r_info as i32 = printf("Decl index node_type: %s\n" to cstr, name_info.data to cstr)
+        let name_p as ptr[String] = node_name_ptr(decl)
+        var name_cstr as cstr = "" to cstr
+        if name_p != None to ptr[String] and (deref name_p).data != None:
+            name_cstr = (deref name_p).data to cstr
+        let r_info as i32 = printf("Decl index node_type: %s\n" to cstr, name_cstr)
 
         if idx == 2 to i64:
             if nt == NodeType.VarDecl:
-                let name_s as String = node_name(decl)
-                let name as cstr = name_s.data to cstr
-                let r_v1 as i32 = printf("res VarDecl variable name: %s\n" to cstr, name)
+                let r_v1 as i32 = printf("res VarDecl variable name: %s\n" to cstr, name_cstr)
 
                 let init_node as ptr[Node] = node_left(decl)
 
@@ -65,9 +67,7 @@ fn main():
 
         elif idx == 3 to i64:
             if nt == NodeType.VarDecl:
-                let name_s2 as String = node_name(decl)
-                let name as cstr = name_s2.data to cstr
-                let r_v4 as i32 = printf("res2 VarDecl variable name: %s\n" to cstr, name)
+                let r_v4 as i32 = printf("res2 VarDecl variable name: %s\n" to cstr, name_cstr)
 
                 let init_node as ptr[Node] = node_left(decl)
 
@@ -82,19 +82,27 @@ fn main():
                         let block_decl1 as ptr[Node] = block_decls[1]
 
                         if node_kind(block_decl0) == NodeType.VarDecl:
-                            let local_var_s as String = node_name(block_decl0)
-                            let local_var_name as cstr = local_var_s.data to cstr
+                            let local_var_p as ptr[String] = node_name_ptr(block_decl0)
+                            var local_var_name as cstr = "" to cstr
+                            if local_var_p != None to ptr[String] and (deref local_var_p).data != None:
+                                local_var_name = (deref local_var_p).data to cstr
                             let r_v6 as i32 = printf("Mangled local variable name in block: %s\n" to cstr, local_var_name)
 
                             if node_kind(block_decl1) == NodeType.BinaryExpr:
                                 let left as ptr[Node] = node_left(block_decl1)
                                 let right as ptr[Node] = node_right(block_decl1)
                                 if left != None to ptr[Node] and right != None to ptr[Node]:
-                                    let l_s as String = node_name(left)
-                                    let r_s as String = node_name(right)
-                                    let l_name as cstr = l_s.data to cstr
-                                    let r_name as cstr = r_s.data to cstr
+                                    let l_p as ptr[String] = node_name_ptr(left)
+                                    let r_p as ptr[String] = node_name_ptr(right)
+                                    var l_name as cstr = "" to cstr
+                                    var r_name as cstr = "" to cstr
+                                    if l_p != None to ptr[String] and (deref l_p).data != None:
+                                        l_name = (deref l_p).data to cstr
+                                    if r_p != None to ptr[String] and (deref r_p).data != None:
+                                        r_name = (deref r_p).data to cstr
 
                                     if strcmp(local_var_name, l_name) == 0 and strcmp(local_var_name, r_name) == 0:
                                         let r_v8 as i32 = printf("Hygienic macro expansion and mangling verified successfully!\n" to cstr, "" to cstr)
         idx = idx + 1 to i64
+
+    return 0 to i32

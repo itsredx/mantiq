@@ -1,0 +1,60 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.string
+from std.string import String
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+// ── Struct with Magic & Operator Methods ─────────────────────────────────
+struct Vec2:
+    public var x as i64
+    public var y as i64
+
+    public fn __add__(self as ptr[Vec2], other as Vec2) as Vec2:
+        return Vec2(x = (deref self).x + other.x, y = (deref self).y + other.y)
+
+    public fn __sub__(self as ptr[Vec2], other as Vec2) as Vec2:
+        return Vec2(x = (deref self).x - other.x, y = (deref self).y - other.y)
+
+    public fn dot(self as ptr[Vec2], other as Vec2) as i64:
+        return (deref self).x * other.x + (deref self).y * other.y
+
+    public fn length_squared(self as ptr[Vec2]) as i64:
+        return (deref self).x * (deref self).x + (deref self).y * (deref self).y
+
+// ── Main Magic Methods Test Runner ────────────────────────────────────────
+fn main() -> i32:
+    let _h as i32 = printf("=== Running test_magic.nz (Magic Methods & Operator Overload Tests) ===\n\n" to cstr)
+
+    // ── Test 1: Vector Addition Method Overload ──────────────────────────
+    let v1 as Vec2 = Vec2(x = 10 to i64, y = 20 to i64)
+    let v2 as Vec2 = Vec2(x = 5 to i64, y = 15 to i64)
+    let v_add as Vec2 = v1.__add__(v2)
+
+    if v_add.x == 15 to i64 and v_add.y == 35 to i64:
+        let _r as i32 = printf("Test 1 (Vector Addition __add__): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 1 (Vector Addition __add__): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 2: Vector Subtraction Method Overload ───────────────────────
+    let v_sub as Vec2 = v1.__sub__(v2)
+
+    if v_sub.x == 5 to i64 and v_sub.y == 5 to i64:
+        let _r as i32 = printf("Test 2 (Vector Subtraction __sub__): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 2 (Vector Subtraction __sub__): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 3: Vector Dot Product & Geometric Length ────────────────────
+    let d as i64 = v1.dot(v2)
+    let lsq as i64 = v1.length_squared()
+
+    if d == 350 to i64 and lsq == 500 to i64:
+        let _r as i32 = printf("Test 3 (Vector Dot Product & Length Squared): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 3 (Vector Dot Product & Length Squared): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_magic.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

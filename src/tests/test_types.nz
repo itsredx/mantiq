@@ -1,0 +1,134 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+from std.option import Option
+from std.mem import make
+from symbols import Span, TypeAnnotation, Node, Symbol, SymbolKind, Scope
+from sema import Sema
+from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, is_copy_type, is_move_type
+from typecheck import TypeChecker
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Helper Annotation Creator ────────────────────────────────────────────
+fn make_annot(name_str as cstr) as ptr[TypeAnnotation]:
+    let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+    (deref annot).name = String.make(name_str)
+    (deref annot).is_ref = False
+    (deref annot).is_mut = False
+    (deref annot).lifetime = None to Option[String]
+    (deref annot).generics = None to Option[List[TypeAnnotation]]
+    return annot
+
+// ── Main Unit Test Runner ────────────────────────────────────────────────
+fn main() -> i32:
+    let _h as i32 = printf("=== Running test_types.nz (Type System Parity Tests) ===\n\n" to cstr)
+    
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(None to ptr[Sema])
+
+    // ── Test 1: Signed Integer Types ──────────────────────────────────────
+    let t_i8 as ptr[Type] = tc.resolve_type_annotation(make_annot("i8" to cstr))
+    let t_i16 as ptr[Type] = tc.resolve_type_annotation(make_annot("i16" to cstr))
+    let t_i32 as ptr[Type] = tc.resolve_type_annotation(make_annot("i32" to cstr))
+    let t_i64 as ptr[Type] = tc.resolve_type_annotation(make_annot("i64" to cstr))
+    let t_i128 as ptr[Type] = tc.resolve_type_annotation(make_annot("i128" to cstr))
+    let t_isize as ptr[Type] = tc.resolve_type_annotation(make_annot("isize" to cstr))
+
+    if (deref t_i8).kind == TypeKind.I8 and (deref t_i16).kind == TypeKind.I16 and (deref t_i32).kind == TypeKind.I32 and (deref t_i64).kind == TypeKind.I64 and (deref t_i128).kind == TypeKind.I128 and (deref t_isize).kind == TypeKind.ISize:
+        let _r as i32 = printf("Test 1 (Signed Integers): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 1 (Signed Integers): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 2: Unsigned Integer Types ────────────────────────────────────
+    let t_u8 as ptr[Type] = tc.resolve_type_annotation(make_annot("u8" to cstr))
+    let t_byte as ptr[Type] = tc.resolve_type_annotation(make_annot("byte" to cstr))
+    let t_u16 as ptr[Type] = tc.resolve_type_annotation(make_annot("u16" to cstr))
+    let t_u32 as ptr[Type] = tc.resolve_type_annotation(make_annot("u32" to cstr))
+    let t_u64 as ptr[Type] = tc.resolve_type_annotation(make_annot("u64" to cstr))
+    let t_u128 as ptr[Type] = tc.resolve_type_annotation(make_annot("u128" to cstr))
+    let t_usize as ptr[Type] = tc.resolve_type_annotation(make_annot("usize" to cstr))
+
+    if (deref t_u8).kind == TypeKind.U8 and (deref t_byte).kind == TypeKind.U8 and (deref t_u16).kind == TypeKind.U16 and (deref t_u32).kind == TypeKind.U32 and (deref t_u64).kind == TypeKind.U64 and (deref t_u128).kind == TypeKind.U128 and (deref t_usize).kind == TypeKind.USize:
+        let _r as i32 = printf("Test 2 (Unsigned Integers): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 2 (Unsigned Integers): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 3: Floating-Point Types ──────────────────────────────────────
+    let t_f16 as ptr[Type] = tc.resolve_type_annotation(make_annot("f16" to cstr))
+    let t_bf16 as ptr[Type] = tc.resolve_type_annotation(make_annot("bf16" to cstr))
+    let t_f32 as ptr[Type] = tc.resolve_type_annotation(make_annot("f32" to cstr))
+    let t_f64 as ptr[Type] = tc.resolve_type_annotation(make_annot("f64" to cstr))
+    let t_f128 as ptr[Type] = tc.resolve_type_annotation(make_annot("f128" to cstr))
+
+    if (deref t_f16).kind == TypeKind.F16 and (deref t_bf16).kind == TypeKind.BFloat16 and (deref t_f32).kind == TypeKind.F32 and (deref t_f64).kind == TypeKind.F64 and (deref t_f128).kind == TypeKind.F128:
+        let _r as i32 = printf("Test 3 (Floats): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 3 (Floats): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 4: String & Character Types ──────────────────────────────────
+    let t_bool as ptr[Type] = tc.resolve_type_annotation(make_annot("bool" to cstr))
+    let t_char as ptr[Type] = tc.resolve_type_annotation(make_annot("char" to cstr))
+    let t_str as ptr[Type] = tc.resolve_type_annotation(make_annot("String" to cstr))
+    let t_cstr as ptr[Type] = tc.resolve_type_annotation(make_annot("cstr" to cstr))
+    let t_utf8 as ptr[Type] = tc.resolve_type_annotation(make_annot("Utf8Str" to cstr))
+
+    if (deref t_bool).kind == TypeKind.Boolean and (deref t_char).kind == TypeKind.Char and (deref t_str).kind == TypeKind.String and (deref t_cstr).kind == TypeKind.CStr and (deref t_utf8).kind == TypeKind.Utf8Str:
+        let _r as i32 = printf("Test 4 (Strings and Chars): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 4 (Strings and Chars): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 5: Special & Quantum Types ───────────────────────────────────
+    let t_void as ptr[Type] = tc.resolve_type_annotation(make_annot("void" to cstr))
+    let t_any as ptr[Type] = tc.resolve_type_annotation(make_annot("Any" to cstr))
+    let t_qbit as ptr[Type] = tc.resolve_type_annotation(make_annot("qbit" to cstr))
+    let t_qreg as ptr[Type] = tc.resolve_type_annotation(make_annot("qreg" to cstr))
+
+    if (deref t_void).kind == TypeKind.Void and (deref t_any).kind == TypeKind.Any and (deref t_qbit).kind == TypeKind.QBit and (deref t_qreg).kind == TypeKind.QReg:
+        let _r as i32 = printf("Test 5 (Special and Quantum Types): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 5 (Special and Quantum Types): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 6: Copy/Move Classification ──────────────────────────────────
+    let is_i32_copy as bool = is_copy_type(t_i32)
+    let is_f64_copy as bool = is_copy_type(t_f64)
+    let is_bool_copy as bool = is_copy_type(t_bool)
+    let is_cstr_copy as bool = is_copy_type(t_cstr)
+
+    let t_list_raw as ptr[Type] = make_type(TypeKind.List)
+    let is_list_move as bool = is_move_type(t_list_raw)
+
+    let t_dict_raw as ptr[Type] = make_type(TypeKind.Dict)
+    let is_dict_move as bool = is_move_type(t_dict_raw)
+
+    if is_i32_copy and is_f64_copy and is_bool_copy and is_cstr_copy and is_list_move and is_dict_move:
+        let _r as i32 = printf("Test 6 (Copy/Move Classification): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 6 (Copy/Move Classification): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 7: Pointer & Composite Constructors ──────────────────────────
+    let t_ptr as ptr[Type] = make_ptr_type(t_i32)
+    let t_struct as ptr[Type] = make_struct_type(String.make("Point" to cstr))
+    let t_enum as ptr[Type] = make_enum_type(String.make("Color" to cstr))
+    let t_union as ptr[Type] = make_union_type(String.make("Data" to cstr))
+
+    let is_ptr_copy as bool = is_copy_type(t_ptr)
+    let is_enum_copy as bool = is_copy_type(t_enum)
+
+    if (deref t_ptr).kind == TypeKind.RawPointer and (deref (deref t_ptr).payload).kind == TypeKind.I32 and (deref t_struct).kind == TypeKind.Struct and (deref t_enum).kind == TypeKind.Enum and (deref t_union).kind == TypeKind.Union and is_ptr_copy and is_enum_copy:
+        let _r as i32 = printf("Test 7 (Pointer and Composite Constructors): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 7 (Pointer and Composite Constructors): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_types.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

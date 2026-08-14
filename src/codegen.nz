@@ -108,14 +108,16 @@ fn option_unwrap_ptr(opt as ptr[OptionLayout]) as ptr[Node]:
     return vp to ptr[Node]
 
 fn get_node_decl(decls as ptr[List[ptr[Node]]], index as i64) as ptr[Node]:
-    let items_addr as usize = deref (decls to ptr[usize])
+    let decls_p as ptr[usize] = decls to ptr[usize]
+    let items_addr as usize = deref decls_p
     let idx_us as usize = index to usize
     let offset as usize = idx_us * 8 to usize
     let elem_addr as ptr[ptr[Node]] = (items_addr + offset) to ptr[ptr[Node]]
     return deref elem_addr
 
 fn get_string_at(drops as ptr[List[String]], index as i64) as String:
-    let items_addr as usize = deref (drops to ptr[usize])
+    let drops_p as ptr[usize] = drops to ptr[usize]
+    let items_addr as usize = deref drops_p
     let idx_us as usize = index to usize
     let offset as usize = idx_us * 24 to usize
     let elem_addr as ptr[String] = (items_addr + offset) to ptr[String]
@@ -143,9 +145,9 @@ fn set_dict_drops(dict_ptr as ptr[Dict[usize, List[String]]], addr as usize, dro
     (deref dict_ptr)[addr] = drops
 
 fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
-    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0:
+    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0:
         return String.make("{ ptr, i64, i64 }" to cstr)
-    elif strcmp(f_cstr, "kind" to cstr) == 0 or strcmp(f_cstr, "mode" to cstr) == 0 or strcmp(f_cstr, "severity" to cstr) == 0 or strcmp(f_cstr, "error_count" to cstr) == 0 or strcmp(f_cstr, "warning_count" to cstr) == 0 or strcmp(f_cstr, "panic_count" to cstr) == 0 or strcmp(f_cstr, "temp_counter" to cstr) == 0 or strcmp(f_cstr, "label_counter" to cstr) == 0 or strcmp(f_cstr, "string_counter" to cstr) == 0 or strcmp(f_cstr, "closure_counter" to cstr) == 0:
+    elif strcmp(f_cstr, "kind" to cstr) == 0 or strcmp(f_cstr, "mode" to cstr) == 0 or strcmp(f_cstr, "severity" to cstr) == 0 or strcmp(f_cstr, "error_count" to cstr) == 0 or strcmp(f_cstr, "warning_count" to cstr) == 0 or strcmp(f_cstr, "panic_count" to cstr) == 0 or strcmp(f_cstr, "temp_counter" to cstr) == 0 or strcmp(f_cstr, "label_counter" to cstr) == 0 or strcmp(f_cstr, "string_counter" to cstr) == 0 or strcmp(f_cstr, "closure_counter" to cstr) == 0 or strcmp(f_cstr, "endianness" to cstr) == 0 or strcmp(f_cstr, "scope_depth" to cstr) == 0:
         return String.make("i32" to cstr)
     elif strcmp(f_cstr, "span" to cstr) == 0 or strcmp(f_cstr, "primary_span" to cstr) == 0:
         return String.make("%Span" to cstr)
@@ -153,11 +155,11 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
         return String.make("{ i8, ptr, i64, i64 }" to cstr)
     elif strcmp(f_cstr, "val" to cstr) == 0:
         return String.make("double" to cstr)
-    elif strcmp(f_cstr, "is_async" to cstr) == 0 or strcmp(f_cstr, "is_extern" to cstr) == 0 or strcmp(f_cstr, "is_variadic" to cstr) == 0 or strcmp(f_cstr, "is_mut" to cstr) == 0 or strcmp(f_cstr, "is_context_manager" to cstr) == 0 or strcmp(f_cstr, "use_color" to cstr) == 0 or strcmp(f_cstr, "has_value" to cstr) == 0 or strcmp(f_cstr, "padding" to cstr) == 0 or strcmp(f_cstr, "is_ref" to cstr) == 0 or strcmp(f_cstr, "has_val" to cstr) == 0:
+    elif strcmp(f_cstr, "is_async" to cstr) == 0 or strcmp(f_cstr, "is_extern" to cstr) == 0 or strcmp(f_cstr, "is_variadic" to cstr) == 0 or strcmp(f_cstr, "is_mut" to cstr) == 0 or strcmp(f_cstr, "is_context_manager" to cstr) == 0 or strcmp(f_cstr, "use_color" to cstr) == 0 or strcmp(f_cstr, "has_value" to cstr) == 0 or strcmp(f_cstr, "padding" to cstr) == 0 or strcmp(f_cstr, "is_ref" to cstr) == 0 or strcmp(f_cstr, "has_val" to cstr) == 0 or strcmp(f_cstr, "is_struct" to cstr) == 0:
         return String.make("i8" to cstr)
     elif strcmp(f_cstr, "node_kind" to cstr) == 0 or strcmp(f_cstr, "start_byte" to cstr) == 0 or strcmp(f_cstr, "end_byte" to cstr) == 0 or strcmp(f_cstr, "start_row" to cstr) == 0 or strcmp(f_cstr, "start_col" to cstr) == 0 or strcmp(f_cstr, "end_row" to cstr) == 0 or strcmp(f_cstr, "end_col" to cstr) == 0:
         return String.make("i32" to cstr)
-    elif strcmp(f_cstr, "next_hygiene_id" to cstr) == 0 or strcmp(f_cstr, "len" to cstr) == 0 or strcmp(f_cstr, "cap" to cstr) == 0 or strcmp(f_cstr, "capacity" to cstr) == 0 or strcmp(f_cstr, "length" to cstr) == 0 or strcmp(f_cstr, "count" to cstr) == 0 or strcmp(f_cstr, "size" to cstr) == 0 or strcmp(f_cstr, "index" to cstr) == 0:
+    elif strcmp(f_cstr, "x" to cstr) == 0 or strcmp(f_cstr, "y" to cstr) == 0 or strcmp(f_cstr, "z" to cstr) == 0 or strcmp(f_cstr, "w" to cstr) == 0 or strcmp(f_cstr, "next_hygiene_id" to cstr) == 0 or strcmp(f_cstr, "len" to cstr) == 0 or strcmp(f_cstr, "cap" to cstr) == 0 or strcmp(f_cstr, "capacity" to cstr) == 0 or strcmp(f_cstr, "length" to cstr) == 0 or strcmp(f_cstr, "count" to cstr) == 0 or strcmp(f_cstr, "size" to cstr) == 0 or strcmp(f_cstr, "index" to cstr) == 0 or strcmp(f_cstr, "pointer_size" to cstr) == 0:
         return String.make("i64" to cstr)
     elif strcmp(f_cstr, "left" to cstr) == 0 or strcmp(f_cstr, "right" to cstr) == 0 or strcmp(f_cstr, "body" to cstr) == 0 or strcmp(f_cstr, "cond" to cstr) == 0 or strcmp(f_cstr, "then_branch" to cstr) == 0 or strcmp(f_cstr, "inferred_type" to cstr) == 0 or strcmp(f_cstr, "data" to cstr) == 0 or strcmp(f_cstr, "buffer" to cstr) == 0 or strcmp(f_cstr, "return_type_annot" to cstr) == 0 or strcmp(f_cstr, "type_annots" to cstr) == 0 or strcmp(f_cstr, "payload" to cstr) == 0 or strcmp(f_cstr, "return_type" to cstr) == 0 or strcmp(f_cstr, "sema" to cstr) == 0 or strcmp(f_cstr, "current_scope" to cstr) == 0 or strcmp(f_cstr, "global_scope" to cstr) == 0 or strcmp(f_cstr, "current_function_return" to cstr) == 0 or strcmp(f_cstr, "inferred_return_type" to cstr) == 0 or strcmp(f_cstr, "decl_node" to cstr) == 0 or strcmp(f_cstr, "root_ast" to cstr) == 0 or strcmp(f_cstr, "parent" to cstr) == 0 or strcmp(f_cstr, "closure_node" to cstr) == 0 or strcmp(f_cstr, "resolved_type" to cstr) == 0 or strcmp(f_cstr, "current_struct_type" to cstr) == 0 or strcmp(f_cstr, "val_ptr" to cstr) == 0:
         return String.make("ptr" to cstr)
@@ -176,11 +178,20 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "1" to ptr[u8]
         elif strcmp(v_cstr, "Dropped" to cstr) == 0:
             return "2" to ptr[u8]
+        elif strcmp(v_cstr, "Borrowed" to cstr) == 0:
+            return "3" to ptr[u8]
     elif strcmp(e_cstr, "Endianness" to cstr) == 0:
         if strcmp(v_cstr, "Little" to cstr) == 0:
             return "0" to ptr[u8]
         elif strcmp(v_cstr, "Big" to cstr) == 0:
             return "1" to ptr[u8]
+    elif strcmp(e_cstr, "PassMode" to cstr) == 0:
+        if strcmp(v_cstr, "Direct" to cstr) == 0:
+            return "0" to ptr[u8]
+        elif strcmp(v_cstr, "ByVal" to cstr) == 0:
+            return "1" to ptr[u8]
+        elif strcmp(v_cstr, "Coerce" to cstr) == 0:
+            return "2" to ptr[u8]
     elif strcmp(e_cstr, "SymbolKind" to cstr) == 0:
         if strcmp(v_cstr, "Variable" to cstr) == 0:
             return "0" to ptr[u8]
@@ -204,10 +215,16 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "0" to ptr[u8]
         elif strcmp(v_cstr, "Warning" to cstr) == 0:
             return "1" to ptr[u8]
+        elif strcmp(v_cstr, "Note" to cstr) == 0:
+            return "2" to ptr[u8]
+        elif strcmp(v_cstr, "Help" to cstr) == 0:
+            return "3" to ptr[u8]
+        elif strcmp(v_cstr, "Panic" to cstr) == 0:
+            return "4" to ptr[u8]
+        elif strcmp(v_cstr, "ICE" to cstr) == 0:
+            return "5" to ptr[u8]
         elif strcmp(v_cstr, "Info" to cstr) == 0:
             return "2" to ptr[u8]
-        elif strcmp(v_cstr, "Note" to cstr) == 0:
-            return "3" to ptr[u8]
     elif strcmp(e_cstr, "NodeType" to cstr) == 0:
         if strcmp(v_cstr, "Program" to cstr) == 0:
             return "0" to ptr[u8]
@@ -510,17 +527,28 @@ fn is_struct_byval(t as String) as bool:
     if deref (t.data to ptr[u8]) == 123 to u8:
         return True
     if deref (t.data to ptr[u8]) == 37 to u8:
-        if strcmp(tc, "%NodeType" to cstr) == 0 or strcmp(tc, "%TypeKind" to cstr) == 0 or strcmp(tc, "%LanguageMode" to cstr) == 0 or strcmp(tc, "%SymbolKind" to cstr) == 0 or strcmp(tc, "%LabelKind" to cstr) == 0 or strcmp(tc, "%Severity" to cstr) == 0 or strcmp(tc, "%ObjectState" to cstr) == 0 or strcmp(tc, "%Endianness" to cstr) == 0:
+        if strcmp(tc, "%NodeType" to cstr) == 0 or strcmp(tc, "%TypeKind" to cstr) == 0 or strcmp(tc, "%LanguageMode" to cstr) == 0 or strcmp(tc, "%SymbolKind" to cstr) == 0 or strcmp(tc, "%LabelKind" to cstr) == 0 or strcmp(tc, "%Severity" to cstr) == 0 or strcmp(tc, "%ObjectState" to cstr) == 0 or strcmp(tc, "%Endianness" to cstr) == 0 or strcmp(tc, "%PassMode" to cstr) == 0:
             return False
         return True
     return False
 
 fn cond_llvm_type(node as ptr[Node]) as String:
-    if node_kind(node) == NodeType.UnaryExpr:
+    if node == None to ptr[Node]:
+        return String.make("i1" to cstr)
+    let nt as NodeType = node_kind(node)
+    if nt == NodeType.BinaryExpr:
+        let op as String = node_op(node)
+        if op.data != None to ptr[u8]:
+            let op_c as cstr = op.data to cstr
+            if strcmp(op_c, "==" to cstr) == 0 or strcmp(op_c, "!=" to cstr) == 0 or strcmp(op_c, "<" to cstr) == 0 or strcmp(op_c, ">" to cstr) == 0 or strcmp(op_c, "<=" to cstr) == 0 or strcmp(op_c, ">=" to cstr) == 0 or strcmp(op_c, "and" to cstr) == 0 or strcmp(op_c, "or" to cstr) == 0:
+                return String.make("i1" to cstr)
+    elif nt == NodeType.UnaryExpr:
         let uop_str as String = node_op(node)
         if uop_str.data != None to ptr[u8]:
             if strcmp(uop_str.data to cstr, "not" to cstr) == 0:
                 return String.make("i1" to cstr)
+    elif nt == NodeType.BooleanLiteral:
+        return String.make("i1" to cstr)
     var t as String = type_to_llvm(node_inferred_type(node))
     if node_kind(node) == NodeType.MemberExpr:
         let m_nm as String = node_name(node)
@@ -557,7 +585,7 @@ fn cond_llvm_type(node as ptr[Node]) as String:
                 t = String.make("i32" to cstr)
             elif strcmp(c_n, "strlen" to cstr) == 0 or strcmp(c_n, "ftell" to cstr) == 0 or strcmp(c_n, "length" to cstr) == 0 or strcmp(c_n, "len" to cstr) == 0:
                 t = String.make("i64" to cstr)
-    if strcmp(t.data to cstr, "{ ptr, ptr }" to cstr) == 0 or t.len == 0 to usize:
+    if strcmp(t.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(t.data to cstr, "void" to cstr) == 0 or t.len == 0 to usize:
         t = String.make("i8" to cstr)
     return t
 
@@ -576,6 +604,7 @@ struct LLVMCodegen:
     public var auto_drops as Dict[usize, List[String]]
     public var var_slots as Dict[String, String]
     public var var_counts as Dict[String, i32]
+    public var var_types as Dict[String, String]
     public var defined_functions as Dict[String, bool]
     public var program_functions as Dict[String, bool]
     public var current_return_type as String
@@ -599,6 +628,7 @@ struct LLVMCodegen:
         (deref self).auto_drops = Dict[usize, List[String]]()
         (deref self).var_slots = Dict[String, String]()
         (deref self).var_counts = Dict[String, i32]()
+        (deref self).var_types = Dict[String, String]()
         (deref self).defined_functions = Dict[String, bool]()
         (deref self).program_functions = Dict[String, bool]()
         (deref self).current_return_type = String.make("void" to cstr)
@@ -792,7 +822,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr }")
         self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr, i64, i64 }, ptr, ptr }")
         self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32 }")
-        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr, i64, i64 }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("ImportDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr, i64, i64 } }")
@@ -1210,6 +1240,28 @@ struct LLVMCodegen:
         let params as List[ptr[Node]] = node_params(node)
         let body as ptr[Node] = node_body(node)
         var ret_type as String = type_to_llvm(node_inferred_type(node))
+        let fn_t as ptr[Type] = node_inferred_type(node)
+        if fn_t != None to ptr[Type]:
+            if (deref fn_t).kind == TypeKind.Function and (deref fn_t).return_type != None to ptr[Type]:
+                ret_type = type_to_llvm((deref fn_t).return_type)
+        let r_annot as ptr[TypeAnnotation] = node_return_type_annot(node)
+        if (ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0 or strcmp(ret_type.data to cstr, "i64" to cstr) == 0) and r_annot != None to ptr[TypeAnnotation]:
+            if (deref r_annot).name.data != None to ptr[u8] and (deref r_annot).name.len > 0 to usize:
+                let rn as cstr = (deref r_annot).name.data to cstr
+                extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                if strcmp(rn, "cstr" to cstr) == 0 or strcmp(rn, "ptr" to cstr) == 0 or strncmp(rn, "ptr[" to cstr, 4 to usize) == 0:
+                    ret_type = String.make("ptr" to cstr)
+                elif strcmp(rn, "i32" to cstr) == 0 or strcmp(rn, "u32" to cstr) == 0:
+                    ret_type = String.make("i32" to cstr)
+                elif strcmp(rn, "i64" to cstr) == 0 or strcmp(rn, "u64" to cstr) == 0 or strcmp(rn, "usize" to cstr) == 0:
+                    ret_type = String.make("i64" to cstr)
+                elif strcmp(rn, "bool" to cstr) == 0 or strcmp(rn, "u8" to cstr) == 0 or strcmp(rn, "i8" to cstr) == 0:
+                    ret_type = String.make("i8" to cstr)
+                elif strncmp(rn, "Dict" to cstr, 4 to usize) == 0 or strncmp(rn, "List" to cstr, 4 to usize) == 0 or strncmp(rn, "String" to cstr, 6 to usize) == 0:
+                    ret_type = String.make("{ ptr, i64, i64 }" to cstr)
+        if ret_type.len == 0 to usize:
+            ret_type = String.make("void" to cstr)
+
         if strcmp(name.data to cstr, "memset" to cstr) == 0:
             ret_type = String.make("ptr" to cstr)
 
@@ -1250,8 +1302,6 @@ struct LLVMCodegen:
         let param_buf as StringBuilder = StringBuilder.make()
         let p_count as i64 = params.length()
         var p_idx as i64 = 0 to i64
-        let p_types_list as List[String] = List[String]()
-        let p_is_byval_list as List[bool] = List[bool]()
         while p_idx < p_count:
             let param as ptr[Node] = get_node_decl(ref params, p_idx)
             var param_type as String = type_to_llvm(node_inferred_type(param))
@@ -1266,13 +1316,19 @@ struct LLVMCodegen:
                         if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
                             let pa_name as cstr = (deref pa).name.data to cstr
                             extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                            if strcmp(pa_name, "ptr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                            if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
                                 param_type = String.make("ptr" to cstr)
+                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                param_type = String.make("i32" to cstr)
+                            elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
+                                param_type = String.make("i64" to cstr)
+                            elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
+                                param_type = String.make("i8" to cstr)
                             elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
                                 param_type = String.make("{ ptr, i64, i64 }" to cstr)
+            if param_type.len == 0 to usize:
+                param_type = String.make("i64" to cstr)
             let is_bv as bool = is_struct_byval(param_type)
-            p_types_list.append(param_type)
-            p_is_byval_list.append(is_bv)
             if is_bv:
                 append_cstr(ref param_buf, "ptr %")
             else:
@@ -1298,6 +1354,7 @@ struct LLVMCodegen:
         (deref self).current_return_type = ret_type
         (deref self).var_slots = Dict[String, String]()
         (deref self).var_counts = Dict[String, i32]()
+        (deref self).var_types = Dict[String, String]()
 
         p_idx = 0 to i64
         while p_idx < p_count:
@@ -1305,8 +1362,32 @@ struct LLVMCodegen:
             let p_name as String = node_name(p)
             set_dict_i32(ref (deref self).var_counts, p_name, 1 to i32)
             set_dict_str(ref (deref self).var_slots, p_name, p_name)
-            let p_type as String = p_types_list[p_idx]
-            let is_bv_p as bool = p_is_byval_list[p_idx]
+            var p_type as String = type_to_llvm(node_inferred_type(p))
+            let p_ann_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
+            if p_ann_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                let p_anns as List[Option[ptr[TypeAnnotation]]] = deref p_ann_ptr
+                if p_anns.length() > 0 to i64:
+                    let p_opt as Option[ptr[TypeAnnotation]] = p_anns[0 to i64]
+                    let p_opt_ref as ptr[OptionLayout] = (ref p_opt) to ptr[OptionLayout]
+                    if option_has_value(p_opt_ref):
+                        let pa as ptr[TypeAnnotation] = option_unwrap_ptr(p_opt_ref) to ptr[TypeAnnotation]
+                        if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
+                            let pa_name as cstr = (deref pa).name.data to cstr
+                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                            if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                                p_type = String.make("ptr" to cstr)
+                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                p_type = String.make("i32" to cstr)
+                            elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
+                                p_type = String.make("i64" to cstr)
+                            elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
+                                p_type = String.make("i8" to cstr)
+                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
+                                p_type = String.make("{ ptr, i64, i64 }" to cstr)
+            if p_type.len == 0 to usize:
+                p_type = String.make("i64" to cstr)
+            set_dict_str(ref (deref self).var_types, p_name, p_type)
+            let is_bv_p as bool = is_struct_byval(p_type)
             append_cstr(ref (deref self).main_out, "  %")
             append_str(ref (deref self).main_out, p_name)
             append_cstr(ref (deref self).main_out, " = alloca ")
@@ -1355,8 +1436,62 @@ struct LLVMCodegen:
 
     public fn emit_var_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name_ptr as ptr[String] = node_name_ptr(node)
-        let var_type as String = type_to_llvm(node_inferred_type(node))
+        var var_type as String = type_to_llvm(node_inferred_type(node))
         let init_node as ptr[Node] = node_left(node)
+
+        if strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize:
+            let v_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+            if v_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                let v_annots as List[Option[ptr[TypeAnnotation]]] = deref v_annots_ptr
+                if v_annots.length() > 0 to i64:
+                    let opt as Option[ptr[TypeAnnotation]] = v_annots[0 to i64]
+                    let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                    if option_has_value(opt_ref):
+                        let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
+                        if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
+                            let pa_name as cstr = (deref pa).name.data to cstr
+                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                            if strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
+                                var_type = String.make("i64" to cstr)
+                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0:
+                                var_type = String.make("i32" to cstr)
+                            elif strcmp(pa_name, "i16" to cstr) == 0 or strcmp(pa_name, "u16" to cstr) == 0:
+                                var_type = String.make("i16" to cstr)
+                            elif strcmp(pa_name, "i8" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "byte" to cstr) == 0:
+                                var_type = String.make("i8" to cstr)
+                            elif strcmp(pa_name, "f64" to cstr) == 0:
+                                var_type = String.make("double" to cstr)
+                            elif strcmp(pa_name, "f32" to cstr) == 0:
+                                var_type = String.make("float" to cstr)
+                            elif strcmp(pa_name, "ptr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                                var_type = String.make("ptr" to cstr)
+                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
+                                var_type = String.make("{ ptr, i64, i64 }" to cstr)
+                            else:
+                                var_type = String.make(pa_name)
+                                if (deref var_type.data) != 37 to u8 and strcmp(pa_name, "ptr" to cstr) != 0 and (deref var_type.data) != 105 to u8:
+                                    let s_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                                    let _ as i32 = sprintf(s_buf, "%%%s" to cstr, pa_name)
+                                    var_type = String.make(s_buf to cstr)
+        if (strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize) and init_node != None to ptr[Node]:
+            if node_kind(init_node) == NodeType.CallExpr:
+                let c_node as ptr[Node] = node_left(init_node)
+                if c_node != None to ptr[Node]:
+                    let c_name_ptr as ptr[String] = node_name_ptr(c_node)
+                    if c_name_ptr != None to ptr[String] and (deref c_name_ptr).data != None:
+                        let cn as cstr = (deref c_name_ptr).data to cstr
+                        if strcmp(cn, "get_size" to cstr) == 0 or strcmp(cn, "get_align" to cstr) == 0 or strcmp(cn, "strlen" to cstr) == 0 or strcmp(cn, "length" to cstr) == 0 or strcmp(cn, "len" to cstr) == 0 or strcmp(cn, "ftell" to cstr) == 0:
+                            var_type = String.make("i64" to cstr)
+                        elif strcmp(cn, "strcmp" to cstr) == 0 or strcmp(cn, "printf" to cstr) == 0 or strcmp(cn, "node_kind" to cstr) == 0:
+                            var_type = String.make("i32" to cstr)
+            elif node_kind(init_node) == NodeType.CastExpr:
+                let c_op as String = node_op(init_node)
+                if c_op.data != None:
+                    let c_op_c as cstr = c_op.data to cstr
+                    if strcmp(c_op_c, "usize" to cstr) == 0 or strcmp(c_op_c, "isize" to cstr) == 0 or strcmp(c_op_c, "i64" to cstr) == 0 or strcmp(c_op_c, "u64" to cstr) == 0:
+                        var_type = String.make("i64" to cstr)
+                    elif strcmp(c_op_c, "i32" to cstr) == 0 or strcmp(c_op_c, "u32" to cstr) == 0 or strcmp(c_op_c, "char" to cstr) == 0:
+                        var_type = String.make("i32" to cstr)
 
         var var_name as String = String.make("" to cstr)
         if name_ptr != None to ptr[String]:
@@ -1378,6 +1513,7 @@ struct LLVMCodegen:
             let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, var_name.data to cstr, count)
             slot_name = String.make(slot_buf to cstr)
         set_dict_str(ref (deref self).var_slots, var_name, slot_name)
+        set_dict_str(ref (deref self).var_types, var_name, var_type)
 
         append_cstr(ref (deref self).main_out, "  %")
         append_str(ref (deref self).main_out, slot_name)
@@ -1540,6 +1676,13 @@ struct LLVMCodegen:
                 let tk as TypeKind = (deref inf_t).kind
                 if tk == TypeKind.F32 or tk == TypeKind.F64:
                     is_float = True
+            if not is_float and ((deref self).current_return_type.len > 0 to usize and (strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "float" to cstr) == 0)):
+                is_float = True
+            let s_raw as String = node_str_val(node)
+            if not is_float and s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
+                extern fn strstr(haystack as cstr, needle as cstr) as cstr
+                if strstr(s_raw.data to cstr, "." to cstr) != None to cstr:
+                    is_float = True
             let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
             if is_float:
                 let _ as i32 = sprintf(buf, "%g" to cstr, val)
@@ -1570,8 +1713,19 @@ struct LLVMCodegen:
             let id_nm_str as String = node_name(node)
             if strcmp(id_nm_str.data to cstr, "self" to cstr) == 0 and strcmp(var_type.data to cstr, "{ ptr, i64, i64 }" to cstr) != 0:
                 var_type = String.make("ptr" to cstr)
-            if strcmp(var_type.data to cstr, "void" to cstr) == 0:
-                return "0" to ptr[u8]
+            if strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize:
+                if (deref self).var_types.has(id_nm_str):
+                    let vt as String = (deref self).var_types[id_nm_str]
+                    if strcmp(vt.data to cstr, "void" to cstr) != 0 and strcmp(vt.data to cstr, "{ ptr, ptr }" to cstr) != 0 and vt.len > 0 to usize:
+                        var_type = vt
+                    elif (deref self).var_slots.has(id_nm_str):
+                        var_type = String.make("i64" to cstr)
+                    else:
+                        return "0" to ptr[u8]
+                elif (deref self).var_slots.has(id_nm_str):
+                    var_type = String.make("i64" to cstr)
+                else:
+                    return "0" to ptr[u8]
             let reg as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
@@ -1675,7 +1829,7 @@ struct LLVMCodegen:
                 let variant_name as String = node_name(node)
                 if variant_name.data != None:
                     let v_cstr as cstr = variant_name.data to cstr
-                    if strcmp(id_name, "NodeType" to cstr) == 0 or strcmp(id_name, "TypeKind" to cstr) == 0 or strcmp(id_name, "LanguageMode" to cstr) == 0 or strcmp(id_name, "SymbolKind" to cstr) == 0 or strcmp(id_name, "LabelKind" to cstr) == 0 or strcmp(id_name, "Severity" to cstr) == 0 or strcmp(id_name, "ObjectState" to cstr) == 0 or strcmp(id_name, "Endianness" to cstr) == 0:
+                    if strcmp(id_name, "NodeType" to cstr) == 0 or strcmp(id_name, "TypeKind" to cstr) == 0 or strcmp(id_name, "LanguageMode" to cstr) == 0 or strcmp(id_name, "SymbolKind" to cstr) == 0 or strcmp(id_name, "LabelKind" to cstr) == 0 or strcmp(id_name, "Severity" to cstr) == 0 or strcmp(id_name, "ObjectState" to cstr) == 0 or strcmp(id_name, "Endianness" to cstr) == 0 or strcmp(id_name, "PassMode" to cstr) == 0:
                         return get_enum_variant_val(id_name, v_cstr)
             let obj_val as ptr[u8] = self.emit_expr(obj)
             let field_name as String = node_name(node)
@@ -1838,7 +1992,7 @@ struct LLVMCodegen:
         elif nt == NodeType.ClosureExpr: // ClosureExpr
             return self.emit_closure_expr(node)
         elif nt == NodeType.BooleanLiteral: // BooleanLiteral
-            if node_val(node) == 1.0:
+            if node_val(node) > 0.5:
                 return "1" to ptr[u8]
             else:
                 return "0" to ptr[u8]
@@ -2078,6 +2232,13 @@ struct LLVMCodegen:
                         field_idx = 5 to i32
                     elif strcmp(f_cstr, "triple" to cstr) == 0:
                         field_idx = 6 to i32
+                elif strcmp(s_cstr, "ABISignature" to cstr) == 0:
+                    if strcmp(f_cstr, "mode" to cstr) == 0:
+                        field_idx = 0 to i32
+                    elif strcmp(f_cstr, "llvm_type" to cstr) == 0:
+                        field_idx = 1 to i32
+                    elif strcmp(f_cstr, "is_struct" to cstr) == 0:
+                        field_idx = 2 to i32
                 elif strcmp(s_cstr, "String" to cstr) == 0:
                     if strcmp(f_cstr, "data" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2205,22 +2366,24 @@ struct LLVMCodegen:
                         field_idx = 11 to i32
                     elif strcmp(f_cstr, "var_counts" to cstr) == 0:
                         field_idx = 12 to i32
-                    elif strcmp(f_cstr, "defined_functions" to cstr) == 0:
+                    elif strcmp(f_cstr, "var_types" to cstr) == 0:
                         field_idx = 13 to i32
-                    elif strcmp(f_cstr, "program_functions" to cstr) == 0:
+                    elif strcmp(f_cstr, "defined_functions" to cstr) == 0:
                         field_idx = 14 to i32
-                    elif strcmp(f_cstr, "current_return_type" to cstr) == 0:
+                    elif strcmp(f_cstr, "program_functions" to cstr) == 0:
                         field_idx = 15 to i32
-                    elif strcmp(f_cstr, "current_struct_name" to cstr) == 0:
+                    elif strcmp(f_cstr, "current_return_type" to cstr) == 0:
                         field_idx = 16 to i32
-                    elif strcmp(f_cstr, "struct_sizes" to cstr) == 0:
+                    elif strcmp(f_cstr, "current_struct_name" to cstr) == 0:
                         field_idx = 17 to i32
-                    elif strcmp(f_cstr, "struct_field_indices" to cstr) == 0:
+                    elif strcmp(f_cstr, "struct_sizes" to cstr) == 0:
                         field_idx = 18 to i32
-                    elif strcmp(f_cstr, "current_break_label" to cstr) == 0:
+                    elif strcmp(f_cstr, "struct_field_indices" to cstr) == 0:
                         field_idx = 19 to i32
-                    elif strcmp(f_cstr, "current_continue_label" to cstr) == 0:
+                    elif strcmp(f_cstr, "current_break_label" to cstr) == 0:
                         field_idx = 20 to i32
+                    elif strcmp(f_cstr, "current_continue_label" to cstr) == 0:
+                        field_idx = 21 to i32
                 elif strcmp(s_cstr, "Scope" to cstr) == 0:
                     if strcmp(f_cstr, "parent" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2488,7 +2651,9 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "\n")
                 return
             var val_type as String = type_to_llvm(node_inferred_type(right))
-            if node_kind(right) == NodeType.IndexExpr:
+            if node_kind(left) == NodeType.IndexExpr:
+                val_type = self.index_value_llvm(left)
+            elif node_kind(right) == NodeType.IndexExpr:
                 val_type = self.index_value_llvm(right)
             if node_kind(right) == NodeType.CallExpr:
                 let call_callee as ptr[Node] = node_left(right)
@@ -2815,9 +2980,18 @@ struct LLVMCodegen:
                         left_t_str = String.make("i64" to cstr)
         elif node_kind(left) == NodeType.MemberExpr:
             let field_name as String = node_name(left)
-            if field_name.data != None and strcmp(left_t_str.data to cstr, "{ ptr, ptr }") == 0:
+            let obj as ptr[Node] = node_left(left)
+            var is_enum_variant as bool = False
+            if obj != None to ptr[Node] and node_kind(obj) == NodeType.Identifier:
+                let id_n as String = node_name(obj)
+                if id_n.data != None:
+                    let id_c as cstr = id_n.data to cstr
+                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0:
+                        is_enum_variant = True
+            if is_enum_variant:
+                left_t_str = String.make("i32" to cstr)
+            elif field_name.data != None and strcmp(left_t_str.data to cstr, "{ ptr, ptr }") == 0:
                 var s_name as String = String.make("Node" to cstr)
-                let obj as ptr[Node] = node_left(left)
                 if obj != None to ptr[Node]:
                     let target_t as ptr[Type] = node_inferred_type(obj)
                     if target_t != None to ptr[Type]:
@@ -2827,7 +3001,22 @@ struct LLVMCodegen:
                             let pl as ptr[Type] = (deref target_t).payload
                             if (deref pl).kind == TypeKind.Struct:
                                 s_name = (deref pl).name
-                left_t_str = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                    var obj_inner as ptr[Node] = obj
+                    if node_kind(obj_inner) == NodeType.UnaryExpr:
+                        let in_node as ptr[Node] = node_left(obj_inner)
+                        if in_node != None to ptr[Node]:
+                            obj_inner = in_node
+                    if node_kind(obj_inner) == NodeType.Identifier:
+                        let id_nm as String = node_name(obj_inner)
+                        if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
+                            s_name = (deref self).current_struct_name
+                let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
+                    left_t_str = f_t
+        elif node_kind(left) == NodeType.Identifier:
+            let id_nm_str as String = node_name(left)
+            if id_nm_str.data != None and (deref self).var_types.has(id_nm_str):
+                left_t_str = (deref self).var_types[id_nm_str]
         elif node_kind(left) == NodeType.CastExpr:
             let op_str as String = node_op(left)
             if op_str.data != None to ptr[u8]:
@@ -2842,6 +3031,8 @@ struct LLVMCodegen:
                     left_t_str = String.make("i32" to cstr)
                 else:
                     left_t_str = String.make("i64" to cstr)
+        elif node_kind(left) == NodeType.IndexExpr:
+            left_t_str = self.index_value_llvm(left)
 
         var right_t_str as String = type_to_llvm(node_inferred_type(right))
         if node_kind(right) == NodeType.CallExpr:
@@ -2856,9 +3047,18 @@ struct LLVMCodegen:
                         right_t_str = String.make("i64" to cstr)
         elif node_kind(right) == NodeType.MemberExpr:
             let field_name as String = node_name(right)
-            if field_name.data != None and strcmp(right_t_str.data to cstr, "{ ptr, ptr }") == 0:
+            let obj as ptr[Node] = node_left(right)
+            var is_enum_variant as bool = False
+            if obj != None to ptr[Node] and node_kind(obj) == NodeType.Identifier:
+                let id_n as String = node_name(obj)
+                if id_n.data != None:
+                    let id_c as cstr = id_n.data to cstr
+                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0:
+                        is_enum_variant = True
+            if is_enum_variant:
+                right_t_str = String.make("i32" to cstr)
+            elif field_name.data != None and strcmp(right_t_str.data to cstr, "{ ptr, ptr }") == 0:
                 var s_name as String = String.make("Node" to cstr)
-                let obj as ptr[Node] = node_left(right)
                 if obj != None to ptr[Node]:
                     let target_t as ptr[Type] = node_inferred_type(obj)
                     if target_t != None to ptr[Type]:
@@ -2868,7 +3068,22 @@ struct LLVMCodegen:
                             let pl as ptr[Type] = (deref target_t).payload
                             if (deref pl).kind == TypeKind.Struct:
                                 s_name = (deref pl).name
-                right_t_str = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                    var obj_inner as ptr[Node] = obj
+                    if node_kind(obj_inner) == NodeType.UnaryExpr:
+                        let in_node as ptr[Node] = node_left(obj_inner)
+                        if in_node != None to ptr[Node]:
+                            obj_inner = in_node
+                    if node_kind(obj_inner) == NodeType.Identifier:
+                        let id_nm as String = node_name(obj_inner)
+                        if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
+                            s_name = (deref self).current_struct_name
+                let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
+                    right_t_str = f_t
+        elif node_kind(right) == NodeType.Identifier:
+            let id_nm_str as String = node_name(right)
+            if id_nm_str.data != None and (deref self).var_types.has(id_nm_str):
+                right_t_str = (deref self).var_types[id_nm_str]
         elif node_kind(right) == NodeType.CastExpr:
             let op_str as String = node_op(right)
             if op_str.data != None to ptr[u8]:
@@ -2883,6 +3098,8 @@ struct LLVMCodegen:
                     right_t_str = String.make("i32" to cstr)
                 else:
                     right_t_str = String.make("i64" to cstr)
+        elif node_kind(right) == NodeType.IndexExpr:
+            right_t_str = self.index_value_llvm(right)
 
         var left_is_ptr as bool = strcmp(left_t_str.data to cstr, "ptr" to cstr) == 0
         var right_is_ptr as bool = strcmp(right_t_str.data to cstr, "ptr" to cstr) == 0
@@ -2932,6 +3149,10 @@ struct LLVMCodegen:
                 operand_type = String.make("float" to cstr)
             elif strcmp(left_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i64" to cstr) == 0:
                 operand_type = String.make("i64" to cstr)
+            elif strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0:
+                operand_type = String.make("i32" to cstr)
+            elif strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0:
+                operand_type = String.make("i16" to cstr)
             elif strcmp(left_t_str.data to cstr, "i8" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
                 operand_type = String.make("i8" to cstr)
             elif strcmp(left_t_str.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(right_t_str.data to cstr, "{ ptr, ptr }" to cstr) == 0:
@@ -3238,8 +3459,8 @@ struct LLVMCodegen:
                         if dict_call_t != None to ptr[Type] and (deref dict_call_t).kind == TypeKind.Dict:
                             if (deref dict_call_t).name.data != None to ptr[u8] and (deref dict_call_t).name.len > 0 to usize:
                                 key_name_str = (deref dict_call_t).name.data to cstr
+                        let c_ann as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(callee)
                         if strcmp(key_name_str, "" to cstr) == 0:
-                            let c_ann as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(callee)
                             if c_ann != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref c_ann).length() > 0 to i64:
                                 var opt as Option[ptr[TypeAnnotation]] = (deref c_ann)[0 to i64]
                                 let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
@@ -3255,6 +3476,27 @@ struct LLVMCodegen:
                         var dict_val_s as i64 = 8 to i64
                         if dict_call_t != None to ptr[Type] and (deref dict_call_t).payload != None to ptr[Type]:
                             dict_val_s = type_size((deref dict_call_t).payload)
+                        elif c_ann != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref c_ann).length() > 1 to i64:
+                            var v_opt as Option[ptr[TypeAnnotation]] = (deref c_ann)[1 to i64]
+                            let v_opt_ref as ptr[OptionLayout] = (ref v_opt) to ptr[OptionLayout]
+                            if option_has_value(v_opt_ref):
+                                let v_an as ptr[TypeAnnotation] = option_unwrap_ptr(v_opt_ref) to ptr[TypeAnnotation]
+                                if v_an != None to ptr[TypeAnnotation] and (deref v_an).name.data != None to ptr[u8]:
+                                    let v_name_str as cstr = (deref v_an).name.data to cstr
+                                    if strcmp(v_name_str, "String" to cstr) == 0:
+                                        dict_val_s = 24 to i64
+                                    elif strcmp(v_name_str, "i32" to cstr) == 0 or strcmp(v_name_str, "u32" to cstr) == 0 or strcmp(v_name_str, "char" to cstr) == 0:
+                                        dict_val_s = 4 to i64
+                                    elif strcmp(v_name_str, "i16" to cstr) == 0 or strcmp(v_name_str, "u16" to cstr) == 0:
+                                        dict_val_s = 2 to i64
+                                    elif strcmp(v_name_str, "i8" to cstr) == 0 or strcmp(v_name_str, "u8" to cstr) == 0 or strcmp(v_name_str, "bool" to cstr) == 0 or strcmp(v_name_str, "byte" to cstr) == 0:
+                                        dict_val_s = 1 to i64
+                                    elif strcmp(v_name_str, "f32" to cstr) == 0:
+                                        dict_val_s = 4 to i64
+                                    elif strcmp(v_name_str, "f64" to cstr) == 0:
+                                        dict_val_s = 8 to i64
+                                    else:
+                                        dict_val_s = self.dict_key_size_from_name(v_name_str)
                         let dict_ptr_reg as ptr[u8] = self.fresh_temp()
                         append_cstr(ref (deref self).main_out, "  ")
                         append_cstr(ref (deref self).main_out, dict_ptr_reg to cstr)
@@ -3577,7 +3819,7 @@ struct LLVMCodegen:
                                     let en_vname_p as ptr[String] = node_name_ptr(fa_expr)
                                     if en_oname_p != None to ptr[String] and en_vname_p != None to ptr[String] and (deref en_oname_p).data != None and (deref en_vname_p).data != None:
                                         let _en_c as cstr = (deref en_oname_p).data to cstr
-                                        if strcmp(_en_c, "NodeType" to cstr) == 0 or strcmp(_en_c, "TypeKind" to cstr) == 0 or strcmp(_en_c, "LanguageMode" to cstr) == 0 or strcmp(_en_c, "SymbolKind" to cstr) == 0 or strcmp(_en_c, "LabelKind" to cstr) == 0 or strcmp(_en_c, "Severity" to cstr) == 0 or strcmp(_en_c, "ObjectState" to cstr) == 0 or strcmp(_en_c, "Endianness" to cstr) == 0:
+                                        if strcmp(_en_c, "NodeType" to cstr) == 0 or strcmp(_en_c, "TypeKind" to cstr) == 0 or strcmp(_en_c, "LanguageMode" to cstr) == 0 or strcmp(_en_c, "SymbolKind" to cstr) == 0 or strcmp(_en_c, "LabelKind" to cstr) == 0 or strcmp(_en_c, "Severity" to cstr) == 0 or strcmp(_en_c, "ObjectState" to cstr) == 0 or strcmp(_en_c, "Endianness" to cstr) == 0 or strcmp(_en_c, "PassMode" to cstr) == 0:
                                             enum_tag = get_enum_variant_val((deref en_oname_p).data to cstr, (deref en_vname_p).data to cstr)
                                             if enum_tag != None to ptr[u8]:
                                                 enum_tname = (deref en_oname_p).data to cstr
@@ -4310,10 +4552,21 @@ struct LLVMCodegen:
             var key_type as String = type_to_llvm(node_inferred_type(key_node))
             if node_kind(key_node) == NodeType.IndexExpr:
                 key_type = self.index_value_llvm(key_node)
+            let d_key_size as i64 = self.dict_declared_key_size(obj_node)
+            if strcmp(key_type.data to cstr, "void" to cstr) == 0 or strcmp(key_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or key_type.len == 0 to usize:
+                if d_key_size == 24 to i64:
+                    key_type = String.make("{ ptr, i64, i64 }" to cstr)
+                elif d_key_size == 4 to i64:
+                    key_type = String.make("i32" to cstr)
+                elif d_key_size == 2 to i64:
+                    key_type = String.make("i16" to cstr)
+                elif d_key_size == 1 to i64:
+                    key_type = String.make("i8" to cstr)
+                else:
+                    key_type = String.make("i64" to cstr)
             var key_emit as ptr[u8] = key_val
             if node_kind(key_node) == NodeType.StringLiteral and strcmp(key_type.data to cstr, "{ ptr, i64, i64 }") == 0:
                 key_emit = self.wrap_string_literal_key(key_node, key_val)
-            let d_key_size as i64 = self.dict_declared_key_size(obj_node)
             if strcmp(key_type.data to cstr, "{ ptr, i64, i64 }") != 0:
                 let widened as ptr[u8] = self.widen_literal_int_key(key_node, key_emit, key_type, d_key_size)
                 if widened != key_emit:
@@ -4881,9 +5134,15 @@ struct LLVMCodegen:
             self.emit_node(get_node_decl(ref stmts, i))
             i = i + 1 to i64
 
-        let drops as List[String] = node_auto_drops(node)
-        if drops.length() > 0 to i64:
-            self.emit_auto_drops(drops)
+        var last_is_ret as bool = False
+        if count > 0 to i64:
+            let last_stmt as ptr[Node] = get_node_decl(ref stmts, count - 1)
+            if last_stmt != None to ptr[Node] and node_kind(last_stmt) == NodeType.ReturnStmt:
+                last_is_ret = True
+        if not last_is_ret:
+            let drops as List[String] = node_auto_drops(node)
+            if drops.length() > 0 to i64:
+                self.emit_auto_drops(drops)
 
     public fn emit_unary_expr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         let op as String = node_op(node)
@@ -4898,7 +5157,7 @@ struct LLVMCodegen:
 
         if strcmp(op.data to cstr, "not" to cstr) == 0:
             var cmp_t as String = t
-            if cmp_t.len == 0 to usize:
+            if cmp_t.len == 0 to usize or strcmp(cmp_t.data to cstr, "{ ptr, ptr }" to cstr) == 0:
                 cmp_t = String.make("i8" to cstr)
             if strcmp(cmp_t.data to cstr, "i1" to cstr) != 0:
                 let temp as ptr[u8] = self.fresh_temp()
@@ -4952,6 +5211,36 @@ struct LLVMCodegen:
             return self.emit_lvalue_ptr(operand)
         elif strcmp(op.data to cstr, "deref" to cstr) == 0:
             var pointee_t as String = type_to_llvm(node_inferred_type(node))
+            if operand != None to ptr[Node] and node_kind(operand) == NodeType.CastExpr:
+                let cast_target as String = node_op(operand)
+                if cast_target.data != None to ptr[u8]:
+                    let ct as cstr = cast_target.data to cstr
+                    extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                    if strncmp(ct, "ptr[" to cstr, 4 to usize) == 0:
+                        let inner as cstr = (ct to usize + 4 to usize) to cstr
+                        if strncmp(inner, "cstr" to cstr, 4 to usize) == 0 or strncmp(inner, "ptr" to cstr, 3 to usize) == 0:
+                            pointee_t = String.make("ptr" to cstr)
+                        elif strncmp(inner, "u8" to cstr, 2 to usize) == 0 or strncmp(inner, "i8" to cstr, 2 to usize) == 0 or strncmp(inner, "bool" to cstr, 4 to usize) == 0 or strncmp(inner, "byte" to cstr, 4 to usize) == 0:
+                            pointee_t = String.make("i8" to cstr)
+                        elif strncmp(inner, "i16" to cstr, 3 to usize) == 0 or strncmp(inner, "u16" to cstr, 3 to usize) == 0:
+                            pointee_t = String.make("i16" to cstr)
+                        elif strncmp(inner, "i32" to cstr, 3 to usize) == 0 or strncmp(inner, "u32" to cstr, 3 to usize) == 0 or strncmp(inner, "char" to cstr, 4 to usize) == 0:
+                            pointee_t = String.make("i32" to cstr)
+                        elif strncmp(inner, "i64" to cstr, 3 to usize) == 0 or strncmp(inner, "u64" to cstr, 3 to usize) == 0 or strncmp(inner, "usize" to cstr, 5 to usize) == 0 or strncmp(inner, "isize" to cstr, 5 to usize) == 0:
+                            pointee_t = String.make("i64" to cstr)
+                        elif strncmp(inner, "f32" to cstr, 3 to usize) == 0:
+                            pointee_t = String.make("float" to cstr)
+                        elif strncmp(inner, "f64" to cstr, 3 to usize) == 0:
+                            pointee_t = String.make("double" to cstr)
+                        elif strncmp(inner, "String" to cstr, 6 to usize) == 0 or strncmp(inner, "List" to cstr, 4 to usize) == 0 or strncmp(inner, "Dict" to cstr, 4 to usize) == 0:
+                            pointee_t = String.make("{ ptr, i64, i64 }" to cstr)
+                        else:
+                            pointee_t = String.make("ptr" to cstr)
+            elif strcmp(pointee_t.data to cstr, "void" to cstr) == 0 or strcmp(pointee_t.data to cstr, "{ ptr, ptr }" to cstr) == 0 or pointee_t.len == 0 to usize:
+                if (deref self).current_return_type.len > 0 to usize and strcmp((deref self).current_return_type.data to cstr, "void" to cstr) != 0:
+                    pointee_t = (deref self).current_return_type
+                else:
+                    pointee_t = String.make("i8" to cstr)
             if strcmp(pointee_t.data to cstr, "void" to cstr) == 0:
                 pointee_t = String.make("i8" to cstr)
             var ptr_reg as ptr[u8] = operand_val
@@ -4985,11 +5274,47 @@ struct LLVMCodegen:
                         let enum_obj as String = node_name(dl)
                         if enum_obj.data != None to ptr[u8]:
                             let e_cstr as cstr = enum_obj.data to cstr
-                            if strcmp(e_cstr, "NodeType" to cstr) == 0 or strcmp(e_cstr, "TypeKind" to cstr) == 0 or strcmp(e_cstr, "LanguageMode" to cstr) == 0 or strcmp(e_cstr, "SymbolKind" to cstr) == 0 or strcmp(e_cstr, "LabelKind" to cstr) == 0 or strcmp(e_cstr, "Severity" to cstr) == 0 or strcmp(e_cstr, "ObjectState" to cstr) == 0 or strcmp(e_cstr, "Endianness" to cstr) == 0:
+                            if strcmp(e_cstr, "NodeType" to cstr) == 0 or strcmp(e_cstr, "TypeKind" to cstr) == 0 or strcmp(e_cstr, "LanguageMode" to cstr) == 0 or strcmp(e_cstr, "SymbolKind" to cstr) == 0 or strcmp(e_cstr, "LabelKind" to cstr) == 0 or strcmp(e_cstr, "Severity" to cstr) == 0 or strcmp(e_cstr, "ObjectState" to cstr) == 0 or strcmp(e_cstr, "Endianness" to cstr) == 0 or strcmp(e_cstr, "PassMode" to cstr) == 0:
                                 return operand_val
         var source_type as String = type_to_llvm(node_inferred_type(operand))
-        if node_kind(operand) == NodeType.StringLiteral:
-            source_type = String.make("ptr" to cstr)
+        if operand != None to ptr[Node]:
+            if node_kind(operand) == NodeType.StringLiteral:
+                source_type = String.make("ptr" to cstr)
+            elif node_kind(operand) == NodeType.MemberExpr:
+                let field_name as String = node_name(operand)
+                let obj as ptr[Node] = node_left(operand)
+                if obj != None to ptr[Node]:
+                    var s_name as String = String.make("Node" to cstr)
+                    let target_t as ptr[Type] = node_inferred_type(obj)
+                    if target_t != None to ptr[Type]:
+                        if (deref target_t).kind == TypeKind.Struct:
+                            s_name = (deref target_t).name
+                        elif (deref target_t).kind == TypeKind.RawPointer and (deref target_t).payload != None to ptr[Type]:
+                            let pl as ptr[Type] = (deref target_t).payload
+                            if (deref pl).kind == TypeKind.Struct:
+                                s_name = (deref pl).name
+                    var obj_inner as ptr[Node] = obj
+                    if node_kind(obj_inner) == NodeType.UnaryExpr:
+                        let in_node as ptr[Node] = node_left(obj_inner)
+                        if in_node != None to ptr[Node]:
+                            obj_inner = in_node
+                    if node_kind(obj_inner) == NodeType.Identifier:
+                        let id_nm as String = node_name(obj_inner)
+                        if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
+                            s_name = (deref self).current_struct_name
+                    let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                    if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
+                        source_type = f_t
+            elif node_kind(operand) == NodeType.Identifier:
+                let id_nm_str as String = node_name(operand)
+                if id_nm_str.data != None and (deref self).var_types.has(id_nm_str):
+                    source_type = (deref self).var_types[id_nm_str]
+            elif node_kind(operand) == NodeType.NumberLiteral:
+                extern fn strstr(haystack as cstr, needle as cstr) as cstr
+                if strstr(operand_val to cstr, "." to cstr) != None to cstr:
+                    source_type = String.make("double" to cstr)
+                else:
+                    source_type = String.make("i64" to cstr)
         var target_type as String = type_to_llvm(node_inferred_type(node))
         let target_op as String = node_op(node)
         if target_op.data != None to ptr[u8]:
@@ -5291,7 +5616,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
                     return True
         let index as ptr[Node] = node_right(node)
         if index != None to ptr[Node]:
@@ -5333,7 +5658,7 @@ struct LLVMCodegen:
                     return String.make("i32" to cstr)
                 if strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
                     return String.make("i1" to cstr)
-                if strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0:
+                if strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0:
                     return String.make("{ ptr, i64, i64 }" to cstr)
                 if strcmp(f_c, "macros" to cstr) == 0:
                     return String.make("%MacroDef" to cstr)
@@ -5386,7 +5711,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(node)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
                     return 24 to i64
         return 8 to i64
 
@@ -5414,7 +5739,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
                     is_struct_val = True
         if is_struct_val and (deref coll_val) == 37 to u8:
             let ext as ptr[u8] = self.fresh_temp()
@@ -5432,6 +5757,17 @@ struct LLVMCodegen:
         if node_kind(index) == NodeType.StringLiteral and strcmp(idx_type.data to cstr, "{ ptr, i64, i64 }") == 0:
             idx_emit = self.wrap_string_literal_key(index, idx_val)
         let d_key_size as i64 = self.dict_declared_key_size(collection)
+        if strcmp(idx_type.data to cstr, "void" to cstr) == 0 or strcmp(idx_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or idx_type.len == 0 to usize:
+            if d_key_size == 24 to i64:
+                idx_type = String.make("{ ptr, i64, i64 }" to cstr)
+            elif d_key_size == 4 to i64:
+                idx_type = String.make("i32" to cstr)
+            elif d_key_size == 2 to i64:
+                idx_type = String.make("i16" to cstr)
+            elif d_key_size == 1 to i64:
+                idx_type = String.make("i8" to cstr)
+            else:
+                idx_type = String.make("i64" to cstr)
         if strcmp(idx_type.data to cstr, "{ ptr, i64, i64 }") != 0:
             let widened as ptr[u8] = self.widen_literal_int_key(index, idx_emit, idx_type, d_key_size)
             if widened != idx_emit:
@@ -5572,8 +5908,15 @@ struct LLVMCodegen:
             var ct as ptr[Type] = coll_t
             if (deref ct).kind == TypeKind.RawPointer and (deref ct).payload != None to ptr[Type]:
                 let pl as ptr[Type] = (deref ct).payload
-                ct = pl
-            if (deref ct).kind == TypeKind.List or (deref ct).kind == TypeKind.Dict:
+                let pe as String = type_to_llvm(pl)
+                var pe_s as String = pe
+                if strcmp(pe_s.data to cstr, "{ ptr, ptr }") == 0:
+                    pe_s = String.make("ptr" to cstr)
+                elif strcmp(pe_s.data to cstr, "i1") == 0:
+                    pe_s = String.make("i8" to cstr)
+                elem_type = pe_s
+                resolved_elem = True
+            elif (deref ct).kind == TypeKind.List or (deref ct).kind == TypeKind.Dict:
                 if (deref ct).payload != None to ptr[Type]:
                     let pe as String = type_to_llvm((deref ct).payload)
                     var pe_s as String = pe
@@ -5876,7 +6219,7 @@ struct LLVMCodegen:
             return make_type(TypeKind.F32)
         elif strcmp(name, "f64" to cstr) == 0:
             return make_type(TypeKind.F64)
-        elif strcmp(name, "NodeType" to cstr) == 0 or strcmp(name, "TypeKind" to cstr) == 0 or strcmp(name, "LanguageMode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "LabelKind" to cstr) == 0 or strcmp(name, "Severity" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0 or strcmp(name, "Endianness" to cstr) == 0:
+        elif strcmp(name, "NodeType" to cstr) == 0 or strcmp(name, "TypeKind" to cstr) == 0 or strcmp(name, "LanguageMode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "LabelKind" to cstr) == 0 or strcmp(name, "Severity" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0 or strcmp(name, "Endianness" to cstr) == 0 or strcmp(name, "PassMode" to cstr) == 0:
             return make_type(TypeKind.I32)
         elif strcmp(name, "bool" to cstr) == 0:
             return make_type(TypeKind.Boolean)

@@ -7,7 +7,7 @@ from std.option import Option
 import symbols
 from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name
 import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr
+from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 
 struct OptionLayout:
     public var has_val as u8
@@ -387,7 +387,12 @@ struct Sema:
             self.report_error(String.make("cannot find module" to cstr), node_span(node))
             return
             
-        let lowerer as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(content.data to cstr, resolved_path.data to cstr)
+        extern fn strstr(haystack as cstr, needle as cstr) as cstr
+        var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
+        if strstr(resolved_path.data to cstr, ".nz" to cstr) != None to cstr:
+            lowerer = make_lowerer_from_cstr(content.data to cstr, resolved_path.data to cstr)
+        else:
+            lowerer = make_lowerer_mantiq_from_cstr(content.data to cstr, resolved_path.data to cstr)
         let root_ast as ptr[Node] = lowerer.lower_source()
         if root_ast == None to ptr[Node]:
             self.report_error(String.make("compilation error in module" to cstr), node_span(node))
@@ -609,12 +614,6 @@ struct Sema:
             if option_has_value(else_opt):
                 let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
                 self.declare_pass(else_node)
-        elif nt == NodeType.WhileStmt:
-            if node_body(node) != None to ptr[Node]:
-                self.declare_pass(node_body(node))
-        elif nt == NodeType.ForStmt:
-            if node_body(node) != None to ptr[Node]:
-                self.declare_pass(node_body(node))
         elif nt == NodeType.ImportDecl:
             self.load_imported_module(node)
 
@@ -674,14 +673,17 @@ struct Sema:
                     if mod_sym != None to ptr[Symbol]:
                         if (deref mod_sym).kind == SymbolKind.Module:
                             let mod_scope as ptr[Scope] = (deref self).loaded_modules[String.make(mod_name)]
-                            if (deref mod_scope).symbols.has(String.make(sym_name)):
-                                let target_sym as ptr[Symbol] = (deref mod_scope).symbols[String.make(sym_name)]
-                            else:
+                            if not (deref mod_scope).symbols.has(String.make(sym_name)):
                                 self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
-                        else:
-                            self.report_error(String.make("module not found" to cstr), node_span(node))
+                        elif (deref mod_sym).kind == SymbolKind.Enum:
+                            // Enum variant access (e.g. PassMode.Coerce) - valid
+                            let _enum_ok as bool = True
+                        elif (deref mod_sym).kind == SymbolKind.Variable or (deref mod_sym).kind == SymbolKind.Struct:
+                            // Field or static method access - valid
+                            let _var_ok as bool = True
                     else:
-                        self.report_error(String.make("module not found" to cstr), node_span(node))
+                        // Left is not in scope yet or is a field expression
+                        let _other_ok as bool = True
             elif strcmp(op, "=" to cstr) == 0:
                 // Skip resolving LHS of assignment (struct field name in named args / struct literals)
                 self.resolve_pass(node_right(node))

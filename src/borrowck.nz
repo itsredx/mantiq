@@ -33,6 +33,7 @@ enum ObjectState:
     Owned
     Moved
     Dropped
+    Borrowed
 
 // ── VariableInfo ───────────────────────────────────────────────────────
 struct VarInfo:
@@ -177,14 +178,24 @@ struct BorrowChecker:
         // Look up the type from symbol_states (stored at declaration time)
         if (deref self).symbol_states.has(name):
             let info as VarInfo = (deref self).symbol_states[name]
+            if info.state == ObjectState.Borrowed:
+                return
             var t as ptr[Type] = info.var_type
             if t == None to ptr[Type] and (deref self).sema != None to ptr[Sema]:
                 let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(name)
                 if sym != None to ptr[Symbol]:
-                    t = ref (deref sym).sym_type
+                    t = (deref sym).resolved_type
             if t != None to ptr[Type]:
                 if is_copy_type(t):
                     return
+        else:
+            if (deref self).sema != None to ptr[Sema]:
+                let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(name)
+                if sym != None to ptr[Symbol]:
+                    let t as ptr[Type] = (deref sym).resolved_type
+                    if t != None to ptr[Type]:
+                        if is_copy_type(t):
+                            return
         self.mark_moved(name)
 
     public fn check_identifier_use(self as ptr[BorrowChecker], node as ptr[Node]):
@@ -214,7 +225,8 @@ struct BorrowChecker:
             let count as i64 = (deref decls).length()
             var i as i64 = 0 to i64
             while i < count:
-                self.walk_ast((deref decls)[i])
+                let decl as ptr[Node] = (deref decls)[i]
+                self.walk_ast(decl)
                 i = i + 1 to i64
                 
         elif nt == NodeType.BlockStmt: // BlockStmt
@@ -239,7 +251,6 @@ struct BorrowChecker:
             
             self.push_scope()
             
-            // Register parameters in current scope stack
             let params_raw as List[ptr[Node]] = node_params(node)
             let params as ptr[List[ptr[Node]]] = ref params_raw
             let param_count as i64 = (deref params).length()
@@ -247,12 +258,16 @@ struct BorrowChecker:
             while p_idx < param_count:
                 let param as ptr[Node] = (deref params)[p_idx]
                 let param_name as String = node_name(param)
+                var p_type as ptr[Type] = node_inferred_type(param)
                 var sym as ptr[Symbol] = None to ptr[Symbol]
                 if sema_ptr != None to ptr[Sema]:
                     sym = (deref sema_ptr).lookup_symbol(param_name)
+                    if p_type == None to ptr[Type] and sym != None to ptr[Symbol]:
+                        p_type = (deref sym).resolved_type
                 if sym == None to ptr[Symbol]:
                     sym = make_symbol(param_name, SymbolKind.Variable, param)
-                self.mark_owned(param_name, (deref sym).resolved_type)
+                    (deref sym).resolved_type = p_type
+                (deref self).symbol_states[param_name] = VarInfo(state = ObjectState.Borrowed, var_type = p_type)
                 self.add_symbol_to_current_scope(sym)
                 p_idx = p_idx + 1 to i64
                 
@@ -299,13 +314,24 @@ struct BorrowChecker:
             while a_idx < arg_count:
                 let arg as ptr[Node] = (deref args)[a_idx]
                 if node_kind(arg) == NodeType.Identifier:
-                    self.move_identifier(arg)
+                    self.check_identifier_use(arg)
+                elif node_kind(arg) == NodeType.UnaryExpr:
+                    let uop as String = node_op(arg)
+                    if uop.data != None to ptr[u8] and (strcmp(uop.data to cstr, "ref" to cstr) == 0 or strcmp(uop.data to cstr, "ref mut" to cstr) == 0):
+                        let ref_target as ptr[Node] = node_left(arg)
+                        if ref_target != None to ptr[Node]:
+                            if node_kind(ref_target) == NodeType.Identifier:
+                                self.check_identifier_use(ref_target)
+                            else:
+                                self.walk_ast(ref_target)
+                    else:
+                        self.walk_ast(arg)
                 else:
                     self.walk_ast(arg)
                 a_idx = a_idx + 1 to i64
                 
         elif nt == NodeType.ReturnStmt: // ReturnStmt
-            let return_val as ptr[Node] = node_body(node)
+            let return_val as ptr[Node] = node_left(node)
             if return_val != None to ptr[Node]:
                 if node_kind(return_val) == NodeType.Identifier:
                     self.move_identifier(return_val)
@@ -336,7 +362,6 @@ struct BorrowChecker:
                                                 is_returned = True
                                     if not is_returned:
                                         drops.append(sym)
-                                        (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = t)
                     i = i + 1 to i64
                 s_idx = s_idx - 1 to i64
                 
@@ -426,5 +451,16 @@ struct BorrowChecker:
             if option_has_value(else_opt):
                 let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
                 self.walk_ast(else_node)
-        elif nt == NodeType.CastExpr or nt == NodeType.UnaryExpr:
+        elif nt == NodeType.CastExpr:
             self.walk_ast(node_left(node))
+        elif nt == NodeType.UnaryExpr:
+            let uop as String = node_op(node)
+            if uop.data != None to ptr[u8] and (strcmp(uop.data to cstr, "ref" to cstr) == 0 or strcmp(uop.data to cstr, "ref mut" to cstr) == 0):
+                let inner as ptr[Node] = node_left(node)
+                if inner != None to ptr[Node]:
+                    if node_kind(inner) == NodeType.Identifier:
+                        self.check_identifier_use(inner)
+                    else:
+                        self.walk_ast(inner)
+            else:
+                self.walk_ast(node_left(node))

@@ -6,21 +6,64 @@ enum Endianness:
     Big
 
 struct Target:
-    arch as String
-    os as String
-    env as String
-    pointer_size as usize
-    endianness as Endianness
-    data_layout as String
-    triple as String
+    public var arch as String
+    public var os as String
+    public var env as String
+    public var pointer_size as usize
+    public var endianness as Endianness
+    public var data_layout as String
+    public var triple as String
 
     public fn x86_64_linux() -> Target:
-        return Target(arch="x86_64" to String, os="linux" to String, env="gnu" to String, pointer_size=8 to usize, endianness=Endianness.Little, data_layout="e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to String, triple="x86_64-unknown-linux-gnu" to String)
+        return Target(arch = String.make("x86_64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to cstr), triple = String.make("x86_64-unknown-linux-gnu" to cstr))
     
 
-public fn get_align(t as Type, target as Target) as usize:
-    pass
+fn get_align(t as ptr[Type], target as Target) as usize:
+    if t == None to ptr[Type]:
+        return target.pointer_size
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean:
+        return 1 to usize
+    elif k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16:
+        return 2 to usize
+    elif k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.QBit:
+        return 4 to usize
+    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.Enum:
+        return 8 to usize
+    elif k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
+        return 16 to usize
+    return target.pointer_size
 
-
-public fn get_size(t as Type, target as Target) as usize:
-    pass
+fn get_size(t as ptr[Type], target as Target) as usize:
+    if t == None to ptr[Type]:
+        return 0 to usize
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.Void:
+        return 0 to usize
+    elif k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean:
+        return 1 to usize
+    elif k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16:
+        return 2 to usize
+    elif k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.QBit:
+        return 4 to usize
+    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize:
+        return 8 to usize
+    elif k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
+        return 16 to usize
+    elif k == TypeKind.Enum:
+        return 40 to usize
+    elif k == TypeKind.String:
+        return target.pointer_size * 3 to usize
+    elif k == TypeKind.Utf8Str or k == TypeKind.AsciiStr or k == TypeKind.WebStr or k == TypeKind.RangeStr:
+        return target.pointer_size * 2 to usize
+    elif k == TypeKind.CStr or k == TypeKind.RawPointer:
+        return target.pointer_size
+    elif k == TypeKind.List or k == TypeKind.Dict:
+        return target.pointer_size * 3 to usize
+    elif k == TypeKind.Option:
+        return target.pointer_size * 2 to usize
+    elif k == TypeKind.Result:
+        return target.pointer_size * 3 to usize
+    elif k == TypeKind.QReg:
+        return 16 to usize
+    return target.pointer_size

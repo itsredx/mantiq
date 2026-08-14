@@ -55,3 +55,11 @@ uint32_t ts_node_end_row_ptr(const TSNode *node) {
 uint32_t ts_node_end_col_ptr(const TSNode *node) {
     return ts_node_end_point(*node).column;
 }
+
+void ts_node_child_by_field_name_ptr(const TSNode *node, const char *name, uint32_t name_length, TSNode *out_node) {
+    *out_node = ts_node_child_by_field_name(*node, name, name_length);
+}
+
+bool ts_node_is_null_ptr(const TSNode *node) {
+    return ts_node_is_null(*node);
+}

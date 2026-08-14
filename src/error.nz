@@ -262,7 +262,7 @@ struct DiagnosticEngine:
 
                     var p as usize = idx
                     while p < line_end:
-                        let ch as u8 = deref (source_code to usize + p) to ptr[u8]
+                        let ch as u8 = deref ((source_code to usize + p) to ptr[u8])
                         let _r as i32 = printf("%c" to cstr, ch to i32)
                         p = p + 1 to usize
                     let _r2 as i32 = printf("\n" to cstr)
@@ -312,7 +312,7 @@ struct DiagnosticEngine:
         var h_idx as i64 = 0 to i64
         let h_count as i64 = (deref diag).help_hints.length()
         while h_idx < h_count:
-            let hint as String = (deref diag).help_hints.get(h_idx)
+            let hint as String = (deref diag).help_hints[h_idx]
             if color:
                 let _r as i32 = printf("  %s├─ %s⚡ How to fix %s───────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_teal(), rgb_surface(), color_reset())
                 let _r2 as i32 = printf("  %s│%s    %s%s%s\n" to cstr, rgb_surface(), color_reset(), rgb_white(), hint.data to cstr, color_reset())
@@ -324,7 +324,7 @@ struct DiagnosticEngine:
         var n_idx as i64 = 0 to i64
         let n_count as i64 = (deref diag).notes.length()
         while n_idx < n_count:
-            let note as String = (deref diag).notes.get(n_idx)
+            let note as String = (deref diag).notes[n_idx]
             if color:
                 let _r as i32 = printf("  %s├─ %s📌 Note %s───────────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_lavender(), rgb_surface(), color_reset())
                 let _r2 as i32 = printf("  %s│%s    %s%s%s\n" to cstr, rgb_surface(), color_reset(), rgb_white(), note.data to cstr, color_reset())
@@ -336,7 +336,7 @@ struct DiagnosticEngine:
         var s_idx as i64 = 0 to i64
         let s_count as i64 = (deref diag).suggestions.length()
         while s_idx < s_count:
-            let sug as Suggestion = (deref diag).suggestions.get(s_idx)
+            let sug as Suggestion = (deref diag).suggestions[s_idx]
             if color:
                 let _r as i32 = printf("  %s├─ %s🔧 Suggested Fix %s────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_peach(), rgb_surface(), color_reset())
                 let _r2 as i32 = printf("  %s│%s    %s %s➜%s  `%s%s%s`\n" to cstr, rgb_surface(), color_reset(), sug.message.data to cstr, rgb_peach(), color_reset(), rgb_green(), sug.replacement.data to cstr, color_reset())
@@ -354,6 +354,6 @@ struct DiagnosticEngine:
         var i as i64 = 0 to i64
         let count as i64 = (deref self).diagnostics.length()
         while i < count:
-            let diag as ptr[Diagnostic] = (deref self).diagnostics.get(i)
+            let diag as ptr[Diagnostic] = (deref self).diagnostics[i]
             (deref self).render_diagnostic(diag, source_code)
             i = i + 1 to i64
