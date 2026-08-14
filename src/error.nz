@@ -13,6 +13,116 @@ extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
 extern fn malloc(size as usize) as ptr
 extern fn free(ptr as ptr)
 extern fn strlen(str as cstr) as usize
+extern fn ioctl(fd as i32, request as u64, ...) as i32
+extern fn getenv(name as cstr) as cstr
+extern fn atoi(nptr as cstr) as i32
+
+// ── Terminal Dimensions & Box Drawing Helpers ────────────────────────────
+struct WinSize:
+    public var ws_row as u16
+    public var ws_col as u16
+    public var ws_xpixel as u16
+    public var ws_ypixel as u16
+
+fn get_terminal_width() as i32:
+    let env_cols as cstr = getenv("COLUMNS" to cstr)
+    if env_cols != None to cstr:
+        let parsed_w as i32 = atoi(env_cols)
+        if parsed_w > 20 to i32:
+            var w as i32 = parsed_w - 4 to i32
+            if w < 70 to i32:
+                return 70 to i32
+            if w > 120 to i32:
+                return 120 to i32
+            return w
+
+    var ws as WinSize = WinSize(ws_row = 0 to u16, ws_col = 0 to u16, ws_xpixel = 0 to u16, ws_ypixel = 0 to u16)
+    let ret as i32 = ioctl(1 to i32, 21523 to u64, ref ws)
+    let col_u16 as u16 = ws.ws_col
+    if ret == 0 and col_u16 > 20 to u16:
+        let col_i32 as i32 = col_u16 to i32
+        var w as i32 = col_i32 - 4 to i32
+        if w < 70 to i32:
+            return 70 to i32
+        if w > 120 to i32:
+            return 120 to i32
+        return w
+
+    return 84 to i32
+
+fn visible_len(s as cstr) as i32:
+    if s == None to cstr:
+        return 0 to i32
+    var len as i32 = 0 to i32
+    var i as usize = 0 to usize
+    let slen as usize = strlen(s)
+    while i < slen:
+        let b0_raw as u8 = deref ((s to usize + i) to ptr[u8])
+        let b0 as i32 = b0_raw to i32
+        if b0 == 27 to i32:
+            // Skip ANSI escape sequence \x1b[...m
+            var is_end as bool = False
+            while i < slen and not is_end:
+                let cur_raw as u8 = deref ((s to usize + i) to ptr[u8])
+                let cur_b as i32 = cur_raw to i32
+                if cur_b == 109 to i32:
+                    is_end = True
+                i = i + 1 to usize
+        elif b0 < 128 to i32:
+            len = len + 1 to i32
+            i = i + 1 to usize
+        elif b0 >= 192 to i32 and b0 <= 223 to i32:
+            // 2-byte UTF-8 character -> 1 column
+            len = len + 1 to i32
+            i = i + 2 to usize
+        elif b0 >= 224 to i32 and b0 <= 239 to i32:
+            // 3-byte UTF-8 character
+            if i + 2 to usize < slen:
+                let b1_raw as u8 = deref ((s to usize + i + 1 to usize) to ptr[u8])
+                let b2_raw as u8 = deref ((s to usize + i + 2 to usize) to ptr[u8])
+                let b1 as i32 = b1_raw to i32
+                let b2 as i32 = b2_raw to i32
+                if b0 == 226 to i32 and b1 == 154 to i32 and b2 == 161 to i32:
+                    // ⚡ (U+26A1) renders with 2 columns in terminal emulators
+                    len = len + 2 to i32
+                else:
+                    // Box drawing characters (╭, ╮, ╰, ╯, │, ─, ├, ┤, ▲, ➜, etc.) -> 1 column
+                    len = len + 1 to i32
+            else:
+                len = len + 1 to i32
+            i = i + 3 to usize
+        elif b0 >= 240 to i32:
+            // 4-byte UTF-8 character (emojis: 📁, 📍, 📌, 💡, 🔧, 💥, 🪲) -> 2 columns
+            len = len + 2 to i32
+            i = i + 4 to usize
+        else:
+            i = i + 1 to usize
+    return len
+
+fn num_digits(n as u32) as i32:
+    if n >= 100000 to u32:
+        return 6 to i32
+    if n >= 10000 to u32:
+        return 5 to i32
+    if n >= 1000 to u32:
+        return 4 to i32
+    if n >= 100 to u32:
+        return 3 to i32
+    if n >= 10 to u32:
+        return 2 to i32
+    return 1 to i32
+
+fn print_dashes(count as i32):
+    var i as i32 = 0 to i32
+    while i < count:
+        let _r as i32 = printf("─" to cstr)
+        i = i + 1 to i32
+
+fn print_spaces(count as i32):
+    var i as i32 = 0 to i32
+    while i < count:
+        let _r as i32 = printf(" " to cstr)
+        i = i + 1 to i32
 
 // ── NvChad / OpenCode 24-bit Truecolor Palette Tokens ──────────────────
 fn color_reset() as cstr:
@@ -197,10 +307,13 @@ struct DiagnosticEngine:
     // ── OpenCode / NvChad Modern Box UI Renderer ─────────────────────────
     public fn render_diagnostic(self as ptr[DiagnosticEngine], diag as ptr[Diagnostic], source_code as cstr):
         let color as bool = (deref self).use_color
+        let width as i32 = get_terminal_width()
+        let inner_w as i32 = width - 2 to i32
+        let content_w as i32 = width - 4 to i32
 
-        let tag_color as cstr = rgb_red()
-        let tag_icon as cstr = "✖"
-        let tag_name as cstr = "ERROR"
+        var tag_color as cstr = rgb_red()
+        var tag_icon as cstr = "✖"
+        var tag_name as cstr = "ERROR"
 
         if (deref diag).severity == Severity.Warning:
             tag_color = rgb_peach()
@@ -224,23 +337,75 @@ struct DiagnosticEngine:
             tag_name = "INTERNAL COMPILER ERROR"
 
         // 1. Top Rounded Border & Header Pill
-        if color:
-            let _r as i32 = printf("  %s╭─ %s%s %s%s" to cstr, rgb_surface(), tag_color, color_bold(), tag_icon, tag_name)
-            if (deref diag).code.is_some():
-                let _r2 as i32 = printf("[%s]" to cstr, (deref diag).code.unwrap().data to cstr)
-            let _r3 as i32 = printf(" %s: %s%s%s %s─────────────────────────────────────────────────────────────%s\n" to cstr, color_reset(), color_bold(), (deref diag).message.data to cstr, color_reset(), rgb_surface(), color_reset())
-        else:
-            let _r as i32 = printf("  ╭─ %s %s: %s\n" to cstr, tag_icon, tag_name, (deref diag).message.data to cstr)
+        let tag_icon_vis as i32 = visible_len(tag_icon)
+        let tag_name_vis as i32 = visible_len(tag_name)
+        var code_len as i32 = 0 to i32
+        if (deref diag).code.is_some():
+            let c_len as i32 = visible_len((deref diag).code.unwrap().data to cstr)
+            code_len = c_len + 3 to i32
+            
+        let msg_vis as i32 = visible_len((deref diag).message.data to cstr)
+        let top_vis as i32 = 3 to i32 + tag_icon_vis + 1 to i32 + tag_name_vis + code_len + 3 to i32 + msg_vis + 1 to i32
+        var top_dashes as i32 = inner_w - top_vis
+        if top_dashes < 2 to i32:
+            top_dashes = 2 to i32
 
-        // 2. Location Line
+        if color:
+            let _r1 as i32 = printf("  %s╭─  %s%s%s %s%s" to cstr, rgb_surface(), tag_color, color_bold(), tag_icon, tag_name, color_reset())
+            if (deref diag).code.is_some():
+                let _r2 as i32 = printf(" %s%s[%s]%s" to cstr, tag_color, color_bold(), (deref diag).code.unwrap().data to cstr, color_reset())
+            let _r3 as i32 = printf(" : %s%s%s %s" to cstr, color_bold(), (deref diag).message.data to cstr, color_reset(), rgb_surface())
+            print_dashes(top_dashes)
+            let _r4 as i32 = printf("╮%s\n" to cstr, color_reset())
+        else:
+            let _r1 as i32 = printf("  ╭─  %s %s" to cstr, tag_icon, tag_name)
+            if (deref diag).code.is_some():
+                let _r2 as i32 = printf(" [%s]" to cstr, (deref diag).code.unwrap().data to cstr)
+            let _r3 as i32 = printf(" : %s " to cstr, (deref diag).message.data to cstr)
+            print_dashes(top_dashes)
+            let _r4 as i32 = printf("╮\n" to cstr)
+
+        // 2. Enhanced Location Block (File, Line, Column)
         let row as u32 = (deref diag).primary_span.start_row + 1 to u32
         let col as u32 = (deref diag).primary_span.start_col + 1 to u32
+        let row_d as i32 = num_digits(row)
+        let col_d as i32 = num_digits(col)
+
+        // Line 1: 📁 File:      <path> (📁 = 2 cols, " File:      " = 12 cols -> 14 cols label)
+        let file_path_vis as i32 = visible_len((deref diag).file_path.data to cstr)
+        let loc1_vis as i32 = 14 to i32 + file_path_vis
+        var loc1_pad as i32 = content_w - loc1_vis
+        if loc1_pad < 0 to i32:
+            loc1_pad = 0 to i32
 
         if color:
-            let _r as i32 = printf("  %s│%s  %s📌 Location:%s %s%s:%d:%d%s\n" to cstr, rgb_surface(), color_reset(), rgb_lavender(), color_reset(), rgb_white(), (deref diag).file_path.data to cstr, row, col, color_reset())
-            let _r2 as i32 = printf("  %s├───────────────────────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), color_reset())
+            let _r as i32 = printf("  %s│%s  %s📁 File:%s      %s%s%s" to cstr, rgb_surface(), color_reset(), rgb_lavender(), color_reset(), rgb_white(), (deref diag).file_path.data to cstr, color_reset())
+            print_spaces(loc1_pad)
+            let _r2 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
         else:
-            let _r as i32 = printf("  │  📌 Location: %s:%d:%d\n  ├───────────────────────────────────────────────────────────────────────────────\n" to cstr, (deref diag).file_path.data to cstr, row, col)
+            let _r as i32 = printf("  │  📁 File:      %s" to cstr, (deref diag).file_path.data to cstr)
+            print_spaces(loc1_pad)
+            let _r2 as i32 = printf("│\n" to cstr)
+
+        // Line 2: 📍 Position:  Line <row>, Column <col> (📍 = 2 cols, " Position:  " = 12 cols -> 14 cols label)
+        let loc2_vis as i32 = 28 to i32 + row_d + col_d
+        var loc2_pad as i32 = content_w - loc2_vis
+        if loc2_pad < 0 to i32:
+            loc2_pad = 0 to i32
+
+        if color:
+            let _r as i32 = printf("  %s│%s  %s📍 Position:%s  %sLine %d%s, %sColumn %d%s" to cstr, rgb_surface(), color_reset(), rgb_mauve(), color_reset(), rgb_peach(), row, color_reset(), rgb_teal(), col, color_reset())
+            print_spaces(loc2_pad)
+            let _r2 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+            let _r3 as i32 = printf("  %s├" to cstr, rgb_surface())
+            print_dashes(inner_w)
+            let _r4 as i32 = printf("┤%s\n" to cstr, color_reset())
+        else:
+            let _r as i32 = printf("  │  📍 Position:  Line %d, Column %d" to cstr, row, col)
+            print_spaces(loc2_pad)
+            let _r2 as i32 = printf("│\n  ├" to cstr)
+            print_dashes(inner_w)
+            let _r3 as i32 = printf("┤\n" to cstr)
 
         // 3. Source Snippet Rendering with Gutter Vertical Bars
         if source_code != None to cstr:
@@ -254,7 +419,10 @@ struct DiagnosticEngine:
                     while line_end < len and (deref (source_code to usize + line_end) to ptr[u8]) != 10 to u8:
                         line_end = line_end + 1 to usize
 
-                    // Source line context
+                    let line_end_i as i32 = line_end to i32
+                    let idx_i as i32 = idx to i32
+                    var code_vis_len as i32 = line_end_i - idx_i
+
                     if color:
                         let _r as i32 = printf("  %s│%s  %s%2d%s %s│%s  " to cstr, rgb_surface(), color_reset(), rgb_muted(), line_num, color_reset(), rgb_surface(), color_reset())
                     else:
@@ -265,22 +433,33 @@ struct DiagnosticEngine:
                         let ch as u8 = deref ((source_code to usize + p) to ptr[u8])
                         let _r as i32 = printf("%c" to cstr, ch to i32)
                         p = p + 1 to usize
-                    let _r2 as i32 = printf("\n" to cstr)
+
+                    let code_content_vis as i32 = 6 to i32 + code_vis_len
+                    var code_pad as i32 = content_w - code_content_vis
+                    if code_pad < 0 to i32:
+                        code_pad = 0 to i32
+                    print_spaces(code_pad)
+                    if color:
+                        let _r2 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+                    else:
+                        let _r2 as i32 = printf("│\n" to cstr)
 
                     // Caret waveform line
                     if color:
                         let _r as i32 = printf("  %s│%s     %s│%s  " to cstr, rgb_surface(), color_reset(), rgb_surface(), color_reset())
                     else:
-                        let _r as i32 = printf("  │     │  ")
+                        let _r as i32 = printf("  │     │  " to cstr)
 
                     var space_i as u32 = 1 to u32
                     while space_i < col:
                         let _r as i32 = printf(" " to cstr)
                         space_i = space_i + 1 to u32
 
-                    var span_len as u32 = (deref diag).primary_span.end_col - (deref diag).primary_span.start_col
-                    if span_len < 1 to u32:
-                        span_len = 1 to u32
+                    let sc_u32 as u32 = (deref diag).primary_span.start_col
+                    let ec_u32 as u32 = (deref diag).primary_span.end_col
+                    var span_len as u32 = 1 to u32
+                    if ec_u32 > sc_u32:
+                        span_len = ec_u32 - sc_u32
 
                     if color:
                         let _r as i32 = printf("%s%s" to cstr, tag_color, color_bold())
@@ -292,8 +471,20 @@ struct DiagnosticEngine:
 
                     if color:
                         let _r as i32 = printf(" %s%s%s" to cstr, tag_color, (deref diag).message.data to cstr, color_reset())
+                    else:
+                        let _r as i32 = printf(" %s" to cstr, (deref diag).message.data to cstr)
 
-                    let _r_end as i32 = printf("\n" to cstr)
+                    let col_i as i32 = col to i32
+                    let span_i as i32 = span_len to i32
+                    let caret_content_vis as i32 = 6 to i32 + col_i - 1 to i32 + span_i + 1 to i32 + msg_vis
+                    var caret_pad as i32 = content_w - caret_content_vis
+                    if caret_pad < 0 to i32:
+                        caret_pad = 0 to i32
+                    print_spaces(caret_pad)
+                    if color:
+                        let _r_end as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+                    else:
+                        let _r_end as i32 = printf("│\n" to cstr)
                     break
                 
                 if (deref (source_code to usize + idx) to ptr[u8]) == 10 to u8:
@@ -302,22 +493,74 @@ struct DiagnosticEngine:
 
         // 4. Friendly Explanation Callout Block
         if (deref diag).friendly_explanation.is_some():
+            let expl_str as cstr = (deref diag).friendly_explanation.unwrap().data to cstr
+            let title_str as cstr = "💡 Why this happened"
+            let title_vis as i32 = visible_len(title_str)
+            let sec_vis as i32 = 3 to i32 + title_vis
+            var sec_dashes as i32 = inner_w - sec_vis
+            if sec_dashes < 2 to i32:
+                sec_dashes = 2 to i32
+
             if color:
-                let _r as i32 = printf("  %s├─ %s💡 Why this happened %s────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_yellow(), rgb_surface(), color_reset())
-                let _r2 as i32 = printf("  %s│%s    %s%s%s\n" to cstr, rgb_surface(), color_reset(), rgb_white(), (deref diag).friendly_explanation.unwrap().data to cstr, color_reset())
+                let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_yellow(), title_str, rgb_surface())
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤%s\n" to cstr, color_reset())
             else:
-                let _r as i32 = printf("  ├─ 💡 Why this happened:\n  │    %s\n" to cstr, (deref diag).friendly_explanation.unwrap().data to cstr)
+                let _r as i32 = printf("  ├─ %s " to cstr, title_str)
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤\n" to cstr)
+
+            let expl_vis as i32 = visible_len(expl_str)
+            let expl_content_vis as i32 = 2 to i32 + expl_vis
+            var expl_pad as i32 = content_w - expl_content_vis
+            if expl_pad < 0 to i32:
+                expl_pad = 0 to i32
+
+            if color:
+                let _r3 as i32 = printf("  %s│%s    %s%s%s" to cstr, rgb_surface(), color_reset(), rgb_white(), expl_str, color_reset())
+                print_spaces(expl_pad)
+                let _r4 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+            else:
+                let _r3 as i32 = printf("  │    %s" to cstr, expl_str)
+                print_spaces(expl_pad)
+                let _r4 as i32 = printf("│\n" to cstr)
 
         // 5. Help Hints ("How to fix")
         var h_idx as i64 = 0 to i64
         let h_count as i64 = (deref diag).help_hints.length()
         while h_idx < h_count:
             let hint as String = (deref diag).help_hints[h_idx]
+            let hint_str as cstr = hint.data to cstr
+            let title_str as cstr = "⚡ How to fix"
+            let title_vis as i32 = visible_len(title_str)
+            let sec_vis as i32 = 3 to i32 + title_vis
+            var sec_dashes as i32 = inner_w - sec_vis
+            if sec_dashes < 2 to i32:
+                sec_dashes = 2 to i32
+
             if color:
-                let _r as i32 = printf("  %s├─ %s⚡ How to fix %s───────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_teal(), rgb_surface(), color_reset())
-                let _r2 as i32 = printf("  %s│%s    %s%s%s\n" to cstr, rgb_surface(), color_reset(), rgb_white(), hint.data to cstr, color_reset())
+                let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_teal(), title_str, rgb_surface())
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤%s\n" to cstr, color_reset())
             else:
-                let _r as i32 = printf("  ├─ ⚡ How to fix:\n  │    %s\n" to cstr, hint.data to cstr)
+                let _r as i32 = printf("  ├─ %s " to cstr, title_str)
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤\n" to cstr)
+
+            let hint_vis as i32 = visible_len(hint_str)
+            let hint_content_vis as i32 = 2 to i32 + hint_vis
+            var hint_pad as i32 = content_w - hint_content_vis
+            if hint_pad < 0 to i32:
+                hint_pad = 0 to i32
+
+            if color:
+                let _r3 as i32 = printf("  %s│%s    %s%s%s" to cstr, rgb_surface(), color_reset(), rgb_white(), hint_str, color_reset())
+                print_spaces(hint_pad)
+                let _r4 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+            else:
+                let _r3 as i32 = printf("  │    %s" to cstr, hint_str)
+                print_spaces(hint_pad)
+                let _r4 as i32 = printf("│\n" to cstr)
             h_idx = h_idx + 1 to i64
 
         // 6. Notes
@@ -325,11 +568,37 @@ struct DiagnosticEngine:
         let n_count as i64 = (deref diag).notes.length()
         while n_idx < n_count:
             let note as String = (deref diag).notes[n_idx]
+            let note_str as cstr = note.data to cstr
+            let title_str as cstr = "📌 Note"
+            let title_vis as i32 = visible_len(title_str)
+            let sec_vis as i32 = 3 to i32 + title_vis
+            var sec_dashes as i32 = inner_w - sec_vis
+            if sec_dashes < 2 to i32:
+                sec_dashes = 2 to i32
+
             if color:
-                let _r as i32 = printf("  %s├─ %s📌 Note %s───────────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_lavender(), rgb_surface(), color_reset())
-                let _r2 as i32 = printf("  %s│%s    %s%s%s\n" to cstr, rgb_surface(), color_reset(), rgb_white(), note.data to cstr, color_reset())
+                let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_lavender(), title_str, rgb_surface())
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤%s\n" to cstr, color_reset())
             else:
-                let _r as i32 = printf("  ├─ 📌 Note:\n  │    %s\n" to cstr, note.data to cstr)
+                let _r as i32 = printf("  ├─ %s " to cstr, title_str)
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤\n" to cstr)
+
+            let note_vis as i32 = visible_len(note_str)
+            let note_content_vis as i32 = 2 to i32 + note_vis
+            var note_pad as i32 = content_w - note_content_vis
+            if note_pad < 0 to i32:
+                note_pad = 0 to i32
+
+            if color:
+                let _r3 as i32 = printf("  %s│%s    %s%s%s" to cstr, rgb_surface(), color_reset(), rgb_white(), note_str, color_reset())
+                print_spaces(note_pad)
+                let _r4 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+            else:
+                let _r3 as i32 = printf("  │    %s" to cstr, note_str)
+                print_spaces(note_pad)
+                let _r4 as i32 = printf("│\n" to cstr)
             n_idx = n_idx + 1 to i64
 
         // 7. Suggestions ("Suggested Fix")
@@ -337,18 +606,48 @@ struct DiagnosticEngine:
         let s_count as i64 = (deref diag).suggestions.length()
         while s_idx < s_count:
             let sug as Suggestion = (deref diag).suggestions[s_idx]
+            let title_str as cstr = "🔧 Suggested Fix"
+            let title_vis as i32 = visible_len(title_str)
+            let sec_vis as i32 = 3 to i32 + title_vis
+            var sec_dashes as i32 = inner_w - sec_vis
+            if sec_dashes < 2 to i32:
+                sec_dashes = 2 to i32
+
             if color:
-                let _r as i32 = printf("  %s├─ %s🔧 Suggested Fix %s────────────────────────────────────────────────────────────%s\n" to cstr, rgb_surface(), rgb_peach(), rgb_surface(), color_reset())
-                let _r2 as i32 = printf("  %s│%s    %s %s➜%s  `%s%s%s`\n" to cstr, rgb_surface(), color_reset(), sug.message.data to cstr, rgb_peach(), color_reset(), rgb_green(), sug.replacement.data to cstr, color_reset())
+                let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_peach(), title_str, rgb_surface())
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤%s\n" to cstr, color_reset())
             else:
-                let _r as i32 = printf("  ├─ 🔧 Suggested Fix:\n  │    %s ➜ `%s`\n" to cstr, sug.message.data to cstr, sug.replacement.data to cstr)
+                let _r as i32 = printf("  ├─ %s " to cstr, title_str)
+                print_dashes(sec_dashes)
+                let _r2 as i32 = printf("┤\n" to cstr)
+
+            let sug_msg_vis as i32 = visible_len(sug.message.data to cstr)
+            let sug_repl_vis as i32 = visible_len(sug.replacement.data to cstr)
+            let sug_content_vis as i32 = 2 to i32 + sug_msg_vis + 5 to i32 + sug_repl_vis + 1 to i32
+            var sug_pad as i32 = content_w - sug_content_vis
+            if sug_pad < 0 to i32:
+                sug_pad = 0 to i32
+
+            if color:
+                let _r3 as i32 = printf("  %s│%s    %s %s➜%s  `%s%s%s`" to cstr, rgb_surface(), color_reset(), sug.message.data to cstr, rgb_peach(), color_reset(), rgb_green(), sug.replacement.data to cstr, color_reset())
+                print_spaces(sug_pad)
+                let _r4 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
+            else:
+                let _r3 as i32 = printf("  │    %s ➜  `%s`" to cstr, sug.message.data to cstr, sug.replacement.data to cstr)
+                print_spaces(sug_pad)
+                let _r4 as i32 = printf("│\n" to cstr)
             s_idx = s_idx + 1 to i64
 
         // Bottom Rounded Footer Line
         if color:
-            let _r as i32 = printf("  %s╰───────────────────────────────────────────────────────────────────────────────%s\n\n" to cstr, rgb_surface(), color_reset())
+            let _r as i32 = printf("  %s╰" to cstr, rgb_surface())
+            print_dashes(inner_w)
+            let _r2 as i32 = printf("╯%s\n\n" to cstr, color_reset())
         else:
-            let _r as i32 = printf("  ╰───────────────────────────────────────────────────────────────────────────────\n\n" to cstr)
+            let _r as i32 = printf("  ╰" to cstr)
+            print_dashes(inner_w)
+            let _r2 as i32 = printf("╯\n\n" to cstr)
 
     public fn emit_all(self as ptr[DiagnosticEngine], source_code as cstr):
         var i as i64 = 0 to i64

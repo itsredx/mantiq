@@ -1773,6 +1773,36 @@ struct LLVMCodegen:
                     elif nb == 116 to u8:
                         append_cstr(ref escaped_buf, "\\09" to cstr)
                         i = i + 1 to i64
+                    elif nb == 101 to u8:
+                        append_cstr(ref escaped_buf, "\\1B" to cstr)
+                        i = i + 1 to i64
+                    elif nb == 120 to u8 and i < str_len - 3 to i64:
+                        let h1 as u8 = str_data[i + 2]
+                        let h2 as u8 = str_data[i + 3]
+                        var hex_val as u8 = 0 to u8
+                        if h1 >= 48 to u8 and h1 <= 57 to u8:
+                            hex_val = (h1 - 48 to u8) * 16 to u8
+                        elif h1 >= 65 to u8 and h1 <= 70 to u8:
+                            hex_val = (h1 - 55 to u8) * 16 to u8
+                        elif h1 >= 97 to u8 and h1 <= 102 to u8:
+                            hex_val = (h1 - 87 to u8) * 16 to u8
+                            
+                        if h2 >= 48 to u8 and h2 <= 57 to u8:
+                            hex_val = hex_val + (h2 - 48 to u8)
+                        elif h2 >= 65 to u8 and h2 <= 70 to u8:
+                            hex_val = hex_val + (h2 - 55 to u8)
+                        elif h2 >= 97 to u8 and h2 <= 102 to u8:
+                            hex_val = hex_val + (h2 - 87 to u8)
+                            
+                        let hex_chars as cstr = "0123456789ABCDEF" to cstr
+                        let esc_hex as ptr[u8] = make[u8](4 to usize) to ptr[u8]
+                        esc_hex[0] = 92 to u8
+                        esc_hex[1] = (deref ((hex_chars to usize + (hex_val / 16 to u8) to usize) to ptr[u8]))
+                        esc_hex[2] = (deref ((hex_chars to usize + (hex_val % 16 to u8) to usize) to ptr[u8]))
+                        esc_hex[3] = 0 to u8
+                        append_cstr(ref escaped_buf, esc_hex to cstr)
+                        free(esc_hex to ptr)
+                        i = i + 3 to i64
                     elif nb == 34 to u8:
                         append_cstr(ref escaped_buf, "\\22" to cstr)
                         i = i + 1 to i64

@@ -6,9 +6,6 @@ Lib dir:  /home/red-x/projects/desktop/mantiq_nizam/mantiq
 
 ------------------------------------------------------------
 [BUILDING] src/tests/test_types.nz ...
-zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
-zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
-zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
 Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_types.nz -> /tmp/test_types
 [RUNNING]  /tmp/test_types ...
 === Running test_types.nz (Type System Parity Tests) ===
@@ -79,41 +76,38 @@ AST instantiation successful!
 
 ------------------------------------------------------------
 [BUILDING] src/tests/test_error.nz ...
-zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
-zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
-zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
 Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_error.nz -> /tmp/test_error
 [RUNNING]  /tmp/test_error ...
 === Running error.nz Unit Tests ===
 
-  \x1b[38;2;88;91;112m╭─ \x1b[38;2;243;139;168m\x1b[1m ✖ERROR[E0308] \x1b[0m: \x1b[1mmismatched types: expected `i32`, found `String`\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:2:24\x1b[0m
-  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 2\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m      let count as i32 = "42"
-  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m                         \x1b[38;2;243;139;168m\x1b[1m▲▲▲▲ \x1b[38;2;243;139;168mmismatched types: expected `i32`, found `String`\x1b[0m
-  \x1b[38;2;88;91;112m├─ \x1b[38;2;249;226;175m💡 Why this happened \x1b[38;2;88;91;112m────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mNizam requires strict type compatibility during variable assignment.\x1b[0m
-  \x1b[38;2;88;91;112m├─ \x1b[38;2;148;226;213m⚡ How to fix \x1b[38;2;88;91;112m───────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mTo convert a `String` to `i32`, call `.parse_i32()` on the string value.\x1b[0m
-  \x1b[38;2;88;91;112m├─ \x1b[38;2;250;179;135m🔧 Suggested Fix \x1b[38;2;88;91;112m────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m    Replace string literal with integer literal \x1b[38;2;250;179;135m➜\x1b[0m  `\x1b[38;2;166;227;161m42\x1b[0m`
-  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  [38;2;88;91;112m╭─  [38;2;243;139;168m[1m✖ ERROR[0m[38;2;243;139;168m[1m[E0308][0m : [1mmismatched types: expected `i32`, found `String`[0m [38;2;88;91;112m──────────╮[0m
+  [38;2;88;91;112m│[0m  [38;2;180;190;254m📌 Location:[0m [38;2;205;214;244msrc/main.nz:2:24[0m                                                 [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├──────────────────────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m  [38;2;108;112;134m 2[0m [38;2;88;91;112m│[0m      let count as i32 = "42"                                            [38;2;88;91;112m│[0m
+  [38;2;88;91;112m│[0m     [38;2;88;91;112m│[0m                         [38;2;243;139;168m[1m▲▲▲▲ [38;2;243;139;168mmismatched types: expected `i32`, found `String`[0m  [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├─ [38;2;249;226;175m💡 Why this happened [38;2;88;91;112m───────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m    [38;2;205;214;244mNizam requires strict type compatibility during variable assignment.[0m      [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├─ [38;2;148;226;213m⚡ How to fix [38;2;88;91;112m───────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m    [38;2;205;214;244mTo convert a `String` to `i32`, call `.parse_i32()` on the string value.[0m  [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├─ [38;2;250;179;135m🔧 Suggested Fix [38;2;88;91;112m────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m    Replace string literal with integer literal [38;2;250;179;135m➜[0m  `[38;2;166;227;161m42[0m`                       [38;2;88;91;112m│[0m
+  [38;2;88;91;112m╰──────────────────────────────────────────────────────────────────────────────╯[0m
 
-  \x1b[38;2;88;91;112m╭─ \x1b[38;2;250;179;135m\x1b[1m ⚡WARNING[W0012] \x1b[0m: \x1b[1munused variable `count`\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:3:12\x1b[0m
-  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 3\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m      return count
-  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m             \x1b[38;2;250;179;135m\x1b[1m▲▲▲▲▲ \x1b[38;2;250;179;135munused variable `count`\x1b[0m
-  \x1b[38;2;88;91;112m├─ \x1b[38;2;180;190;254m📌 Note \x1b[38;2;88;91;112m───────────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m    \x1b[38;2;205;214;244mIf this is intended, prefix variable with an underscore: `_count`\x1b[0m
-  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  [38;2;88;91;112m╭─  [38;2;250;179;135m[1m⚡ WARNING[0m[38;2;250;179;135m[1m[W0012][0m : [1munused variable `count`[0m [38;2;88;91;112m─────────────────────────────────╮[0m
+  [38;2;88;91;112m│[0m  [38;2;180;190;254m📌 Location:[0m [38;2;205;214;244msrc/main.nz:3:12[0m                                                 [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├──────────────────────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m  [38;2;108;112;134m 3[0m [38;2;88;91;112m│[0m      return count                                                       [38;2;88;91;112m│[0m
+  [38;2;88;91;112m│[0m     [38;2;88;91;112m│[0m             [38;2;250;179;135m[1m▲▲▲▲▲ [38;2;250;179;135munused variable `count`[0m                               [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├─ [38;2;180;190;254m📌 Note [38;2;88;91;112m─────────────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m    [38;2;205;214;244mIf this is intended, prefix variable with an underscore: `_count`[0m         [38;2;88;91;112m│[0m
+  [38;2;88;91;112m╰──────────────────────────────────────────────────────────────────────────────╯[0m
 
-  \x1b[38;2;88;91;112m╭─ \x1b[38;2;203;166;247m\x1b[1m 💥PANIC! \x1b[0m: \x1b[1mindex out of bounds: the len is 3 but the index is 5\x1b[0m \x1b[38;2;88;91;112m─────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;180;190;254m📌 Location:\x1b[0m \x1b[38;2;205;214;244msrc/main.nz:1:2\x1b[0m
-  \x1b[38;2;88;91;112m├───────────────────────────────────────────────────────────────────────────────\x1b[0m
-  \x1b[38;2;88;91;112m│\x1b[0m  \x1b[38;2;108;112;134m 1\x1b[0m \x1b[38;2;88;91;112m│\x1b[0m  fn calculate_total(items as List[Item]) as i32:
-  \x1b[38;2;88;91;112m│\x1b[0m     \x1b[38;2;88;91;112m│\x1b[0m   \x1b[38;2;203;166;247m\x1b[1m▲▲▲▲▲▲▲▲▲ \x1b[38;2;203;166;247mindex out of bounds: the len is 3 but the index is 5\x1b[0m
-  \x1b[38;2;88;91;112m╰───────────────────────────────────────────────────────────────────────────────\x1b[0m
+  [38;2;88;91;112m╭─  [38;2;203;166;247m[1m💥 PANIC![0m : [1mindex out of bounds: the len is 3 but the index is 5[0m [38;2;88;91;112m────────────╮[0m
+  [38;2;88;91;112m│[0m  [38;2;180;190;254m📌 Location:[0m [38;2;205;214;244msrc/main.nz:1:2[0m                                                  [38;2;88;91;112m│[0m
+  [38;2;88;91;112m├──────────────────────────────────────────────────────────────────────────────┤[0m
+  [38;2;88;91;112m│[0m  [38;2;108;112;134m 1[0m [38;2;88;91;112m│[0m  fn calculate_total(items as List[Item]) as i32:                        [38;2;88;91;112m│[0m
+  [38;2;88;91;112m│[0m     [38;2;88;91;112m│[0m   [38;2;203;166;247m[1m▲▲▲▲▲▲▲▲▲ [38;2;203;166;247mindex out of bounds: the len is 3 but the index is 5[0m        [38;2;88;91;112m│[0m
+  [38;2;88;91;112m╰──────────────────────────────────────────────────────────────────────────────╯[0m
 
 
 [PASS] error.nz Unit Tests Completed Successfully! (Errors: 1, Warnings: 1, Panics: 1)
@@ -121,6 +115,9 @@ Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests
 
 ------------------------------------------------------------
 [BUILDING] src/tests/test_macro.nz ...
+zig: warning: argument unused during compilation: '-isystem /usr/local/include' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include/x86_64-linux-gnu' [-Wunused-command-line-argument]
+zig: warning: argument unused during compilation: '-isystem /usr/include' [-Wunused-command-line-argument]
 Successfully compiled /home/red-x/projects/desktop/mantiq_nizam/mantiq/src/tests/test_macro.nz -> /tmp/test_macro
 [RUNNING]  /tmp/test_macro ...
 Error: 'class' is a Mantiq-only feature. Use 'struct' in Nizam strict mode.
