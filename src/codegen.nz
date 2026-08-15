@@ -225,6 +225,17 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "5" to ptr[u8]
         elif strcmp(v_cstr, "Info" to cstr) == 0:
             return "2" to ptr[u8]
+    elif strcmp(e_cstr, "ImportKind" to cstr) == 0:
+        if strcmp(v_cstr, "Normal" to cstr) == 0:
+            return "0" to ptr[u8]
+        elif strcmp(v_cstr, "Path" to cstr) == 0:
+            return "1" to ptr[u8]
+        elif strcmp(v_cstr, "Vendor" to cstr) == 0:
+            return "2" to ptr[u8]
+        elif strcmp(v_cstr, "C" to cstr) == 0:
+            return "3" to ptr[u8]
+        elif strcmp(v_cstr, "Pkg" to cstr) == 0:
+            return "4" to ptr[u8]
     elif strcmp(e_cstr, "NodeType" to cstr) == 0:
         if strcmp(v_cstr, "Program" to cstr) == 0:
             return "0" to ptr[u8]
@@ -527,7 +538,7 @@ fn is_struct_byval(t as String) as bool:
     if deref (t.data to ptr[u8]) == 123 to u8:
         return True
     if deref (t.data to ptr[u8]) == 37 to u8:
-        if strcmp(tc, "%NodeType" to cstr) == 0 or strcmp(tc, "%TypeKind" to cstr) == 0 or strcmp(tc, "%LanguageMode" to cstr) == 0 or strcmp(tc, "%SymbolKind" to cstr) == 0 or strcmp(tc, "%LabelKind" to cstr) == 0 or strcmp(tc, "%Severity" to cstr) == 0 or strcmp(tc, "%ObjectState" to cstr) == 0 or strcmp(tc, "%Endianness" to cstr) == 0 or strcmp(tc, "%PassMode" to cstr) == 0:
+        if strcmp(tc, "%NodeType" to cstr) == 0 or strcmp(tc, "%TypeKind" to cstr) == 0 or strcmp(tc, "%LanguageMode" to cstr) == 0 or strcmp(tc, "%SymbolKind" to cstr) == 0 or strcmp(tc, "%LabelKind" to cstr) == 0 or strcmp(tc, "%Severity" to cstr) == 0 or strcmp(tc, "%ObjectState" to cstr) == 0 or strcmp(tc, "%Endianness" to cstr) == 0 or strcmp(tc, "%PassMode" to cstr) == 0 or strcmp(tc, "%ImportKind" to cstr) == 0:
             return False
         return True
     return False
@@ -825,7 +836,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
-        self.register_builtin_struct("ImportDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
+        self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
         self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr }")
         self.register_builtin_struct("VarDeclData", "{ { ptr, i64, i64 }, ptr, i8, ptr }")
         self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr } }")
@@ -879,9 +890,10 @@ struct LLVMCodegen:
         self.register_field_idx("Node" to cstr, "data" to cstr, 4 to i32)
 
         self.register_field_idx("ProgramData" to cstr, "declarations" to cstr, 0 to i32)
-        self.register_field_idx("ImportDeclData" to cstr, "target" to cstr, 0 to i32)
-        self.register_field_idx("ImportDeclData" to cstr, "imported_symbols" to cstr, 1 to i32)
-        self.register_field_idx("ImportDeclData" to cstr, "alias" to cstr, 2 to i32)
+        self.register_field_idx("ImportDeclData" to cstr, "kind" to cstr, 0 to i32)
+        self.register_field_idx("ImportDeclData" to cstr, "target" to cstr, 1 to i32)
+        self.register_field_idx("ImportDeclData" to cstr, "imported_symbols" to cstr, 2 to i32)
+        self.register_field_idx("ImportDeclData" to cstr, "alias" to cstr, 3 to i32)
         self.register_field_idx("FunDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("FunDeclData" to cstr, "params" to cstr, 1 to i32)
         self.register_field_idx("FunDeclData" to cstr, "body" to cstr, 2 to i32)
@@ -1453,7 +1465,11 @@ struct LLVMCodegen:
                         if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
                             let pa_name as cstr = (deref pa).name.data to cstr
                             extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                            if strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
+                            extern fn strlen(s as cstr) as usize
+                            let pa_len as usize = strlen(pa_name)
+                            if (pa_len > 1 to usize and (deref (((deref pa).name.data to usize + pa_len - 1 to usize) to ptr[u8])) == 63 to u8) or strncmp(pa_name, "Option", 6 to usize) == 0:
+                                var_type = String.make("{ i8, ptr }" to cstr)
+                            elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
                                 var_type = String.make("i64" to cstr)
                             elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0:
                                 var_type = String.make("i32" to cstr)
@@ -1861,7 +1877,7 @@ struct LLVMCodegen:
                 let variant_name as String = node_name(node)
                 if variant_name.data != None:
                     let v_cstr as cstr = variant_name.data to cstr
-                    if strcmp(id_name, "NodeType" to cstr) == 0 or strcmp(id_name, "TypeKind" to cstr) == 0 or strcmp(id_name, "LanguageMode" to cstr) == 0 or strcmp(id_name, "SymbolKind" to cstr) == 0 or strcmp(id_name, "LabelKind" to cstr) == 0 or strcmp(id_name, "Severity" to cstr) == 0 or strcmp(id_name, "ObjectState" to cstr) == 0 or strcmp(id_name, "Endianness" to cstr) == 0 or strcmp(id_name, "PassMode" to cstr) == 0:
+                    if strcmp(id_name, "NodeType" to cstr) == 0 or strcmp(id_name, "TypeKind" to cstr) == 0 or strcmp(id_name, "LanguageMode" to cstr) == 0 or strcmp(id_name, "SymbolKind" to cstr) == 0 or strcmp(id_name, "LabelKind" to cstr) == 0 or strcmp(id_name, "Severity" to cstr) == 0 or strcmp(id_name, "ObjectState" to cstr) == 0 or strcmp(id_name, "Endianness" to cstr) == 0 or strcmp(id_name, "PassMode" to cstr) == 0 or strcmp(id_name, "ImportKind" to cstr) == 0:
                         return get_enum_variant_val(id_name, v_cstr)
             let obj_val as ptr[u8] = self.emit_expr(obj)
             let field_name as String = node_name(node)
@@ -2351,12 +2367,14 @@ struct LLVMCodegen:
                     elif strcmp(f_cstr, "name" to cstr) == 0:
                         field_idx = 1 to i32
                 elif strcmp(s_cstr, "ImportDeclData" to cstr) == 0:
-                    if strcmp(f_cstr, "target" to cstr) == 0:
+                    if strcmp(f_cstr, "kind" to cstr) == 0:
                         field_idx = 0 to i32
-                    elif strcmp(f_cstr, "imported_symbols" to cstr) == 0:
+                    elif strcmp(f_cstr, "target" to cstr) == 0:
                         field_idx = 1 to i32
-                    elif strcmp(f_cstr, "alias" to cstr) == 0:
+                    elif strcmp(f_cstr, "imported_symbols" to cstr) == 0:
                         field_idx = 2 to i32
+                    elif strcmp(f_cstr, "alias" to cstr) == 0:
+                        field_idx = 3 to i32
                 elif strcmp(s_cstr, "WhileStmtData" to cstr) == 0:
                     if strcmp(f_cstr, "cond" to cstr) == 0:
                         field_idx = 0 to i32
@@ -3018,7 +3036,7 @@ struct LLVMCodegen:
                 let id_n as String = node_name(obj)
                 if id_n.data != None:
                     let id_c as cstr = id_n.data to cstr
-                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0:
+                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0 or strcmp(id_c, "ImportKind" to cstr) == 0:
                         is_enum_variant = True
             if is_enum_variant:
                 left_t_str = String.make("i32" to cstr)
@@ -3085,7 +3103,7 @@ struct LLVMCodegen:
                 let id_n as String = node_name(obj)
                 if id_n.data != None:
                     let id_c as cstr = id_n.data to cstr
-                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0:
+                    if strcmp(id_c, "NodeType" to cstr) == 0 or strcmp(id_c, "TypeKind" to cstr) == 0 or strcmp(id_c, "LanguageMode" to cstr) == 0 or strcmp(id_c, "PassMode" to cstr) == 0 or strcmp(id_c, "ObjectState" to cstr) == 0 or strcmp(id_c, "Endianness" to cstr) == 0 or strcmp(id_c, "Severity" to cstr) == 0 or strcmp(id_c, "LabelKind" to cstr) == 0 or strcmp(id_c, "ImportKind" to cstr) == 0:
                         is_enum_variant = True
             if is_enum_variant:
                 right_t_str = String.make("i32" to cstr)
@@ -3851,7 +3869,7 @@ struct LLVMCodegen:
                                     let en_vname_p as ptr[String] = node_name_ptr(fa_expr)
                                     if en_oname_p != None to ptr[String] and en_vname_p != None to ptr[String] and (deref en_oname_p).data != None and (deref en_vname_p).data != None:
                                         let _en_c as cstr = (deref en_oname_p).data to cstr
-                                        if strcmp(_en_c, "NodeType" to cstr) == 0 or strcmp(_en_c, "TypeKind" to cstr) == 0 or strcmp(_en_c, "LanguageMode" to cstr) == 0 or strcmp(_en_c, "SymbolKind" to cstr) == 0 or strcmp(_en_c, "LabelKind" to cstr) == 0 or strcmp(_en_c, "Severity" to cstr) == 0 or strcmp(_en_c, "ObjectState" to cstr) == 0 or strcmp(_en_c, "Endianness" to cstr) == 0 or strcmp(_en_c, "PassMode" to cstr) == 0:
+                                        if strcmp(_en_c, "NodeType" to cstr) == 0 or strcmp(_en_c, "TypeKind" to cstr) == 0 or strcmp(_en_c, "LanguageMode" to cstr) == 0 or strcmp(_en_c, "SymbolKind" to cstr) == 0 or strcmp(_en_c, "LabelKind" to cstr) == 0 or strcmp(_en_c, "Severity" to cstr) == 0 or strcmp(_en_c, "ObjectState" to cstr) == 0 or strcmp(_en_c, "Endianness" to cstr) == 0 or strcmp(_en_c, "PassMode" to cstr) == 0 or strcmp(_en_c, "ImportKind" to cstr) == 0:
                                             enum_tag = get_enum_variant_val((deref en_oname_p).data to cstr, (deref en_vname_p).data to cstr)
                                             if enum_tag != None to ptr[u8]:
                                                 enum_tname = (deref en_oname_p).data to cstr
@@ -5306,7 +5324,7 @@ struct LLVMCodegen:
                         let enum_obj as String = node_name(dl)
                         if enum_obj.data != None to ptr[u8]:
                             let e_cstr as cstr = enum_obj.data to cstr
-                            if strcmp(e_cstr, "NodeType" to cstr) == 0 or strcmp(e_cstr, "TypeKind" to cstr) == 0 or strcmp(e_cstr, "LanguageMode" to cstr) == 0 or strcmp(e_cstr, "SymbolKind" to cstr) == 0 or strcmp(e_cstr, "LabelKind" to cstr) == 0 or strcmp(e_cstr, "Severity" to cstr) == 0 or strcmp(e_cstr, "ObjectState" to cstr) == 0 or strcmp(e_cstr, "Endianness" to cstr) == 0 or strcmp(e_cstr, "PassMode" to cstr) == 0:
+                            if strcmp(e_cstr, "NodeType" to cstr) == 0 or strcmp(e_cstr, "TypeKind" to cstr) == 0 or strcmp(e_cstr, "LanguageMode" to cstr) == 0 or strcmp(e_cstr, "SymbolKind" to cstr) == 0 or strcmp(e_cstr, "LabelKind" to cstr) == 0 or strcmp(e_cstr, "Severity" to cstr) == 0 or strcmp(e_cstr, "ObjectState" to cstr) == 0 or strcmp(e_cstr, "Endianness" to cstr) == 0 or strcmp(e_cstr, "PassMode" to cstr) == 0 or strcmp(e_cstr, "ImportKind" to cstr) == 0:
                                 return operand_val
         var source_type as String = type_to_llvm(node_inferred_type(operand))
         if operand != None to ptr[Node]:
@@ -6251,7 +6269,7 @@ struct LLVMCodegen:
             return make_type(TypeKind.F32)
         elif strcmp(name, "f64" to cstr) == 0:
             return make_type(TypeKind.F64)
-        elif strcmp(name, "NodeType" to cstr) == 0 or strcmp(name, "TypeKind" to cstr) == 0 or strcmp(name, "LanguageMode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "LabelKind" to cstr) == 0 or strcmp(name, "Severity" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0 or strcmp(name, "Endianness" to cstr) == 0 or strcmp(name, "PassMode" to cstr) == 0:
+        elif strcmp(name, "NodeType" to cstr) == 0 or strcmp(name, "TypeKind" to cstr) == 0 or strcmp(name, "LanguageMode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "LabelKind" to cstr) == 0 or strcmp(name, "Severity" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0 or strcmp(name, "Endianness" to cstr) == 0 or strcmp(name, "PassMode" to cstr) == 0 or strcmp(name, "ImportKind" to cstr) == 0:
             return make_type(TypeKind.I32)
         elif strcmp(name, "bool" to cstr) == 0:
             return make_type(TypeKind.Boolean)

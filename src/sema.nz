@@ -5,7 +5,7 @@ from std.collections import List
 from std.collections import Dict
 from std.option import Option, Empty
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import types
@@ -224,6 +224,10 @@ struct Sema:
                 s_idx = s_idx + 1 to i64
             return
         
+        let import_k as ImportKind = node_import_kind(node)
+        if import_k == ImportKind.C:
+            return
+        
         let path_buf as ptr[u8] = strdup(target.data to cstr) to ptr[u8]
         var idx as i64 = 0 to i64
         while path_buf[idx] != 0 to u8:
@@ -235,6 +239,36 @@ struct Sema:
             
         var content as String = String.make("" to cstr)
         var resolved_path as String = String.make("" to cstr)
+
+        if import_k == ImportKind.Path:
+            var path_content as String = read_file_to_str(target.data to cstr)
+            if path_content.len > 0 to usize:
+                content = path_content
+                resolved_path = String.make(target.data to cstr)
+            else:
+                let sbp as StringBuilder = StringBuilder.make()
+                sbp.append(target.data to cstr)
+                sbp.append(".nz" to cstr)
+                let target_nz as String = sbp.to_string()
+                path_content = read_file_to_str(target_nz.data to cstr)
+                if path_content.len > 0 to usize:
+                    content = path_content
+                    resolved_path = target_nz
+                else:
+                    target_nz.deinit()
+
+        if import_k == ImportKind.Vendor and content.len == 0 to usize:
+            let sbv as StringBuilder = StringBuilder.make()
+            sbv.append("vendor/" to cstr)
+            sbv.append(path_buf to cstr)
+            sbv.append(".nz" to cstr)
+            let v_path as String = sbv.to_string()
+            let v_content as String = read_file_to_str(v_path.data to cstr)
+            if v_content.len > 0 to usize:
+                content = v_content
+                resolved_path = v_path
+            else:
+                v_path.deinit()
         
         let sb1 as StringBuilder = StringBuilder.make()
         sb1.append("./" to cstr)
@@ -289,25 +323,26 @@ struct Sema:
         sb5.append(".nz" to cstr)
         let path5 as String = sb5.to_string()
         
-        content = read_file_to_str(path1.data to cstr)
-        if content.len > 0 to usize:
-            resolved_path = path1
-        else:
-            content = read_file_to_str(path2.data to cstr)
+        if content.len == 0 to usize:
+            content = read_file_to_str(path1.data to cstr)
             if content.len > 0 to usize:
-                resolved_path = path2
+                resolved_path = path1
             else:
-                content = read_file_to_str(path3.data to cstr)
+                content = read_file_to_str(path2.data to cstr)
                 if content.len > 0 to usize:
-                    resolved_path = path3
+                    resolved_path = path2
                 else:
-                    content = read_file_to_str(path4.data to cstr)
+                    content = read_file_to_str(path3.data to cstr)
                     if content.len > 0 to usize:
-                        resolved_path = path4
+                        resolved_path = path3
                     else:
-                        content = read_file_to_str(path5.data to cstr)
+                        content = read_file_to_str(path4.data to cstr)
                         if content.len > 0 to usize:
-                            resolved_path = path5
+                            resolved_path = path4
+                        else:
+                            content = read_file_to_str(path5.data to cstr)
+                            if content.len > 0 to usize:
+                                resolved_path = path5
 
                 // If still not found, walk up from the source file looking for a project root
                 if content.len == 0 to usize:
@@ -455,15 +490,25 @@ struct Sema:
         (deref (deref self).current_scope).symbols[target] = mod_sym
         
         let count as i64 = node_imported_symbols(node).length()
-        var s_idx as i64 = 0 to i64
-        while s_idx < count:
-            let s_name as String = node_imported_symbols(node)[s_idx]
-            if (deref mod_scope).symbols.has(s_name):
-                let orig_sym as ptr[Symbol] = (deref mod_scope).symbols[s_name]
-                (deref (deref self).current_scope).symbols[s_name] = orig_sym
-            else:
-                self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
-            s_idx = s_idx + 1 to i64
+        if count == 0 to i64 and (import_k == ImportKind.Path or import_k == ImportKind.Vendor):
+            let mod_keys as List[String] = (deref mod_scope).symbols.keys()
+            let mk_cnt as i64 = mod_keys.length()
+            var mki as i64 = 0 to i64
+            while mki < mk_cnt:
+                let sym_k as String = mod_keys[mki]
+                let sym_v as ptr[Symbol] = (deref mod_scope).symbols[sym_k]
+                (deref (deref self).current_scope).symbols[sym_k] = sym_v
+                mki = mki + 1 to i64
+        else:
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                if (deref mod_scope).symbols.has(s_name):
+                    let orig_sym as ptr[Symbol] = (deref mod_scope).symbols[s_name]
+                    (deref (deref self).current_scope).symbols[s_name] = orig_sym
+                else:
+                    self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
+                s_idx = s_idx + 1 to i64
             
         content.deinit()
 

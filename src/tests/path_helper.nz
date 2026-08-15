@@ -1,0 +1,3 @@
+// ── Path Helper Module ────────────────────────────────────────────────────────
+fn helper_mul(a as i32, b as i32) as i32:
+    return a * b

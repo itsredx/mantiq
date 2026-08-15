@@ -4,7 +4,7 @@ from std.string import String
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind
 from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
@@ -33,6 +33,20 @@ fn slice_string(s_data as ptr[u8], s_len as usize, start as usize, end as usize)
     let res as ptr[String] = make[String](1 to usize) to ptr[String]
     (deref res) = String(data = d, len = len, capacity = cap)
     return res to ptr
+
+fn strip_quotes(d as ptr[u8], len as usize) as String:
+    if len >= 2 to usize:
+        let c0 as u8 = deref d
+        let c1 as u8 = deref ((d to usize + len - 1 to usize) to ptr[u8])
+        if (c0 == 34 to u8 and c1 == 34 to u8) or (c0 == 39 to u8 and c1 == 39 to u8):
+            let inner as ptr[String] = slice_string(d, len, 1 to usize, len - 1 to usize) to ptr[String]
+            let res as String = deref inner
+            drop(inner to ptr)
+            return res
+    let slice_all as ptr[String] = slice_string(d, len, 0 to usize, len) to ptr[String]
+    let res_all as String = deref slice_all
+    drop(slice_all to ptr)
+    return res_all
 
 // ── Macro Definition Storage ─────────────────────────────────────────────
 struct MacroDef:
@@ -78,7 +92,7 @@ struct Lowerer:
         let root_ast as ptr[Node] = self.lower_node(ref root_ts)
         ts_parser_delete(parser)
         if root_ast != None to ptr[Node]:
-            tag_node_file_path(root_ast, (deref self).file_path)
+            tag_node_file_path(root_ast, (deref self).file_path.data to cstr)
         return root_ast
 
     public fn slice_string_from_node(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[String]:
@@ -117,10 +131,15 @@ struct Lowerer:
                     last_name_end = ts_node_end_byte_ptr(ref child) to usize
             idx = idx + 1 to u32
         
-        if first_name_start > 0 to usize and last_name_end > first_name_start:
-            let full_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, first_name_start, last_name_end) to ptr[String]
-            (deref annot).name = deref full_slice
-            drop(full_slice to ptr)
+        if first_name_start > 0 to usize:
+            let type_end as usize = ts_node_end_byte_ptr(ts_node) to usize
+            var end_pos as usize = type_end
+            while end_pos > first_name_start and (deref (((deref self).source_code.data to usize + end_pos - 1 to usize) to ptr[u8])) <= 32 to u8:
+                end_pos = end_pos - 1 to usize
+            if end_pos > first_name_start:
+                let full_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, first_name_start, end_pos) to ptr[String]
+                (deref annot).name = deref full_slice
+                drop(full_slice to ptr)
         
         return annot
 
@@ -900,7 +919,7 @@ struct Lowerer:
         
         // Generic clone: copy all fields via accessors
         let res as ptr[Node] = make_node(nt, span_val)
-        set_node_module_name(res, node_module_name(node))
+        (deref res).module_name = (deref node).module_name
         set_node_val(res, node_val(node))
         set_node_op(res, node_op(node))
         set_node_is_mut(res, node_is_mut(node))
@@ -1204,7 +1223,6 @@ struct Lowerer:
         (deref data).is_extern = is_extern_fn
         (deref data).is_variadic = is_variadic_fn
         (deref data).return_type_annot = ret_type_annot
-        (deref data).type_annots = None to ptr[List[Option[ptr[TypeAnnotation]]]]
         (deref n).data = data to ptr[u8]
         return n
 
@@ -1220,12 +1238,32 @@ struct Lowerer:
         var target as String = String.make("" to cstr)
         let imported_symbols as List[String] = List[String]()
         var alias as Option[String] = Empty
+        var kind as ImportKind = ImportKind.Normal
         
         extern fn strstr(haystack as cstr, needle as cstr) as cstr
         extern fn strtok(str as cstr, delim as cstr) as cstr
         extern fn strdup(s as cstr) as cstr
+        extern fn free(p as ptr)
+        extern fn strlen(s as cstr) as usize
+        
+        if strstr(text, "[c]" to cstr) != None to cstr or strstr(text, "[C]" to cstr) != None to cstr:
+            kind = ImportKind.C
+        elif strstr(text, "[vendor]" to cstr) != None to cstr:
+            kind = ImportKind.Vendor
+        elif strstr(text, "[path]" to cstr) != None to cstr:
+            kind = ImportKind.Path
+        elif strstr(text, "[pkg]" to cstr) != None to cstr:
+            kind = ImportKind.Pkg
         
         let buf as cstr = strdup(text)
+        var b_idx as usize = 0 to usize
+        while (deref ((buf to usize + b_idx) to ptr[u8])) != 0 to u8:
+            let b_char as u8 = deref ((buf to usize + b_idx) to ptr[u8])
+            if b_char == 91 to u8 or b_char == 93 to u8:
+                let b_p as ptr[u8] = (buf to usize + b_idx) to ptr[u8]
+                deref b_p = 32 to u8
+            b_idx = b_idx + 1 to usize
+            
         let delims as cstr = " \t\r\n," to cstr
         
         var first_tok as cstr = strtok(buf, delims)
@@ -1233,7 +1271,7 @@ struct Lowerer:
             if strcmp(first_tok, "from" to cstr) == 0:
                 let target_tok as cstr = strtok(None to cstr, delims)
                 if target_tok != None to cstr:
-                    target = String.make(target_tok)
+                    target = strip_quotes(target_tok to ptr[u8], strlen(target_tok))
                     
                 let import_tok as cstr = strtok(None to cstr, delims)
                 
@@ -1248,9 +1286,15 @@ struct Lowerer:
                     tokens.append(String.make(tok))
                     tok = strtok(None to cstr, delims)
                 
-                var from_idx as i64 = -1 to i64
-                var idx as i64 = 0 to i64
+                var start_tok_idx as i64 = 0 to i64
                 let tok_len as i64 = tokens.length()
+                if tok_len > 0 to i64:
+                    let t0 as cstr = tokens[0].data to cstr
+                    if strcmp(t0, "c" to cstr) == 0 or strcmp(t0, "vendor" to cstr) == 0 or strcmp(t0, "path" to cstr) == 0 or strcmp(t0, "pkg" to cstr) == 0:
+                        start_tok_idx = 1 to i64
+                
+                var from_idx as i64 = -1 to i64
+                var idx as i64 = start_tok_idx
                 while idx < tok_len:
                     if strcmp(tokens[idx].data to cstr, "from" to cstr) == 0:
                         from_idx = idx
@@ -1259,29 +1303,31 @@ struct Lowerer:
                 
                 if from_idx != -1 to i64:
                     if from_idx + 1 to i64 < tok_len:
-                        target = tokens[from_idx + 1 to i64]
+                        let t_str as String = tokens[from_idx + 1 to i64]
+                        target = strip_quotes(t_str.data, t_str.len)
                     
-                    var s_idx as i64 = 0 to i64
+                    var s_idx as i64 = start_tok_idx
                     while s_idx < from_idx:
                         imported_symbols.append(tokens[s_idx])
                         s_idx = s_idx + 1 to i64
                 else:
-                    if tok_len > 0 to i64:
-                        target = tokens[0]
+                    if tok_len > start_tok_idx:
+                        let t_str as String = tokens[start_tok_idx]
+                        target = strip_quotes(t_str.data, t_str.len)
                     
                     var placeholder_str as String = String.make("" to cstr)
-                    if tok_len >= 3 to i64:
-                        placeholder_str = tokens[2]
+                    if tok_len >= start_tok_idx + 3 to i64:
+                        placeholder_str = tokens[start_tok_idx + 2 to i64]
                         let opt_alias as Option[String] = Some(placeholder_str)
-                        if strcmp(tokens[1].data to cstr, "as" to cstr) == 0:
+                        if strcmp(tokens[start_tok_idx + 1 to i64].data to cstr, "as" to cstr) == 0:
                             alias = opt_alias
         
-        extern fn free(p as ptr)
         free(buf to ptr)
         text_str.deinit()
         
         let n as ptr[Node] = make_node(NodeType.ImportDecl, span)
         let data as ptr[ImportDeclData] = make[ImportDeclData](1 to usize) to ptr[ImportDeclData]
+        (deref data).kind = kind
         (deref data).target = target
         (deref data).imported_symbols = imported_symbols
         (deref data).alias = alias
@@ -1668,5 +1714,58 @@ fn make_lowerer_mantiq_from_cstr(source as cstr, path as cstr) as ptr[Lowerer]:
     return low
 
 // ── AST Origin Tagging ───────────────────────────────────────────────────
-fn tag_node_file_path(node as ptr[Node], file_path as String):
-    return
+fn tag_node_file_path(node as ptr[Node], file_path as cstr):
+    if node == None to ptr[Node] or file_path == None to cstr:
+        return
+    set_node_file_path(node, file_path)
+    
+    let k as NodeType = node_kind(node)
+    if k == NodeType.Program or k == NodeType.BlockStmt or k == NodeType.EnumDecl or k == NodeType.ListLiteral or k == NodeType.DictLiteral:
+        let decls_p as ptr[List[ptr[Node]]] = node_declarations_ptr(node)
+        if decls_p != None to ptr[List[ptr[Node]]]:
+            let count as i64 = (deref decls_p).length()
+            var i as i64 = 0 to i64
+            while i < count:
+                tag_node_file_path((deref decls_p)[i], file_path)
+                i = i + 1 to i64
+    elif k == NodeType.FunDecl or k == NodeType.MacroDecl or k == NodeType.MacroInvocation or k == NodeType.ClosureExpr:
+        let params_p as ptr[List[ptr[Node]]] = node_params_ptr(node)
+        if params_p != None to ptr[List[ptr[Node]]]:
+            let p_count as i64 = (deref params_p).length()
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                tag_node_file_path((deref params_p)[pi], file_path)
+                pi = pi + 1 to i64
+        tag_node_file_path(node_body(node), file_path)
+    elif k == NodeType.CallExpr:
+        tag_node_file_path(node_left(node), file_path)
+        let args_p as ptr[List[ptr[Node]]] = node_params_ptr(node)
+        if args_p != None to ptr[List[ptr[Node]]]:
+            let a_cnt as i64 = (deref args_p).length()
+            var ai as i64 = 0 to i64
+            while ai < a_cnt:
+                tag_node_file_path((deref args_p)[ai], file_path)
+                ai = ai + 1 to i64
+    elif k == NodeType.BinaryExpr or k == NodeType.IndexExpr:
+        tag_node_file_path(node_left(node), file_path)
+        tag_node_file_path(node_right(node), file_path)
+    elif k == NodeType.IfStmt:
+        tag_node_file_path(node_cond(node), file_path)
+        tag_node_file_path(node_then_branch(node), file_path)
+        let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
+        let else_opt_ref as ptr[OptionLayout] = (ref else_opt_raw) to ptr[OptionLayout]
+        if (deref else_opt_ref).has_val == 1 to u8 and (deref else_opt_ref).val_ptr != None to ptr[u8]:
+            let else_ptr as ptr[Node] = (deref else_opt_ref).val_ptr to ptr[Node]
+            tag_node_file_path(else_ptr, file_path)
+    elif k == NodeType.WhileStmt:
+        tag_node_file_path(node_cond(node), file_path)
+        tag_node_file_path(node_body(node), file_path)
+    elif k == NodeType.ForStmt:
+        tag_node_file_path(node_left(node), file_path)
+        tag_node_file_path(node_body(node), file_path)
+    elif k == NodeType.StructDecl or k == NodeType.UnionDecl or k == NodeType.WithStmt or k == NodeType.TryStmt or k == NodeType.MatchStmt:
+        tag_node_file_path(node_left(node), file_path)
+        tag_node_file_path(node_body(node), file_path)
+    elif k == NodeType.VarDecl or k == NodeType.ReturnStmt or k == NodeType.UnaryExpr or k == NodeType.CastExpr or k == NodeType.MemberExpr or k == NodeType.SpreadExpr or k == NodeType.AwaitExpr:
+        tag_node_file_path(node_left(node), file_path)
+        tag_node_file_path(node_body(node), file_path)

@@ -70,6 +70,13 @@ enum NodeType:
     UnionDecl
     FieldDecl
 
+enum ImportKind:
+    Normal
+    Path
+    Vendor
+    C
+    Pkg
+
 // ── Per-Variant Data Structs ───────────────────────────────────────────
 // Each node type has exactly the fields it needs, no more.
 
@@ -77,6 +84,7 @@ struct ProgramData:
     public var declarations as List[ptr[Node]]
 
 struct ImportDeclData:
+    public var kind as ImportKind
     public var target as String
     public var imported_symbols as List[String]
     public var alias as Option[String]
@@ -351,6 +359,14 @@ fn node_module_name(n as ptr[Node]) as Option[String]:
 fn set_node_module_name(n as ptr[Node], m as Option[String]):
     if n != None to ptr[Node]:
         (deref n).module_name = m
+
+fn set_node_file_path(n as ptr[Node], path as cstr):
+    if n != None to ptr[Node] and path != None to cstr:
+        let s_ptr as ptr[String] = make[String](1 to usize) to ptr[String]
+        (deref s_ptr) = String.make(path)
+        let opt_ref as ptr[OptionLayout] = (ref (deref n).module_name) to ptr[OptionLayout]
+        (deref opt_ref).has_val = 1 to u8
+        (deref opt_ref).val_ptr = s_ptr to ptr[u8]
 
 fn node_file_path(n as ptr[Node], default_file as String) as String:
     if n == None to ptr[Node]:
@@ -734,6 +750,27 @@ fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
         r = (deref d).declarations
     return r
 
+fn node_declarations_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return None to ptr[List[ptr[Node]]]
+    let k as NodeType = (deref n).kind
+    if k == NodeType.Program:
+        let d as ptr[ProgramData] = (deref n).data to ptr[ProgramData]
+        return ref (deref d).declarations
+    elif k == NodeType.BlockStmt:
+        let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        return ref (deref d).declarations
+    elif k == NodeType.EnumDecl:
+        let d as ptr[EnumDeclData] = (deref n).data to ptr[EnumDeclData]
+        return ref (deref d).declarations
+    elif k == NodeType.ListLiteral:
+        let d as ptr[ListLiteralData] = (deref n).data to ptr[ListLiteralData]
+        return ref (deref d).declarations
+    elif k == NodeType.DictLiteral:
+        let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
+        return ref (deref d).declarations
+    return None to ptr[List[ptr[Node]]]
+
 fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return
@@ -776,6 +813,27 @@ fn node_params(n as ptr[Node]) as List[ptr[Node]]:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         r = (deref d).params
     return r
+
+fn node_params_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return None to ptr[List[ptr[Node]]]
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        return ref (deref d).params
+    elif k == NodeType.CallExpr:
+        let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
+        return ref (deref d).params
+    elif k == NodeType.MacroDecl:
+        let d as ptr[MacroDeclData] = (deref n).data to ptr[MacroDeclData]
+        return ref (deref d).params
+    elif k == NodeType.MacroInvocation:
+        let d as ptr[MacroInvocationData] = (deref n).data to ptr[MacroInvocationData]
+        return ref (deref d).params
+    elif k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        return ref (deref d).params
+    return None to ptr[List[ptr[Node]]]
 
 fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
@@ -1168,6 +1226,23 @@ fn set_node_alias(n as ptr[Node], alias as Option[String]):
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).alias = alias
+
+// kind accessor (ImportDecl):
+fn node_import_kind(n as ptr[Node]) as ImportKind:
+    var r as ImportKind = ImportKind.Normal
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).kind
+    return r
+
+fn set_node_import_kind(n as ptr[Node], kind as ImportKind):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.ImportDecl:
+        let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        (deref d).kind = kind
 
 // ── SymbolKind ─────────────────────────────────────────────────────────
 enum SymbolKind:

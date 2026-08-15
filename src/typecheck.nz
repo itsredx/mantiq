@@ -5,7 +5,7 @@ from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
 import symbols
-from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node
+from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node
 import types
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type
 import sema
@@ -259,6 +259,25 @@ struct TypeChecker:
             (deref t).payload = elem_type
             return t
 
+        // Handle T? optional type syntax (e.g. void?, i32?, String?)
+        if name_len > 1 to usize and (deref ((name_data to usize + name_len - 1 to usize) to ptr[u8])) == 63 to u8:
+            let inner_len as usize = name_len - 1 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m4 as ptr = memcpy(inner_buf to ptr, name_data to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            let t as ptr[Type] = make_type(TypeKind.Option)
+            (deref t).payload = elem_type
+            return t
+
         // Handle ptr[T]
         if strcmp(name, "ptr" to cstr) == 0:
             let opt_gen as ptr[u8] = (ref (deref annot).generics) to ptr[u8]
@@ -283,12 +302,22 @@ struct TypeChecker:
 
         return make_struct_type(String.make(name))
 
-    public fn check_nizam_import(self as ptr[TypeChecker], name as cstr, span as Span):
+    public fn check_nizam_import(self as ptr[TypeChecker], name as cstr, span as Span, file_path as String):
         if (deref (deref self).sema).mode to i32 == LanguageMode.Nizam to i32:
             extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
             extern fn free(p as ptr)
             extern fn strchr(s as cstr, c as i32) as cstr
             extern fn strtok(str as cstr, delim as cstr) as cstr
+            extern fn strlen(s as cstr) as usize
+
+            let name_len as usize = strlen(name)
+            if name_len > 1 to usize and (deref ((name to usize + name_len - 1 to usize) to ptr[u8])) == 63 to u8:
+                let inner_buf as ptr[u8] = make[u8](name_len) to ptr[u8]
+                let _mo as ptr = memcpy(inner_buf to ptr, name to ptr, name_len - 1 to usize)
+                inner_buf[name_len - 1 to usize] = 0 to u8
+                self.check_nizam_import(inner_buf to cstr, span, file_path)
+                free(inner_buf to ptr)
+                return
 
             let bracket_pos as cstr = strchr(name, '[' to i32)
             if bracket_pos != None to cstr:
@@ -297,7 +326,7 @@ struct TypeChecker:
                     let base_buf as ptr[u8] = make[u8](i + 1 to usize) to ptr[u8]
                     let _mb as ptr = memcpy(base_buf to ptr, name to ptr, i)
                     base_buf[i] = 0 to u8
-                    self.check_nizam_import(base_buf to cstr, span)
+                    self.check_nizam_import(base_buf to cstr, span, file_path)
                     free(base_buf to ptr)
 
                 let close_bracket as cstr = strchr(bracket_pos, ']' to i32)
@@ -314,7 +343,7 @@ struct TypeChecker:
                             while (deref (tok to ptr[u8])) == 32 to u8:
                                 tok = (tok to usize + 1 to usize) to cstr
                             if (deref (tok to ptr[u8])) != 0 to u8:
-                                self.check_nizam_import(tok, span)
+                                self.check_nizam_import(tok, span, file_path)
                             tok = strtok(None to cstr, "," to cstr)
                         free(inner_buf to ptr)
 
@@ -350,7 +379,7 @@ struct TypeChecker:
                     sb.append(name)
                     sb.append(" requires explicit import in Nizam strict mode" to cstr)
                     let msg as String = sb.to_string()
-                    let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_with_code("E0316" to cstr, msg, (deref (deref self).sema).current_file, span)
+                    let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_with_code("E0316" to cstr, msg, file_path, span)
                     if d != None to ptr[Diagnostic]:
                         d.set_explanation(String.make("Nizam strict mode requires all types and identifiers from external modules to be explicitly imported." to cstr))
                         d.add_help(String.make("Add an explicit `from <module> import <Symbol>` declaration." to cstr))
@@ -404,7 +433,7 @@ struct TypeChecker:
             
         let nt as NodeType = node_kind(node)
         let res as ptr[Node] = make_node(nt, node_span(node))
-        set_node_module_name(res, node_module_name(node))
+        (deref res).module_name = (deref node).module_name
         set_node_val(res, node_val(node))
         set_node_op(res, node_op(node))
         set_node_is_mut(res, node_is_mut(node))
@@ -530,7 +559,7 @@ struct TypeChecker:
                         let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
                         if annot_val != None to ptr[TypeAnnotation]:
                             annotated_type = self.resolve_type_annotation(annot_val)
-                            self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node))
+                            self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
             
             if node_left(node) != None to ptr[Node]:
                 let init_node as ptr[Node] = node_left(node)
@@ -584,6 +613,7 @@ struct TypeChecker:
             if ret_annot != None to ptr[TypeAnnotation]:
                 if (deref ret_annot).name.len > 0 to usize:
                     (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
+                    self.check_nizam_import((deref ret_annot).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
                 else:
                     (deref f_type).return_type = make_type(TypeKind.Void)
             else:
@@ -616,7 +646,7 @@ struct TypeChecker:
                             let p_annot_val as ptr[TypeAnnotation] = p_val_p to ptr[TypeAnnotation]
                             if p_annot_val != None to ptr[TypeAnnotation]:
                                 p_type = self.resolve_type_annotation(p_annot_val)
-                                self.check_nizam_import((deref p_annot_val).name.data to cstr, node_span(p_node))
+                                self.check_nizam_import((deref p_annot_val).name.data to cstr, node_span(p_node), node_file_path(p_node, (deref (deref self).sema).current_file))
                 
                 if p_type == None to ptr[Type]:
                     if p_idx == 0 to i64 and strcmp(p_name, "self" to cstr) == 0 and (deref self).current_struct_type != None to ptr[Type]:

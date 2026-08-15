@@ -1,0 +1,3 @@
+// ── Vendor Module: Grep ──────────────────────────────────────────────────────
+fn grep_count(s as cstr) as i32:
+    return 7

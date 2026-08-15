@@ -1,0 +1,184 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String, StringBuilder
+from std.collections import List, Dict
+from std.option import Option, Empty, Some
+from std.mem import make
+import symbols
+from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, make_node, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_file_path
+import lower
+from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema, make_scope, make_symbol, Scope, Symbol, SymbolKind
+import types
+from types import Type, TypeKind, make_type
+import typecheck
+from typecheck import TypeChecker
+import error
+from error import DiagnosticEngine, Diagnostic
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn fopen(filename as cstr, mode as cstr) as ptr
+extern fn fclose(stream as ptr) as i32
+extern fn fwrite(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
+extern fn strlen(s as cstr) as usize
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
+extern fn remove(pathname as cstr) as i32
+
+// ── File Helper ──────────────────────────────────────────────────────────
+fn write_file(path as cstr, content as cstr):
+    let f as ptr = fopen(path, "wb" to cstr)
+    if f != None to ptr:
+        let l as usize = strlen(content)
+        let _w as usize = fwrite(content to ptr, 1 to usize, l, f)
+        fclose(f)
+
+// ── Main Entry ───────────────────────────────────────────────────────────
+fn main() -> i32:
+    let _hdr as i32 = printf("=== Running Multi-File Error Location Tests ===\n\n" to cstr)
+
+    // ── Test 1: Type Mismatch in Imported Module ─────────────────────────
+    let path_imp1 as cstr = "/tmp/mfe_imported1.nz" to cstr
+    let src_imp1 as cstr = "fn compute_total(a as i32, b as i32) -> i32:\n    let s as String = \"not an int\"\n    return s\n" to cstr
+    write_file(path_imp1, src_imp1)
+
+    let path_ent1 as cstr = "/tmp/mfe_entry1.nz" to cstr
+    let src_ent1 as cstr = "import[path] \"/tmp/mfe_imported1.nz\"\nfrom mfe_imported1 import compute_total\n\nfn main() -> i32:\n    let x as i32 = compute_total(10, 20)\n    return x\n" to cstr
+    write_file(path_ent1, src_ent1)
+
+    let engine1 as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine1.init()
+    engine1.register_source(String.make(path_ent1), String.make(src_ent1))
+
+    let lowerer1 as ptr[Lowerer] = make_lowerer_from_cstr(src_ent1, path_ent1)
+    let root1 as ptr[Node] = (deref lowerer1).lower_source()
+
+    let sema1 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref sema1).init_sema(path_ent1)
+    (deref sema1).engine = engine1
+    (deref sema1).root_ast = root1
+    sema1.declare_pass(root1)
+    sema1.resolve_pass(root1)
+
+    let tc1 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc1).init_tc(sema1)
+    let _tc1_res as ptr[Type] = (deref tc1).typecheck_node(root1)
+
+    var test1_passed as bool = False
+    if (deref engine1).diagnostics.length() > 0 to i64:
+        let diag1 as ptr[Diagnostic] = (deref engine1).diagnostics[0]
+        let file1 as cstr = (deref diag1).file_path.data to cstr
+        if strstr(file1, "mfe_imported1.nz" to cstr) != None to cstr:
+            test1_passed = True
+
+    if test1_passed:
+        let _p as i32 = printf("Test 1 (Type Mismatch in Imported Module File Attribution): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 1 (Type Mismatch in Imported Module File Attribution): FAILED!\n" to cstr)
+
+    // ── Test 2: Strict Mode Missing Import in Imported Module ────────────
+    let path_imp2 as cstr = "/tmp/mfe_imported2.nz" to cstr
+    let src_imp2 as cstr = "fn create_date() -> i32:\n    let d as DateTime = 0 to i32\n    return 0\n" to cstr
+    write_file(path_imp2, src_imp2)
+
+    let path_ent2 as cstr = "/tmp/mfe_entry2.nz" to cstr
+    let src_ent2 as cstr = "import[path] \"/tmp/mfe_imported2.nz\"\nfrom mfe_imported2 import create_date\n\nfn main() -> i32:\n    return create_date()\n" to cstr
+    write_file(path_ent2, src_ent2)
+
+    let engine2 as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine2.init()
+    engine2.register_source(String.make(path_ent2), String.make(src_ent2))
+
+    let lowerer2 as ptr[Lowerer] = make_lowerer_from_cstr(src_ent2, path_ent2)
+    let root2 as ptr[Node] = (deref lowerer2).lower_source()
+
+    let sema2 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref sema2).init_sema(path_ent2)
+    (deref sema2).engine = engine2
+    (deref sema2).root_ast = root2
+    sema2.declare_pass(root2)
+    sema2.resolve_pass(root2)
+
+    let tc2 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc2).init_tc(sema2)
+    let _tc2_res as ptr[Type] = (deref tc2).typecheck_node(root2)
+
+    var test2_passed as bool = False
+    if (deref engine2).diagnostics.length() > 0 to i64:
+        let diag2 as ptr[Diagnostic] = (deref engine2).diagnostics[0]
+        let file2 as cstr = (deref diag2).file_path.data to cstr
+        if strstr(file2, "mfe_imported2.nz" to cstr) != None to cstr:
+            test2_passed = True
+
+    if test2_passed:
+        let _p as i32 = printf("Test 2 (Strict Mode Missing Import Attribution): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 2 (Strict Mode Missing Import Attribution): FAILED!\n" to cstr)
+
+    // ── Test 3: Transitive Multi-Hop Import Error Attribution ────────────
+    let path_lib_b as cstr = "/tmp/mfe_lib_b.nz" to cstr
+    let src_lib_b as cstr = "fn helper_b() -> i32:\n    let val as String = \"wrong\"\n    return val\n" to cstr
+    write_file(path_lib_b, src_lib_b)
+
+    let path_lib_a as cstr = "/tmp/mfe_lib_a.nz" to cstr
+    let src_lib_a as cstr = "import[path] \"/tmp/mfe_lib_b.nz\"\nfrom mfe_lib_b import helper_b\n\nfn helper_a() -> i32:\n    return helper_b()\n" to cstr
+    write_file(path_lib_a, src_lib_a)
+
+    let path_ent3 as cstr = "/tmp/mfe_entry3.nz" to cstr
+    let src_ent3 as cstr = "import[path] \"/tmp/mfe_lib_a.nz\"\nfrom mfe_lib_a import helper_a\n\nfn main() -> i32:\n    return helper_a()\n" to cstr
+    write_file(path_ent3, src_ent3)
+
+    let engine3 as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine3.init()
+    engine3.register_source(String.make(path_ent3), String.make(src_ent3))
+
+    let lowerer3 as ptr[Lowerer] = make_lowerer_from_cstr(src_ent3, path_ent3)
+    let root3 as ptr[Node] = (deref lowerer3).lower_source()
+
+    let sema3 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref sema3).init_sema(path_ent3)
+    (deref sema3).engine = engine3
+    (deref sema3).root_ast = root3
+    sema3.declare_pass(root3)
+    sema3.resolve_pass(root3)
+
+    let tc3 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc3).init_tc(sema3)
+    let _tc3_res as ptr[Type] = (deref tc3).typecheck_node(root3)
+
+    var test3_passed as bool = False
+    if (deref engine3).diagnostics.length() > 0 to i64:
+        let diag3 as ptr[Diagnostic] = (deref engine3).diagnostics[0]
+        let file3 as cstr = (deref diag3).file_path.data to cstr
+        if strstr(file3, "mfe_lib_b.nz" to cstr) != None to cstr:
+            test3_passed = True
+
+    if test3_passed:
+        let _p as i32 = printf("Test 3 (Transitive Multi-Hop Import Attribution): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 3 (Transitive Multi-Hop Import Attribution): FAILED!\n" to cstr)
+
+    // ── Test 4: Visual Diagnostic Box Rendering on Multi-File Error ─────
+    if (deref engine1).diagnostics.length() > 0 to i64:
+        engine1.emit_all_cached()
+        let _p as i32 = printf("Test 4 (Multi-File Diagnostic Box Rendering): PASSED!\n\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 4 (Multi-File Diagnostic Box Rendering): FAILED!\n\n" to cstr)
+
+    // ── Cleanup Temporary Fixture Files ──────────────────────────────────
+    let _c1 as i32 = remove(path_imp1)
+    let _c2 as i32 = remove(path_ent1)
+    let _c3 as i32 = remove(path_imp2)
+    let _c4 as i32 = remove(path_ent2)
+    let _c5 as i32 = remove(path_lib_b)
+    let _c6 as i32 = remove(path_lib_a)
+    let _c7 as i32 = remove(path_ent3)
+
+    if test1_passed and test2_passed and test3_passed:
+        let _p_all as i32 = printf(">>> ALL MULTI-FILE ERROR TESTS PASSED <<<\n" to cstr)
+        return 0
+    else:
+        let _p_fail as i32 = printf(">>> SOME MULTI-FILE ERROR TESTS FAILED <<<\n" to cstr)
+        return 1

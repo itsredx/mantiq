@@ -29,6 +29,8 @@ TEST_FILES=(
     "src/tests/test_traverse.nz"
     "src/tests/test_utils.nz"
     "src/tests/test_codegen.nz"
+    "src/tests/test_tagged_imports_and_options.nz"
+    "src/tests/test_multifile_error.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

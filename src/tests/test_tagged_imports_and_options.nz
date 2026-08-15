@@ -1,0 +1,30 @@
+import[c] "stdio.h"
+import[c] "time.h"
+import[path] "src/tests/path_helper.nz"
+import[vendor] grep
+
+// ── Test Module ──────────────────────────────────────────────────────────────
+fn add(a as i32, b as i32) as i32:
+    return a + b
+
+fn check_option_i32(val as i32?) as i32:
+    let opt as i32? = val
+    return 100
+
+fn main():
+    // 1. Test optional type annotations with T? syntax
+    let empty as void? = None
+    let count as i32? = None
+    let name as String? = None
+    let active as bool? = None
+    
+    // 2. Test functions with T? parameters
+    let r as i32 = check_option_i32(count)
+    let total as i32 = add(r, 42)
+    
+    // 3. Test import[path] and import[vendor] function calls
+    let mul as i32 = helper_mul(2, 5)
+    let g_cnt as i32 = grep_count("pattern" to cstr)
+    
+    let final_res as i32 = total + mul + g_cnt
+    print(final_res)

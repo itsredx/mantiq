@@ -612,7 +612,10 @@ struct DiagnosticEngine:
         (deref self).use_color = True
 
     public fn register_source(self as ptr[DiagnosticEngine], file_path as String, source as String):
-        (deref self).source_cache[file_path] = source
+        if source.data != None to ptr[u8]:
+            (deref self).source_cache[file_path] = String.make(source.data to cstr)
+        else:
+            (deref self).source_cache[file_path] = source
 
     public fn get_source(self as ptr[DiagnosticEngine], file_path as String) as cstr:
         if (deref self).source_cache.has(file_path):
