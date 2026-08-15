@@ -25,9 +25,9 @@ fn main() -> i32:
     let error_span as Span = Span(start_byte = 53 to u32, end_byte = 57 to u32, start_row = 1 to u32, start_col = 23 to u32, end_row = 1 to u32, end_col = 27 to u32)
     let diag1 as ptr[Diagnostic] = engine.report_error("E0308" to cstr, String.make("mismatched types: expected `i32`, found `String`" to cstr), String.make("src/main.nz" to cstr), error_span)
 
-    diag1.set_explanation(String.make("Nizam requires strict type compatibility during variable assignment." to cstr))
-    diag1.add_help(String.make("To convert a `String` to `i32`, call `.parse_i32()` on the string value." to cstr))
-    diag1.add_suggestion(error_span, String.make("42" to cstr), String.make("Replace string literal with integer literal" to cstr))
+    diag1.set_explanation(String.make("Nizam enforces strict static type discipline during variable assignments and function returns. Implicit type coercion is prohibited to ensure memory safety and determinism." to cstr))
+    diag1.add_help(String.make("To convert a `String` to `i32`, call `.parse_i32()` on the string value, or check if the source expression can directly provide an integer." to cstr))
+    diag1.add_suggestion(error_span, String.make("42" to cstr), String.make("Replace string literal with integer literal in assignment expression" to cstr))
 
     // ── Test 2: Unused Variable Warning ──────────────────────────────────
     let warn_span as Span = Span(start_byte = 64 to u32, end_byte = 69 to u32, start_row = 2 to u32, start_col = 11 to u32, end_row = 2 to u32, end_col = 16 to u32)

@@ -2,361 +2,167 @@
 
 ## Overview
 
-The Mantiq/Nizam compiler is written in **Zig** and compiles source code through a multi-stage pipeline:
+The Mantiq / Nizam compiler is a **fully self-hosted compiler** written in **Nizam** (`src/*.nz`). It translates Mantiq and Nizam source code into LLVM Intermediate Representation (IR) and compiles it into native standalone executables using Clang/LLVM, with full tree-sitter CST parsing, two-pass semantic analysis, type inference & checking, borrow checking with auto-drop injection, rich multi-file diagnostics with error codes, and macro expansion.
 
 ```
-Source text
+Source text (*.nz, *.mq)
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 1. Parser (tree-sitter C FFI)                       │
-│    Source → tree-sitter CST (Concrete Syntax Tree)  │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 1. Tree-Sitter Parser (FFI C Binding)                  │
+│    Source → Tree-Sitter CST (Concrete Syntax Tree)     │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 2. Lower (CST → AST)                                │
-│    Tree-sitter CST → Mantiq AST (ast.zig: Node)     │
-│    Macro expansion, Nizam strict mode enforcement   │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 2. CST Lowering & Macro Expansion (src/lower.nz)       │
+│    Tree-Sitter CST → Nizam AST (Node / Span)           │
+│    Hygienic macro expansion, strict mode validation    │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 3. Semantic Analysis (sema.zig)                     │
-│    Two-pass: declare → resolve                      │
-│    Symbol table construction, scope resolution,     │
-│    module loading, closure capture analysis         │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 3. Semantic Analysis (src/sema.nz)                     │
+│    Two-pass: declare_pass → resolve_pass               │
+│    Symbol tables, lexical scoping, module loading,     │
+│    closure capture detection, multi-file registration  │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 4. CFG Analysis (cfg.zig)                           │
-│    Control flow graph checks:                       │
-│    - Return path completeness                       │
-│    - Unreachable code detection                     │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 4. Type Checking & Monomorphization (src/typecheck.nz) │
+│    Bidirectional type inference, coercion rules,       │
+│    generic struct/function monomorphization,           │
+│    destination-driven literal type inference           │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 5. Type Checking (typecheck.zig)                    │
-│    Type inference, unification, validation          │
-│    Generic monomorphization (struct + function)     │
-│    Nizam allocation rules enforcement               │
-│    Built-in function type resolution                │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 5. Borrow Checking & Auto-Drops (src/borrowck.nz)      │
+│    Move semantics state machine (Owned → Moved)        │
+│    Use-after-move / use-after-drop verification        │
+│    Scope auto-drop injection at block exits            │
+│    Context manager (`with` stmt) lifecycle drop        │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 6. Borrow Checking (borrowck.zig)                   │
-│    Ownership state machine: Owned → Moved | Dropped │
-│    Auto-drop injection at scope exit                │
-│    Context manager (with stmt) integration          │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 6. LLVM IR Code Generation (src/codegen.nz)            │
+│    AST → SSA LLVM IR text emission                     │
+│    Struct/union memory layout, mangling, ABI calls,    │
+│    closure environment boxing and function pointers    │
+└────────────────────────────────────────────────────────┘
   │
   ▼
-┌─────────────────────────────────────────────────────┐
-│ 7. Dead Code Elimination (dce.zig)                  │
-│    Mark-and-sweep two-phase design                  │
-│    Quantum-specific tree shaking (std.quantum)      │
-│    Constant-folding boolean branches                │
-└─────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────┐
-│ 8. AST Merging (mergeImportedDeclarations)          │
-│    Inline imported module ASTs into the root AST    │
-└─────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────┐
-│ 9. Code Generation (codegen.zig)                    │
-│    AST → LLVM IR string                             │
-│    - Type mapping (fat pointers, Option, Any, etc.) │
-│    - Auto-drop cleanup generation                   │
-│    - Temporary lifetime management                  │
-│    - Closure outlining + trampoline patterns        │
-│    - Parallel loop codegen (for@par)                │
-└─────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────┐
-│ 10. JIT (jit.zig)                                   │
-│     LLVM IR → zig cc -shared → .so → dlopen → exec │
-│     Incremental: previous .so linked into new ones  │
-└─────────────────────────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────────────────────────┐
-│ OR AOT (aot.zig)                                    │
-│     LLVM IR → zig cc → native binary (.o / elf)    │
-│     WASM cross-compilation path                     │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ 7. Native Linkage & Binary Generation (src/main.nz)    │
+│    LLVM IR + C Runtime (runtime.c) + Tree-sitter FFI   │
+│    Linked via zig cc / clang → Native Executable       │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Stage Details
+## 1. Core Modules
 
-### 1. Parser — `parser.zig` (37 lines)
-
-A thin Zig wrapper around the tree-sitter C library. It:
-- Initialises a `TSParser` with the external `tree_sitter_mantiq()` language (compiled from `tree-sitter-mantiq/`)
-- Exposes `parseString(source) → TSTree`
-- The resulting `TSTree` is a **Concrete Syntax Tree** (CST) — a full-fidelity parse tree with whitespace and comments
-
-**Key files:** `parser.zig`, `tree-sitter-mantiq/src/parser.c`
-
----
-
-### 2. Lower — `lower.zig` (~2870 lines, largest lowering pass)
-
-Converts the tree-sitter CST into the Mantiq **AST** (`ast.zig:Node`). This is the most substantial transformation pass:
-
-| Responsibility | Details |
-|---|---|
-| CST→AST conversion | Walks tree-sitter nodes, constructs `ast.Node` tagged union variants |
-| Macro expansion | `MacroDef` struct stores param names + body AST; invocation performs text substitution |
-| Nizam strict mode | `StrictNizamViolation` error for Mantiq-only features in Nizam mode (e.g., classes) |
-| Ternary lowering | `X if cond else Y` → AST `IfStmt` |
-| Type annotation parsing | Recursive `lowerTypeAnnotation` for generics, tuples, function signatures |
-
-**Entry point:** `Lowerer.lowerProgram(root_node) → *ast.Node`
+| Module | Source File | Lines | Responsibilities |
+| :--- | :--- | :--- | :--- |
+| **AST & Symbols** | `src/symbols.nz` | ~1,200 | `Node`, `Span`, `Symbol`, `Scope`, `NodeType` definitions, accessors, and setters |
+| **Type System** | `src/types.nz` | ~180 | `Type`, `TypeKind`, primitive/composite types, copy vs move classification |
+| **Tree-Sitter FFI** | `src/tree_sitter.nz` | ~100 | C FFI bindings to Tree-sitter parser, node navigation, and cursor API |
+| **CST Lowering** | `src/lower.nz` | ~1,700 | Transforms Tree-sitter CST to typed AST, macro definition/invocation handling |
+| **Semantic Analysis** | `src/sema.nz` | ~800 | Two-pass symbol declaration and resolution, module import loading, closure detection |
+| **Type Checker** | `src/typecheck.nz` | ~1,100 | Type validation, type unification, generic monomorphization, literal inference |
+| **Borrow Checker** | `src/borrowck.nz` | ~450 | Move analysis, use-after-move detection, deterministic auto-drop injection |
+| **LLVM Codegen** | `src/codegen.nz` | ~6,350 | Generates SSA LLVM IR, type-to-LLVM mapping, struct layouts, function emission |
+| **Diagnostic Engine** | `src/error.nz` | ~1,070 | Box-drawing ANSI terminal renderer, multi-file source cache, error codes catalog |
+| **CLI Driver** | `src/main.nz` | ~230 | CLI entry point (`build`, `repl`, `run`), pipeline orchestration, native linker invocation |
+| **C Runtime** | `src/runtime.c` | ~975 | Task actor concurrency, dictionary hash table, string utilities, memory management |
 
 ---
 
-### 3. Semantic Analysis — `sema.zig` (~850 lines)
+## 2. Diagnostic Engine & Error Reporting (`src/error.nz`)
 
-Two-pass symbol resolution:
+The compiler incorporates a state-of-the-art terminal diagnostic renderer inspired by modern compiler design (Rust/Clang), featuring:
 
-- **Pass 1 (declare):** Walks the AST to register all declarations (functions, variables, structs, classes, interfaces, enums, unions, imports) into symbol tables (`symbols.Scope`)
-- **Pass 2 (resolve):** Resolves identifier references to their declarations, links `resolved_symbol` pointers on `Identifier` nodes
+1. **Standardized Error Codes Catalog**:
+   - `[E0101]`: Undeclared variable or symbol.
+   - `[E0102]`: Duplicate variable or symbol declaration.
+   - `[E0103]`: Symbol not found in module.
+   - `[E0201]`: Class usage in Nizam strict mode (`struct` required).
+   - `[E0301]`: Unresolved type annotation.
+   - `[E0308]`: Type mismatch in expression / assignment / return.
+   - `[E0401]`: Use of moved variable (borrow checker).
+   - `[E0402]`: Use of dropped variable.
+   - `[E0403]`: Cannot borrow mutably.
+   - `[E0501]`: Undefined macro invocation.
+   - `[E0502]`: Macro argument count mismatch.
+   - `[W0012]`: Unused variable warning.
 
-Additional responsibilities:
-- **Module loading:** `resolveModulePath` searches `cwd → project root → $MANTIQ_VENDOR_PATH → ~/.mantiq/vendor/ → /usr/lib/mantiq/vendor/`
-- **Circular dependency prevention:** via `loaded_modules` HashMap
-- **Project root discovery:** `findProjectRoot` walks up directories looking for `nmproject.toml`, `mantiq.toml`, `nizam.toml`, `project.toml`, `mantiq-compiler/`, `std/`
-- **Name mangling:** `mangleModuleName` — `mantiq_` prefix, `/ → __`, `. → _`
-- **Built-in symbol injection:** Language-appropriate builtins injected for each `std.*` module
-- **Closure capture analysis** (lines 662-684): Detects upvalues — variables accessed from an outer scope within a closure
+2. **Box-Drawing Terminal Formatting**:
+   - Adaptive terminal column width (`COLUMNS` environment variable or standard 80-120 columns).
+   - Unicode box-drawing characters (`╭─`, `├─`, `│`, `╰─`).
+   - Highlighted source code snippets with exact line and column numbers.
+   - Caret underline markers (`▲▲▲▲▲`) pointing directly at erroneous spans.
+   - Explanatory diagnosis sections (`💡 Why this happened`).
+   - Actionable remediation hints (`⚡ How to fix`).
+   - Optional compiler notes (`📌 Note`) and concrete replacement suggestions (`🔧 Suggested Fix`).
 
-**Entry point:** `SemanticAnalyzer.analyze(ast_root)`
-
----
-
-### 4. CFG Analysis — `cfg.zig` (~90 lines)
-
-Control flow graph analysis on the AST:
-
-- **Return path completeness:** Verifies all execution paths in non-void functions end with `return`
-- **Unreachable code detection:** Flags statements after guaranteed returns
-- `WhileStmt` is treated as not guaranteeing a return (the condition could be false)
-
-**Entry point:** `CFGAnalyzer.analyzeProgram(ast_root)`
-
----
-
-### 5. Type Checking — `typecheck.zig` (~2530 lines, second largest)
-
-Type inference, validation, and monomorphization:
-
-| Component | Details |
-|---|---|
-| Type resolution | `validateType` converts `TypeAnnotation → Type` structs via `parseTypeString` |
-| Generic monomorphization | `instantiateStruct` clones generic AST, substitutes type params, re-runs analysis |
-| Generic function instantiation | Lines 770-870: `inferGenericBindings` algorithm |
-| Nizam allocation rules | `ImplicitAllocationNotAllowed` fires for heap-allocating expressions in Nizam mode |
-| Built-in functions | Lines 525-750: type inference for ~100+ built-in functions (math, string, IO, quantum, etc.) |
-| Closure types | Tracked via `closure_types` AutoHashMap keyed by closure counter |
-
-**Entry point:** `TypeChecker.checkProgram(ast_root)`
+3. **Multi-File Source Cache**:
+   - `DiagnosticEngine` caches the source text of all parsed files (`main.nz` and imported modules).
+   - Resolves exact line and column slices without re-reading files from disk during error emission.
 
 ---
 
-### 6. Borrow Checking — `borrowck.zig` (~386 lines)
+## 3. Multi-File Module Resolution (`src/sema.nz`)
 
-Ownership tracking via a simple state machine:
+1. **Module Import Pipeline**:
+   - `import foo` or `from foo import bar, baz`.
+   - `Sema.load_imported_module` locates `foo.nz` or `foo.mq` relative to the primary module or library directory (`--lib-dir`).
+   - Registers the module source text with `DiagnosticEngine`.
+   - Parses and lowers the module into an independent module AST.
+   - Executes `declare_pass` and `resolve_pass` under an isolated module `Scope`.
+   - Merges top-level module declarations into the root AST program for global codegen.
 
-- **ObjectState:** `Owned → Moved | Dropped`
-- On assignment of a complex type, the source is **moved** (marked Moved)
-- Subsequent uses of a Moved or Dropped variable trigger `UseAfterMoveError` / `UseAfterDropError`
-- `VariableState` tracks `shared_borrows` / `mutable_borrows` (reserved for future reference-counting borrows)
-- **Auto-drop injection:** `auto_drops` fields on `FunDecl`, `BlockStmt`, `ParamBlockStmt` are populated at scope exit
-- **Context manager integration:** `is_context_manager` flag on symbols enables `with` statement semantics
-
-**Entry point:** `BorrowChecker.checkProgram(ast_root)`
-
----
-
-### 7. Dead Code Elimination — `dce.zig` (~192 lines)
-
-Two-phase mark-and-sweep:
-
-- **Phase 1 (Mark):** Walks the AST marking reachable nodes. Constant-folds boolean branch conditions (`if True` / `if False`) to prune unreachable arms
-- **Phase 2 (Sweep):** Removes unmarked declarations and prunes dead branches
-- **Quantum tree shaking:** If `std.quantum` is imported but no qbit/qreg types are used, the entire quantum import is pruned (zero-cost abstraction)
-
-**Entry point:** `DeadCodeEliminator.optimizeProgram(ast_root)`
+2. **Accurate Origin Spans**:
+   - Each declaration and imported AST node retains its origin file path and local span coordinates.
+   - Diagnostic reports accurately point to the imported file and exact line number when errors occur in dependencies.
 
 ---
 
-### 8. AST Merging — `mergeImportedDeclarations` (inline in `main.zig`)
+## 4. Self-Hosting Bootstrap & IR Convergence
 
-Flattens the AST by inlining imported module ASTs into the root `Program.declarations` array. Uses a `merged_modules` set to prevent duplicate inlining (circular import guard).
+The Nizam compiler achieves **100% deterministic self-hosting convergence**:
 
-**Entry point:** `mergeImportedDeclarations(allocator, ast_root, &merged_modules)`
+$$\text{Stage 1 (Zig Reference Compiler)} \longrightarrow \text{Stage 2 (Nizam AOT Binary)}$$
+$$\text{Stage 2} \longrightarrow \text{Stage 3} \longrightarrow \text{Stage 4} \longrightarrow \text{Stage 5}$$
 
----
-
-### 9. Code Generation — `codegen.zig` (~4855 lines, largest file)
-
-Converts the analyzed AST to an LLVM IR string:
-
-| Component | Details |
-|---|---|
-| Type mapping | Primitives → LLVM native types; fat pointers (`{ptr, i64}`) for strings; `{ptr, ptr}` for `Any`; `{i1, ptr}` for `Option`; `{i8, ptr}` for `Result` |
-| Auto-drops | `genAutoDrops` generates cleanup code at scope boundaries |
-| Temporary lifetime | `statement_temporaries` / `registerTemp` / `consumeTemp` / `flushStatementTemps` — managed per-statement |
-| Global variable handling | In script mode (no `main()`), an implicit `main` is generated wrapping global code |
-| Parallel loops | `for@par` → closure outlining + trampoline function pattern |
-| Struct/Union/Enum layouts | Emitted as LLVM struct types with computed padding |
-| ABI | `byval` vs `coerce` vs `direct` based on type size (SysV x86_64) |
-
-The `LLVMCodegen` struct maintains **four output buffers**:
-- `out` — main function/global IR
-- `outlined_out` — outlined closures and parallel loop trampolines
-- `type_out` — type definitions
-- `metadata_out` — debug metadata
-
-**Entry point:** `LLVMCodegen.generate(ast_root) → []const u8` (LLVM IR string)
+- **Convergence Invariant**:
+  `diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll` yields **0 diff lines** (byte-for-byte identical LLVM IR).
+- **Zero-Initialization Invariant**:
+  `mantiq_malloc` in `src/runtime.c` uses `calloc` to guarantee zero-initialized memory for all AST node and symbol allocations, eliminating uninitialized pointer garbage.
+- **Copy Semantics for Option**:
+  `Option[T]` (`{ i8, ptr }`) is classified as a copy type in `src/types.nz`, preventing borrow checker auto-drop passes from emitting invalid `free()` operations on stack-allocated values.
 
 ---
 
-### 10. JIT — `jit.zig` (~116 lines)
+## 5. Test Harness & Verification (`src/tests/run_tests.sh`)
 
-Just-In-Time compilation via a **compile-link-load-execute** strategy:
+The compiler contains a comprehensive 14-suite test harness executed via `src/tests/run_tests.sh`:
 
-1. Write LLVM IR to `{name}_jit.ll`
-2. Run `zig cc -shared -fPIC {name}_jit.ll src/runtime.c -O3 -o lib{name}_jit.so -lmimalloc -lpthread`
-3. `dlopen` the `.so` and call the `main()` entry point
-4. Keep the `.so` loaded and linked into subsequent snippets (incremental REPL)
+1. `src/tests/test_types.nz`: Type representation, copy/move classification.
+2. `src/tests/test_abi.nz`: C calling conventions, struct packing, FFI ABI.
+3. `src/tests/test_std.nz`: Standard library `String`, `List`, `Dict`, `Option`.
+4. `src/tests/test_magic.nz`: Magic methods (`__add__`, `__eq__`, `__len__`).
+5. `src/tests/test_ast.nz`: AST node allocation, span propagation, data getters/setters.
+6. `src/tests/test_error.nz`: DiagnosticEngine, box formatting, error codes, word wrapping.
+7. `src/tests/test_macro.nz`: Macro expansion, hygienic identifier mangling, strict modes.
+8. `src/tests/test_sema.nz`: Lexical scoping, duplicate detection, closure capture, monomorphization.
+9. `src/tests/test_borrowck.nz`: Use-after-move detection, auto-drop injection, context manager drops.
+10. `src/tests/test_ffi.nz`: Tree-sitter FFI bindings and CST traversal.
+11. `src/tests/test_lower.nz`: Tree-sitter CST to Nizam AST lowering.
+12. `src/tests/test_traverse.nz`: AST visitor and depth-first traversal.
+13. `src/tests/test_utils.nz`: String utilities and helper functions.
+14. `src/tests/test_codegen.nz`: LLVM IR generation and Clang validation.
 
-**Incremental linking:** Each new snippet is linked against all previous `.so` files, enabling cross-snippet symbol resolution.
-
-**Cleanup:** `.ll` files deleted immediately; `.so` files kept until `deinit`.
-
----
-
-### 11. AOT — `aot.zig` (~101 lines)
-
-Ahead-Of-Time compilation to native binaries:
-
-1. Write LLVM IR to `{name}.ll`
-2. Run `zig cc {name}.ll src/runtime.c -O3 -o {name} -lmimalloc`
-3. Supports WASM cross-compilation (`-target wasm32-wasi`, `--no-entry`, `-nostdlib`)
-4. If no `main()` entry point is found → compiles to a `.o` object file instead
-5. `link` statements in source map to `-l` flags
-
-**Entry point:** `AOTCompiler.compile(ir, name, target, as_object, link_targets)`
-
----
-
-## Key Data Structures
-
-### AST (ast.zig)
-
-```
-Node
-├── node_type: NodeType   (46 variants: Program, FunDecl, VarDecl, IfStmt, etc.)
-├── span: Span            (source location)
-├── data: NodeData         (tagged union matching node_type)
-├── inferred_type: ?Type   (set by typecheck)
-└── module_name: ?[]const u8
-```
-
-### Type System (types.zig)
-
-```
-Type
-├── kind: TypeKind         (40+ variants: I32, String, Struct, Function, QBit, etc.)
-├── payload: ?*Type        (generic/collection element type)
-├── tuple_types: ?[]Type
-├── function: ?*FunctionType
-├── struct_type: ?*StructType
-├── enum_type: ?*EnumType
-├── union_type: ?*UnionType
-├── closure_id: ?u32
-├── array_len: ?usize
-└── module_scope: ?*anyopaque
-```
-
-### Symbol Table (symbols.zig)
-
-```
-Symbol
-├── name: []const u8
-├── kind: SymbolType      (Variable, Function, Class, Struct, Interface, Enum, Union, Module)
-├── decl_node: ?*Node
-├── sym_type: ?TypeKind
-├── module_scope: ?*Scope
-└── is_context_manager: bool
-
-Scope (linked list)
-├── parent: ?*Scope
-├── symbols: HashMap(name → *Symbol)
-└── closure_node: ?*Node
-```
-
----
-
-## Operating Modes
-
-### 1. Test-Suite Mode (default)
-
-`main.zig` runs a battery of ~50 inline integration tests in `runTests()`. Each test:
-1. Parses a hardcoded source string
-2. Runs the full pipeline (parse → lower → sema → cfg → typecheck → borrowck → dce → merge → codegen → JIT → AOT)
-3. Prints pass/fail for each stage
-
-This is the primary development workflow — tests are embedded in `main.zig` rather than a separate test framework.
-
-### 2. REPL Mode
-
-`./mantiq repl [nizam]` — interactive read-eval-print loop:
-- Maintains persistent state across snippets (`SemanticAnalyzer`, `TypeChecker`, `JITCompiler`)
-- Each snippet is compiled and JIT-evaluated incrementally
-- Previous `.so` files are linked into new snippets (cross-snippet symbol resolution)
-- Supports both Mantiq and Nizam language modes
-
-### 3. File Compilation Mode
-
-**Not yet implemented.** The CLI currently only supports test-suite and REPL modes. The intended flow would be:
-- `mantiq build file.mq` → parse → pipeline → AOT output binary
-- `mantiq run file.mq` → parse → pipeline → JIT execute
-
-Flags supported today:
-- `--show-ir` — prints generated LLVM IR
-- `--debug` — enables debug logging
-
----
-
-## Runtime Library — `runtime.c` (~877 lines)
-
-The C runtime provides:
-- **SIMD/parallel execution:** `__mantiq_parallel_for` — thread pool dispatcher for `for@par`
-- **Quantum simulation:** State-vector simulator with 16-qubit limit (`Complex global_state[65536]`), Hadamard, CNOT, measure operations
-- **Concurrency:** `MantiqTask` / `mantiq_spawn` / `mantiq_await` — actor-based model using pthreads
-- **Hash table:** `MantiqDict` — open-addressing hash table
-- **Process args:** `mantiq_process_args` — parses `/proc/self/cmdline`
-- **Memory:** Optional mimalloc integration (falls back to libc malloc)
-
-The runtime is compiled and linked in at both JIT and AOT stages via `zig cc src/runtime.c`.
-
----
-
-## Build System — `build.zig`
-
-The compiler is built with Zig's build system:
-- `zig build` — builds the compiler executable
-- Links against the tree-sitter C library
-- Statically links mimalloc
-- Generates the final binary at `zig-out/bin/mantiq`
+**Result**: 14 / 14 suites pass with 100% parity across self-hosted builds.

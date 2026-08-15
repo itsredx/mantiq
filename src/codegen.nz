@@ -152,7 +152,7 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
     elif strcmp(f_cstr, "span" to cstr) == 0 or strcmp(f_cstr, "primary_span" to cstr) == 0:
         return String.make("%Span" to cstr)
     elif strcmp(f_cstr, "module_name" to cstr) == 0 or strcmp(f_cstr, "else_branch" to cstr) == 0 or strcmp(f_cstr, "alias" to cstr) == 0 or strcmp(f_cstr, "generics" to cstr) == 0 or strcmp(f_cstr, "lifetime" to cstr) == 0 or strcmp(f_cstr, "sym_type" to cstr) == 0:
-        return String.make("{ i8, ptr, i64, i64 }" to cstr)
+        return String.make("{ i8, ptr }" to cstr)
     elif strcmp(f_cstr, "val" to cstr) == 0:
         return String.make("double" to cstr)
     elif strcmp(f_cstr, "is_async" to cstr) == 0 or strcmp(f_cstr, "is_extern" to cstr) == 0 or strcmp(f_cstr, "is_variadic" to cstr) == 0 or strcmp(f_cstr, "is_mut" to cstr) == 0 or strcmp(f_cstr, "is_context_manager" to cstr) == 0 or strcmp(f_cstr, "use_color" to cstr) == 0 or strcmp(f_cstr, "has_value" to cstr) == 0 or strcmp(f_cstr, "padding" to cstr) == 0 or strcmp(f_cstr, "is_ref" to cstr) == 0 or strcmp(f_cstr, "has_val" to cstr) == 0 or strcmp(f_cstr, "is_struct" to cstr) == 0:
@@ -430,7 +430,7 @@ fn type_to_llvm(t as ptr[Type]) as String:
     if k == TypeKind.Dict:
         return String.make("{ ptr, i64, i64 }" to cstr)
     if k == TypeKind.Option:
-        return String.make("{ i8, ptr, i64, i64 }" to cstr)
+        return String.make("{ i8, ptr }" to cstr)
     if k == TypeKind.Result:
         return String.make("{ i8, ptr, ptr }" to cstr)
     if k == TypeKind.Any:
@@ -500,7 +500,7 @@ fn type_size(t as ptr[Type]) as i64:
     if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict:
         return 24 to i64
     if k == TypeKind.Option:
-        return 32 to i64
+        return 16 to i64
     if k == TypeKind.Struct and (deref t).name.data != None:
         let sn as cstr = (deref t).name.data to cstr
         if strcmp(sn, "Span" to cstr) == 0 or strcmp(sn, "String" to cstr) == 0 or strcmp(sn, "StringBuilder" to cstr) == 0 or strcmp(sn, "Set" to cstr) == 0 or strcmp(sn, "List" to cstr) == 0 or strcmp(sn, "Dict" to cstr) == 0:
@@ -512,7 +512,7 @@ fn type_size(t as ptr[Type]) as i64:
         elif strcmp(sn, "Diagnostic" to cstr) == 0:
             return 240 to i64
         elif strcmp(sn, "DiagnosticEngine" to cstr) == 0:
-            return 40 to i64
+            return 64 to i64
         elif strcmp(sn, "TSNode" to cstr) == 0:
             return 32 to i64
     return 256 to i64
@@ -522,7 +522,7 @@ fn is_struct_byval(t as String) as bool:
         return False
     let tc as cstr = t.data to cstr
     extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-    if strcmp(tc, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(tc, "{ i8, ptr, i64, i64 }" to cstr) == 0 or strcmp(tc, "{ i8, ptr, ptr }" to cstr) == 0 or strcmp(tc, "{ ptr, ptr }" to cstr) == 0:
+    if strcmp(tc, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(tc, "{ i8, ptr }" to cstr) == 0 or strcmp(tc, "{ i8, ptr, ptr }" to cstr) == 0 or strcmp(tc, "{ ptr, ptr }" to cstr) == 0:
         return True
     if deref (t.data to ptr[u8]) == 123 to u8:
         return True
@@ -819,16 +819,16 @@ struct LLVMCodegen:
 
     public fn emit_builtin_struct_types(self as ptr[LLVMCodegen]):
         self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
-        self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr }")
-        self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr, i64, i64 }, ptr, ptr }")
+        self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr }")
+        self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32 }")
         self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
-        self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr, i64, i64 }, ptr, ptr }")
+        self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
-        self.register_builtin_struct("ImportDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr, i64, i64 } }")
+        self.register_builtin_struct("ImportDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
         self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr }")
         self.register_builtin_struct("VarDeclData", "{ { ptr, i64, i64 }, ptr, i8, ptr }")
-        self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr, i64, i64 } }")
+        self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr } }")
         self.register_builtin_struct("ClassDeclData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("BinaryExprData", "{ { ptr, i64, i64 }, ptr, ptr }")
         self.register_builtin_struct("IdentifierData", "{ { ptr, i64, i64 } }")
@@ -845,7 +845,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("CastExprData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("BlockStmtData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("WithStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
-        self.register_builtin_struct("MatchStmtData", "{ ptr, ptr, { i8, ptr, i64, i64 } }")
+        self.register_builtin_struct("MatchStmtData", "{ ptr, ptr, { i8, ptr } }")
         self.register_builtin_struct("TryStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("ThrowStmtData", "{ ptr }")
         self.register_builtin_struct("ListLiteralData", "{ { ptr, i64, i64 } }")
@@ -862,14 +862,14 @@ struct LLVMCodegen:
         self.register_builtin_struct("Span", "{ i32, i32, i32, i32, i32, i32 }")
         self.register_builtin_struct("Label", "{ %Span, { ptr, i64, i64 }, i32 }")
         self.register_builtin_struct("Suggestion", "{ %Span, { ptr, i64, i64 }, { ptr, i64, i64 } }")
-        self.register_builtin_struct("Diagnostic", "{ i32, { i8, ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, %Span, { ptr, i64, i64 }, { i8, ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
-        self.register_builtin_struct("DiagnosticEngine", "{ { ptr, i64, i64 }, i32, i32, i32, i8 }")
+        self.register_builtin_struct("Diagnostic", "{ i32, { i8, ptr }, { ptr, i64, i64 }, { ptr, i64, i64 }, %Span, { ptr, i64, i64 }, { i8, ptr }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+        self.register_builtin_struct("DiagnosticEngine", "{ { ptr, i64, i64 }, i32, i32, i32, i8, { ptr, i64, i64 } }")
         self.register_builtin_struct("Set", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("StringBuilder", "{ ptr, i64, i64 }")
         self.register_builtin_struct("Type", "{ i32, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr }")
-        self.register_builtin_struct("Symbol", "{ { ptr, i64, i64 }, i32, ptr, { i8, ptr, i64, i64 }, i8, ptr }")
+        self.register_builtin_struct("Symbol", "{ { ptr, i64, i64 }, i32, ptr, { i8, ptr }, i8, ptr }")
         self.register_builtin_struct("Scope", "{ ptr, { ptr, i64, i64 }, ptr }")
-        self.register_builtin_struct("TypeAnnotation", "{ { ptr, i64, i64 }, i8, i8, { i8, ptr, i64, i64 }, { i8, ptr, i64, i64 }, { i8, ptr, i64, i64 }, ptr }")
+        self.register_builtin_struct("TypeAnnotation", "{ { ptr, i64, i64 }, i8, i8, { i8, ptr }, { i8, ptr }, { i8, ptr }, ptr }")
         self.register_builtin_struct("TSNode", "{ i32, i32, i32, i32, ptr, ptr }")
 
         self.register_field_idx("Node" to cstr, "kind" to cstr, 0 to i32)
@@ -973,6 +973,7 @@ struct LLVMCodegen:
         self.register_field_idx("Sema" to cstr, "current_file" to cstr, 6 to i32)
         self.register_field_idx("Sema" to cstr, "mode" to cstr, 7 to i32)
         self.register_field_idx("Sema" to cstr, "root_ast" to cstr, 8 to i32)
+        self.register_field_idx("Sema" to cstr, "engine" to cstr, 9 to i32)
 
         self.register_field_idx("TypeChecker" to cstr, "sema" to cstr, 0 to i32)
         self.register_field_idx("TypeChecker" to cstr, "current_function_return" to cstr, 1 to i32)
@@ -1024,6 +1025,7 @@ struct LLVMCodegen:
         self.register_field_idx("DiagnosticEngine" to cstr, "warning_count" to cstr, 2 to i32)
         self.register_field_idx("DiagnosticEngine" to cstr, "panic_count" to cstr, 3 to i32)
         self.register_field_idx("DiagnosticEngine" to cstr, "use_color" to cstr, 4 to i32)
+        self.register_field_idx("DiagnosticEngine" to cstr, "source_cache" to cstr, 5 to i32)
 
         self.register_field_idx("Type" to cstr, "kind" to cstr, 0 to i32)
         self.register_field_idx("Type" to cstr, "payload" to cstr, 1 to i32)
@@ -1035,13 +1037,13 @@ struct LLVMCodegen:
         self.register_field_idx("Symbol" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("Symbol" to cstr, "kind" to cstr, 1 to i32)
         self.register_field_idx("Symbol" to cstr, "decl_node" to cstr, 2 to i32)
-        self.register_field_idx("Symbol" to cstr, "inferred_type" to cstr, 3 to i32)
+        self.register_field_idx("Symbol" to cstr, "sym_type" to cstr, 3 to i32)
         self.register_field_idx("Symbol" to cstr, "is_context_manager" to cstr, 4 to i32)
-        self.register_field_idx("Symbol" to cstr, "scope" to cstr, 5 to i32)
+        self.register_field_idx("Symbol" to cstr, "resolved_type" to cstr, 5 to i32)
 
         self.register_field_idx("Scope" to cstr, "parent" to cstr, 0 to i32)
         self.register_field_idx("Scope" to cstr, "symbols" to cstr, 1 to i32)
-        self.register_field_idx("Scope" to cstr, "current_function" to cstr, 2 to i32)
+        self.register_field_idx("Scope" to cstr, "closure_node" to cstr, 2 to i32)
 
         self.register_field_idx("TypeAnnotation" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("TypeAnnotation" to cstr, "is_ref" to cstr, 1 to i32)
@@ -3439,12 +3441,12 @@ struct LLVMCodegen:
                                 let t1 as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, t1 to cstr)
-                                append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr, i64, i64 } undef, i8 1, 0\n")
+                                append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr } undef, i8 1, 0\n")
                                 if opt_is_ptr:
                                     let t2 as ptr[u8] = self.fresh_temp()
                                     append_cstr(ref (deref self).main_out, "  ")
                                     append_cstr(ref (deref self).main_out, t2 to cstr)
-                                    append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr, i64, i64 } ")
+                                    append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr } ")
                                     append_cstr(ref (deref self).main_out, t1 to cstr)
                                     append_cstr(ref (deref self).main_out, ", ptr ")
                                     append_cstr(ref (deref self).main_out, opt_val to cstr)
@@ -3467,7 +3469,7 @@ struct LLVMCodegen:
                                 let t2 as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, t2 to cstr)
-                                append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr, i64, i64 } ")
+                                append_cstr(ref (deref self).main_out, " = insertvalue { i8, ptr } ")
                                 append_cstr(ref (deref self).main_out, t1 to cstr)
                                 append_cstr(ref (deref self).main_out, ", ptr ")
                                 append_cstr(ref (deref self).main_out, box_reg to cstr)
@@ -4380,7 +4382,7 @@ struct LLVMCodegen:
             let tag as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, tag to cstr)
-            append_cstr(ref (deref self).main_out, " = extractvalue { i8, ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, " = extractvalue { i8, ptr } ")
             append_cstr(ref (deref self).main_out, rec_ptr to cstr)
             append_cstr(ref (deref self).main_out, ", 0\n")
             let cmp as ptr[u8] = self.fresh_temp()
@@ -4405,7 +4407,7 @@ struct LLVMCodegen:
             let box_ptr as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, box_ptr to cstr)
-            append_cstr(ref (deref self).main_out, " = extractvalue { i8, ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, " = extractvalue { i8, ptr } ")
             append_cstr(ref (deref self).main_out, obj_val to cstr)
             append_cstr(ref (deref self).main_out, ", 1\n")
             let unwrapped as ptr[u8] = self.fresh_temp()

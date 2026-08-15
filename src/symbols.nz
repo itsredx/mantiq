@@ -221,6 +221,14 @@ struct FieldDeclData:
     public var name as String
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
 
+struct OptionLayout:
+    public var has_val as u8
+    public var val_ptr as ptr[u8]
+
+struct StringOptionLayout:
+    public var has_val as u8
+    public var val as String
+
 // ── Node ───────────────────────────────────────────────────────────────
 // Common header for all node types. Variant-specific data is in data ptr.
 struct Node:
@@ -317,26 +325,47 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
 // Common field accessors (no cast needed):
 
 fn node_span(n as ptr[Node]) as Span:
+    if n == None to ptr[Node]:
+        return Span(start_byte = 0 to i32, end_byte = 0 to i32, start_row = 0 to i32, start_col = 0 to i32, end_row = 0 to i32, end_col = 0 to i32)
     return (deref n).span
 
 fn node_kind(n as ptr[Node]) as NodeType:
+    if n == None to ptr[Node]:
+        return NodeType.Program
     return (deref n).kind
 
 fn node_inferred_type(n as ptr[Node]) as ptr[Type]:
+    if n == None to ptr[Node]:
+        return None to ptr[Type]
     return (deref n).inferred_type
 
 fn set_node_inferred_type(n as ptr[Node], t as ptr[Type]):
-    (deref n).inferred_type = t
+    if n != None to ptr[Node]:
+        (deref n).inferred_type = t
 
 fn node_module_name(n as ptr[Node]) as Option[String]:
+    if n == None to ptr[Node]:
+        return Empty
     return (deref n).module_name
 
 fn set_node_module_name(n as ptr[Node], m as Option[String]):
-    (deref n).module_name = m
+    if n != None to ptr[Node]:
+        (deref n).module_name = m
+
+fn node_file_path(n as ptr[Node], default_file as String) as String:
+    if n == None to ptr[Node]:
+        return default_file
+    let opt_raw as Option[String] = (deref n).module_name
+    let opt_ref as ptr[OptionLayout] = (ref opt_raw) to ptr[OptionLayout]
+    if (deref opt_ref).has_val == 1 to u8 and (deref opt_ref).val_ptr != None to ptr[u8]:
+        let s_ptr as ptr[String] = (deref opt_ref).val_ptr to ptr[String]
+        if s_ptr != None to ptr[String] and (deref s_ptr).data != None to ptr[u8] and (deref s_ptr).len > 0 to usize:
+            return deref s_ptr
+    return default_file
 
 // name accessor (14 node types have it):
 fn node_name(n as ptr[Node]) as String:
-    if n == None to ptr[Node]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return String.make("" to cstr)
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
@@ -384,7 +413,7 @@ fn node_name(n as ptr[Node]) as String:
     return String.make("" to cstr)
 
 fn node_name_ptr(n as ptr[Node]) as ptr[String]:
-    if n == None to ptr[Node]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return None to ptr[String]
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
@@ -432,6 +461,8 @@ fn node_name_ptr(n as ptr[Node]) as ptr[String]:
     return None to ptr[String]
 
 fn set_node_name(n as ptr[Node], name as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -478,8 +509,10 @@ fn set_node_name(n as ptr[Node], name as String):
 
 // left accessor (14 node types have it):
 fn node_left(n as ptr[Node]) as ptr[Node]:
-    let k as NodeType = (deref n).kind
     var r as ptr[Node] = None to ptr[Node]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
         r = (deref d).left
@@ -528,6 +561,8 @@ fn node_left(n as ptr[Node]) as ptr[Node]:
     return r
 
 fn set_node_left(n as ptr[Node], left as ptr[Node]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
@@ -574,8 +609,10 @@ fn set_node_left(n as ptr[Node], left as ptr[Node]):
 
 // right accessor (BinaryExpr, IndexExpr):
 fn node_right(n as ptr[Node]) as ptr[Node]:
-    let k as NodeType = (deref n).kind
     var r as ptr[Node] = None to ptr[Node]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
         r = (deref d).right
@@ -585,6 +622,8 @@ fn node_right(n as ptr[Node]) as ptr[Node]:
     return r
 
 fn set_node_right(n as ptr[Node], right as ptr[Node]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
@@ -595,8 +634,10 @@ fn set_node_right(n as ptr[Node], right as ptr[Node]):
 
 // body accessor (9 node types have it):
 fn node_body(n as ptr[Node]) as ptr[Node]:
-    let k as NodeType = (deref n).kind
     var r as ptr[Node] = None to ptr[Node]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).body
@@ -633,6 +674,8 @@ fn node_body(n as ptr[Node]) as ptr[Node]:
     return r
 
 fn set_node_body(n as ptr[Node], body as ptr[Node]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -670,8 +713,10 @@ fn set_node_body(n as ptr[Node], body as ptr[Node]):
 
 // declarations accessor (6 node types have it):
 fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
-    let k as NodeType = (deref n).kind
     var r as List[ptr[Node]] = List[ptr[Node]]()
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.Program:
         let d as ptr[ProgramData] = (deref n).data to ptr[ProgramData]
         r = (deref d).declarations
@@ -690,6 +735,8 @@ fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
     return r
 
 fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.Program:
         let d as ptr[ProgramData] = (deref n).data to ptr[ProgramData]
@@ -709,8 +756,10 @@ fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
 
 // params accessor (5 node types have it):
 fn node_params(n as ptr[Node]) as List[ptr[Node]]:
-    let k as NodeType = (deref n).kind
     var r as List[ptr[Node]] = List[ptr[Node]]()
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).params
@@ -729,6 +778,8 @@ fn node_params(n as ptr[Node]) as List[ptr[Node]]:
     return r
 
 fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -748,7 +799,7 @@ fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
 
 // op accessor (3 node types have it):
 fn node_op(n as ptr[Node]) as String:
-    if n == None to ptr[Node]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return String.make("" to cstr)
     let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
@@ -763,7 +814,7 @@ fn node_op(n as ptr[Node]) as String:
     return String.make("" to cstr)
 
 fn node_op_ptr(n as ptr[Node]) as ptr[String]:
-    if n == None to ptr[Node]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return None to ptr[String]
     let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
@@ -778,6 +829,8 @@ fn node_op_ptr(n as ptr[Node]) as ptr[String]:
     return None to ptr[String]
 
 fn set_node_op(n as ptr[Node], op as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.BinaryExpr:
         let d as ptr[BinaryExprData] = (deref n).data to ptr[BinaryExprData]
@@ -791,8 +844,10 @@ fn set_node_op(n as ptr[Node], op as String):
 
 // cond accessor (IfStmt, WhileStmt):
 fn node_cond(n as ptr[Node]) as ptr[Node]:
-    let k as NodeType = (deref n).kind
     var r as ptr[Node] = None to ptr[Node]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         r = (deref d).cond
@@ -802,6 +857,8 @@ fn node_cond(n as ptr[Node]) as ptr[Node]:
     return r
 
 fn set_node_cond(n as ptr[Node], cond as ptr[Node]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
@@ -813,20 +870,26 @@ fn set_node_cond(n as ptr[Node], cond as ptr[Node]):
 // then_branch accessor (IfStmt):
 fn node_then_branch(n as ptr[Node]) as ptr[Node]:
     var r as ptr[Node] = None to ptr[Node]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         r = (deref d).then_branch
     return r
 
 fn set_node_then_branch(n as ptr[Node], branch as ptr[Node]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         (deref d).then_branch = branch
 
 // else_branch accessor (IfStmt, MatchStmt):
 fn node_else_branch(n as ptr[Node]) as Option[ptr[Node]]:
-    let k as NodeType = (deref n).kind
     var r as Option[ptr[Node]] = Empty
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         r = (deref d).else_branch
@@ -836,6 +899,8 @@ fn node_else_branch(n as ptr[Node]) as Option[ptr[Node]]:
     return r
 
 fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
@@ -846,6 +911,8 @@ fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
 
 // val accessor (NumberLiteral, BooleanLiteral):
 fn node_val(n as ptr[Node]) as f64:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return 0 to f64
     let k as NodeType = (deref n).kind
     if k == NodeType.NumberLiteral:
         let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
@@ -856,6 +923,8 @@ fn node_val(n as ptr[Node]) as f64:
     return 0 to f64
 
 fn set_node_val(n as ptr[Node], val as f64):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.NumberLiteral:
         let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
@@ -866,26 +935,34 @@ fn set_node_val(n as ptr[Node], val as f64):
 
 fn node_str_val(n as ptr[Node]) as String:
     var r as String = String.make("" to cstr)
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.StringLiteral:
         let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
         r = (deref d).str_val
     return r
 
 fn node_str_val_ptr(n as ptr[Node]) as ptr[String]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return None to ptr[String]
     if (deref n).kind == NodeType.StringLiteral:
         let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
         return ref (deref d).str_val
     return None to ptr[String]
 
 fn set_node_str_val(n as ptr[Node], str_val as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.StringLiteral:
         let d as ptr[StringLiteralData] = (deref n).data to ptr[StringLiteralData]
         (deref d).str_val = str_val
 
 // is_async accessor (FunDecl, ForStmt):
 fn node_is_async(n as ptr[Node]) as bool:
-    let k as NodeType = (deref n).kind
     var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).is_async
@@ -895,6 +972,8 @@ fn node_is_async(n as ptr[Node]) as bool:
     return r
 
 fn set_node_is_async(n as ptr[Node], is_async as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -906,12 +985,16 @@ fn set_node_is_async(n as ptr[Node], is_async as bool):
 // is_extern accessor (FunDecl):
 fn node_is_extern(n as ptr[Node]) as bool:
     var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).is_extern
     return r
 
 fn set_node_is_extern(n as ptr[Node], is_extern as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         (deref d).is_extern = is_extern
@@ -919,12 +1002,16 @@ fn set_node_is_extern(n as ptr[Node], is_extern as bool):
 // is_variadic accessor (FunDecl):
 fn node_is_variadic(n as ptr[Node]) as bool:
     var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).is_variadic
     return r
 
 fn set_node_is_variadic(n as ptr[Node], is_variadic as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         (deref d).is_variadic = is_variadic
@@ -932,12 +1019,16 @@ fn set_node_is_variadic(n as ptr[Node], is_variadic as bool):
 // return_type_annot accessor (FunDecl):
 fn node_return_type_annot(n as ptr[Node]) as ptr[TypeAnnotation]:
     var r as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).return_type_annot
     return r
 
 fn set_node_return_type_annot(n as ptr[Node], return_type_annot as ptr[TypeAnnotation]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         (deref d).return_type_annot = return_type_annot
@@ -945,20 +1036,26 @@ fn set_node_return_type_annot(n as ptr[Node], return_type_annot as ptr[TypeAnnot
 // is_mut accessor (VarDecl):
 fn node_is_mut(n as ptr[Node]) as bool:
     var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.VarDecl:
         let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
         r = (deref d).is_mut
     return r
 
 fn set_node_is_mut(n as ptr[Node], is_mut as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.VarDecl:
         let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
         (deref d).is_mut = is_mut
 
 // type_annots accessor (FunDecl, VarDecl, FieldDecl, ClosureExpr):
-fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]]:
-    let k as NodeType = (deref n).kind
+fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]] :
     var r as ptr[List[Option[ptr[TypeAnnotation]]]] = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).type_annots
@@ -977,6 +1074,8 @@ fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]]:
     return r
 
 fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
@@ -996,8 +1095,10 @@ fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeA
 
 // auto_drops accessor (ReturnStmt, BlockStmt):
 fn node_auto_drops(n as ptr[Node]) as List[String]:
-    let k as NodeType = (deref n).kind
     var r as List[String] = List[String]()
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
     if k == NodeType.ReturnStmt:
         let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
         r = (deref d).auto_drops
@@ -1007,6 +1108,8 @@ fn node_auto_drops(n as ptr[Node]) as List[String]:
     return r
 
 fn set_node_auto_drops(n as ptr[Node], drops as List[String]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     let k as NodeType = (deref n).kind
     if k == NodeType.ReturnStmt:
         let d as ptr[ReturnStmtData] = (deref n).data to ptr[ReturnStmtData]
@@ -1018,12 +1121,16 @@ fn set_node_auto_drops(n as ptr[Node], drops as List[String]):
 // target accessor (ImportDecl):
 fn node_target(n as ptr[Node]) as String:
     var r as String = String.make("" to cstr)
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         r = (deref d).target
     return r
 
 fn set_node_target(n as ptr[Node], target as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).target = target
@@ -1031,12 +1138,16 @@ fn set_node_target(n as ptr[Node], target as String):
 // imported_symbols accessor (ImportDecl):
 fn node_imported_symbols(n as ptr[Node]) as List[String]:
     var r as List[String] = List[String]()
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         r = (deref d).imported_symbols
     return r
 
 fn set_node_imported_symbols(n as ptr[Node], syms as List[String]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).imported_symbols = syms
@@ -1044,12 +1155,16 @@ fn set_node_imported_symbols(n as ptr[Node], syms as List[String]):
 // alias accessor (ImportDecl):
 fn node_alias(n as ptr[Node]) as Option[String]:
     var r as Option[String] = Empty
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         r = (deref d).alias
     return r
 
 fn set_node_alias(n as ptr[Node], alias as Option[String]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).alias = alias

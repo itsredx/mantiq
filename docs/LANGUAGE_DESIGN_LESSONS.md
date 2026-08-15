@@ -305,6 +305,67 @@ String             // Growable heap-allocated string
 
 ---
 
+## 13. **Vague Error Messages & Actionable Diagnostics**
+
+### Problem (C++ / GCC / Clang Template Vomit)
+- Multi-page template instantiation errors dump internal compiler implementation details.
+- Generic messages like `invalid conversion from 'X' to 'Y'` without showing the offending expression or providing remediation steps.
+- Lack of origin file tracking when errors occur inside nested header includes or template expansions.
+
+### What We Learn
+- Error messages are the primary user interface of a compiler.
+- Every error should answer three questions:
+  1. **Where did it happen?** (File, exact line, column, highlighted source snippet with caret).
+  2. **Why did it happen?** (Explanatory diagnosis explaining the language rule).
+  3. **How to fix it?** (Concrete, actionable remediation advice).
+- Standardized error codes (e.g. `[E0308]`) allow quick searchability and online lookup.
+
+### NIZAM/MANTIQ Mitigation
+✅ **Box-Drawing Diagnostic Engine & Error Codes Catalog (`src/error.nz`)**:
+```text
+  ╭─  ✖ ERROR [E0308] : mismatched types: expected `i32`, found `String` ────╮
+  │  📁 File:      src/main.nz                                               │
+  │  📍 Position:  Line 2, Column 24                                         │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │   2 │      let count as i32 = "42"                                       │
+  │     │                         ▲▲▲▲                                       │
+  │     │  mismatched types: expected `i32`, found `String`                  │
+  ├─ 💡 Why this happened ───────────────────────────────────────────────────┤
+  │    Nizam enforces strict static type discipline during variable          │
+  │    assignments and function returns. Implicit type coercion is prohibited│
+  │    to ensure memory safety and determinism.                              │
+  ├─ ⚡ How to fix ──────────────────────────────────────────────────────────┤
+  │    To convert a `String` to `i32`, call `.parse_i32()` on the string     │
+  │    value, or check if the source expression can directly provide an      │
+  │    integer.                                                              │
+  ├─ 🔧 Suggested Fix ───────────────────────────────────────────────────────┤
+  │    Replace string literal with integer literal in assignment expression  │
+  │      ➜  `42`                                                            │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+---
+
+## 14. **Self-Hosting Determinism & Memory Invariants**
+
+### Problem
+- Compilers that rely on uninitialized memory or compiler-dependent padding produce non-deterministic binaries across bootstrap stages.
+- Treating composite value types (like `Option[T]`) as heap objects results in accidental `free()` calls and use-after-free bugs during borrowck auto-drop passes.
+
+### What We Learn
+- Self-hosting requires absolute byte-for-byte fixpoint convergence: $\text{Stage } N \equiv \text{Stage } N+1$.
+- Zero-initialization by default for compiler data structures prevents phantom pointers and segmentation faults.
+- Value types (`Option[T]` as `{ i8, ptr }`) must be classified as copy types to prevent inappropriate destructor invocation.
+
+### NIZAM/MANTIQ Mitigation
+✅ **Deterministic Self-Hosting Invariants**:
+- Runtime memory allocation via `calloc` in `mantiq_malloc`.
+- Copy classification for `Option` in `src/types.nz`.
+- Null safety guards on all AST accessors and setters in `src/symbols.nz`.
+- Verified 5-stage bootstrap with 0 diff lines between generated IR stages.
+
+---
+
 ## Summary: Design Principles for NIZAM/MANTIQ
 
 | Principle | C++ Problem | Our Solution |
@@ -319,6 +380,8 @@ String             // Growable heap-allocated string
 | **Memory** | Hidden destructors | Explicit allocation/deallocation |
 | **Const** | Spiral rule, circumventable | Simple immutability, enforced |
 | **Collections** | Misleading names | Clear, descriptive types |
+| **Diagnostics** | Template error vomit | Boxed diagnostics with Why/How-to-fix & Error Codes |
+| **Determinism** | Compiler-dependent UB | Fully deterministic self-hosting & zeroed allocations |
 
 ---
 
@@ -337,5 +400,6 @@ The C++ critique demonstrates that **poor language design choices compound over 
 4. Providing clear, descriptive type and function names
 5. Enforcing memory safety without hidden complexity
 6. Establishing canonical style and best practices
+7. Delivering crystal-clear, actionable diagnostics with standardized error codes
 
 This report should inform ongoing design decisions to ensure these languages remain clean, teachable, and maintainable.

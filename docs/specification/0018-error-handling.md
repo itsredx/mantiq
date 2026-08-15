@@ -511,6 +511,9 @@ fn main():
 |----------|---------|
 | `docs/decisions/0017-std-option-result.md` | Module-based Option/Result via std.option / std.result |
 | `docs/decisions/0029-async-actor-model.md` | Task type for concurrent error handling |
+| `docs/decisions/0040-diagnostic-engine-and-error-codes.md` | Diagnostic Engine and Standardized Error Codes Catalog |
+| `docs/decisions/0041-multi-file-span-and-origin-tracking.md` | Multi-File Span & Origin Tracking |
+| `docs/decisions/0042-self-hosting-compiler-convergence.md` | Self-Hosting Compiler Convergence & Memory Invariants |
 
 ---
 
@@ -519,14 +522,57 @@ fn main():
 | File | Lines | Role |
 |------|-------|------|
 | `grammar.js` | 259-266, 283-289, 417-426, 661 | try_expr, try_stmt, raise grammar |
-| `ast.zig` | 86-87, 241-249 | TryStmt, ThrowStmt AST nodes |
-| `lower.zig` | 6-11, 272, 603-621, 627-685 | CST→AST lowering |
-| `sema.zig` | 17-21, 165-194, 345-359, 833-850 | Builtin registration, import handling, resolution |
-| `types.zig` | 23-59, 324 | Option/Result TypeKind, formatType |
-| `typecheck.zig` | 27-31, 37-41, 151-162, 490-495, 507-508, 655, 791-835, 2338-2373 | Type checking — imports, constructors, try/raise |
-| `cfg.zig` | 70-72 | ThrowStmt as definitive return |
-| `codegen.zig` | 168, 384-385, 584-591, 1920-1953, 2817-2824, 3515-3563, 3862-3868, 5077-5100, 5168-5253 | LLVM IR emission |
-| `runtime.c` | 837-843 | mantiq_panic, mantiq_panic_at |
-| `main.zig` | 642-661, 974-999, 1244-1368 | Pipeline, Option/Result tests |
-| `docs/specification/0006-std-option-result.md` | All | Stdlib spec for Option/Result |
-| `docs/decisions/0017-std-option-result.md` | All | Decision record for Option/Result |
+| `src/error.nz` | ~1070 | DiagnosticEngine, box-drawing renderer, error codes catalog |
+| `src/symbols.nz` | ~1200 | Node, Span, OptionLayout, AST origin accessors |
+| `src/sema.nz` | ~800 | Symbol table resolution, DiagnosticEngine error reporting |
+| `src/typecheck.nz` | ~1100 | Type validation with standardized error codes |
+| `src/borrowck.nz` | ~450 | Ownership move verification with borrowck error codes |
+| `src/codegen.nz` | ~6350 | LLVM IR emission |
+| `src/runtime.c` | ~975 | mantiq_panic, mantiq_panic_at, memory management |
+
+---
+
+## 14. Compiler Diagnostic Engine & Error Codes Catalog
+
+### 14.1 Diagnostic Format
+Compiler compilation errors and warnings are emitted via the self-hosted `DiagnosticEngine` (`src/error.nz`), which renders a Unicode box-drawing format with multi-file source caching and automatic word-wrapping:
+
+```text
+  ╭─  ✖ ERROR [E0308] : mismatched types: expected `i32`, found `String` ────╮
+  │  📁 File:      src/main.nz                                               │
+  │  📍 Position:  Line 2, Column 24                                         │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │   2 │      let count as i32 = "42"                                       │
+  │     │                         ▲▲▲▲                                       │
+  │     │  mismatched types: expected `i32`, found `String`                  │
+  ├─ 💡 Why this happened ───────────────────────────────────────────────────┤
+  │    Nizam enforces strict static type discipline during variable          │
+  │    assignments and function returns. Implicit type coercion is prohibited│
+  │    to ensure memory safety and determinism.                              │
+  ├─ ⚡ How to fix ──────────────────────────────────────────────────────────┤
+  │    To convert a `String` to `i32`, call `.parse_i32()` on the string     │
+  │    value, or check if the source expression can directly provide an      │
+  │    integer.                                                              │
+  ├─ 🔧 Suggested Fix ───────────────────────────────────────────────────────┤
+  │    Replace string literal with integer literal in assignment expression  │
+  │      ➜  `42`                                                            │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+### 14.2 Standard Error Codes Catalog
+
+| Code | Category | Name / Description |
+| :--- | :--- | :--- |
+| `[E0101]` | Scope | Undeclared variable or symbol |
+| `[E0102]` | Scope | Duplicate variable or function declaration |
+| `[E0103]` | Module | Symbol not found in imported module |
+| `[E0201]` | Strict Mode | `class` used in Nizam strict mode (`struct` required) |
+| `[E0301]` | Type | Unresolved type annotation |
+| `[E0308]` | Type | Mismatched types in expression, assignment, or return |
+| `[E0401]` | Borrowck | Use of moved variable |
+| `[E0402]` | Borrowck | Use of dropped variable |
+| `[E0403]` | Borrowck | Cannot borrow mutably |
+| `[E0501]` | Macro | Undefined macro invocation |
+| `[E0502]` | Macro | Macro argument count mismatch |
+| `[W0012]` | Warning | Unused variable |
+

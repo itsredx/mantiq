@@ -10,6 +10,8 @@ import types
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type
 import sema
 from sema import Sema, make_scope, make_symbol
+import error
+from error import Diagnostic
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
@@ -348,7 +350,10 @@ struct TypeChecker:
                     sb.append(name)
                     sb.append(" requires explicit import in Nizam strict mode" to cstr)
                     let msg as String = sb.to_string()
-                    (deref (deref self).sema).report_error(msg, span)
+                    let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_with_code("E0316" to cstr, msg, (deref (deref self).sema).current_file, span)
+                    if d != None to ptr[Diagnostic]:
+                        d.set_explanation(String.make("Nizam strict mode requires all types and identifiers from external modules to be explicitly imported." to cstr))
+                        d.add_help(String.make("Add an explicit `from <module> import <Symbol>` declaration." to cstr))
 
     public fn is_implicitly_convertible(self as ptr[TypeChecker], from_t as ptr[Type], to_t as ptr[Type]) as bool:
         if from_t == None to ptr[Type] or to_t == None to ptr[Type]:
@@ -536,7 +541,10 @@ struct TypeChecker:
                     
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
-                        (deref (deref self).sema).report_error(String.make("type mismatch in variable initialization" to cstr), node_span(node))
+                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make("type mismatch in variable initialization" to cstr), node)
+                        if d != None to ptr[Diagnostic]:
+                            d.set_explanation(String.make("The initialized expression type is incompatible with the variable's declared type." to cstr))
+                            d.add_help(String.make("Cast the expression using `to <type>` or match the annotated type." to cstr))
                 else:
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
                     annotated_type = init_type
@@ -642,9 +650,15 @@ struct TypeChecker:
                         let inferred_kind as TypeKind = (deref inferred_ret).kind
                         if inferred_kind != TypeKind.Void and inferred_kind != TypeKind.Any and inferred_kind != TypeKind.Unknown:
                             if not self.is_implicitly_convertible(inferred_ret, declared_ret):
-                                (deref (deref self).sema).report_error(String.make("return type mismatch: declared return type does not match actual return type" to cstr), node_span(node))
+                                let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0309" to cstr, String.make("return type mismatch: declared return type does not match actual return type" to cstr), node)
+                                if d != None to ptr[Diagnostic]:
+                                    d.set_explanation(String.make("The value returned from the function does not match the function's declared return type annotation." to cstr))
+                                    d.add_help(String.make("Change the return value or update the return type annotation in the function signature." to cstr))
                     else:
-                        (deref (deref self).sema).report_error(String.make("function with non-void return type must return a value" to cstr), node_span(node))
+                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0310" to cstr, String.make("function with non-void return type must return a value" to cstr), node)
+                        if d != None to ptr[Diagnostic]:
+                            d.set_explanation(String.make("Functions declaring a non-void return type must return a valid value along all execution paths." to cstr))
+                            d.add_help(String.make("Add a `return <expression>` statement to the function." to cstr))
             
             let self_ref_ret_back as ptr[Option[ptr[Type]]] = ref (deref self_ptr).current_function_return
             deref self_ref_ret_back = saved_ret
@@ -921,7 +935,9 @@ struct TypeChecker:
                         else:
                             ret_type = make_type(TypeKind.Any)
                     else:
-                        (deref (deref self).sema).report_error(String.make("module has no member with that name" to cstr), node_span(node))
+                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0315" to cstr, String.make("module has no member with that name" to cstr), node)
+                        if d != None to ptr[Diagnostic]:
+                            d.set_explanation(String.make("The requested symbol was not exported or found in the target module scope." to cstr))
                         ret_type = make_type(TypeKind.Any)
                 else:
                     ret_type = make_type(TypeKind.Any)

@@ -3,11 +3,15 @@ import std.collections
 from std.string import String, StringBuilder
 from std.collections import List
 from std.collections import Dict
-from std.option import Option
+from std.option import Option, Empty
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
+import types
+from types import Type
+import error
+from error import DiagnosticEngine, Diagnostic, Severity
 
 struct OptionLayout:
     public var has_val as u8
@@ -79,6 +83,7 @@ struct Sema:
     public var current_file as String
     public var mode as LanguageMode
     public var root_ast as ptr[Node]
+    public var engine as ptr[DiagnosticEngine]
 
     public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
@@ -88,6 +93,7 @@ struct Sema:
         (deref self).module_asts = Dict[String, ptr[Node]]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
         (deref self).root_ast = None to ptr[Node]
+        (deref self).engine = None to ptr[DiagnosticEngine]
         
         let gs as ptr[Scope] = make_scope(None to ptr[Scope], None to ptr[Node])
         (deref self).global_scope = gs
@@ -107,13 +113,24 @@ struct Sema:
         (deref gs).symbols[String.make("print")] = make_symbol(String.make("print"), SymbolKind.Function, None to ptr[Node])
 
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
-        let cap as usize = msg.len + (deref self).current_file.len + 64 to usize
+        self.report_error_with_code("E0101" to cstr, msg, (deref self).current_file, span)
+
+    public fn report_error_with_code(self as ptr[Sema], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        let cap as usize = msg.len + file_path.len + 64 to usize
         let buf as ptr[u8] = make(cap) to ptr[u8]
         extern fn snprintf(str as ptr[u8], size as usize, format as cstr, file as cstr, row as u32, col as u32, err as cstr) as i32
-        let len as i32 = snprintf(buf, cap, "%s:%d:%d: error: %s" to cstr, (deref self).current_file.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
+        let len as i32 = snprintf(buf, cap, "%s:%d:%d: error: %s" to cstr, file_path.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
         
-        let r as i32 = printf("%s\n" to cstr, buf to cstr)
+        if (deref self).engine != None to ptr[DiagnosticEngine]:
+            return (deref (deref self).engine).report_error(code, msg, file_path, span)
+        else:
+            let r as i32 = printf("%s\n" to cstr, buf to cstr)
+        return None to ptr[Diagnostic]
+
+    public fn report_error_node(self as ptr[Sema], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+        let file_path as String = node_file_path(node, (deref self).current_file)
+        return self.report_error_with_code(code, msg, file_path, node_span(node))
 
     public fn lookup_symbol(self as ptr[Sema], name as String) as ptr[Symbol]:
         var curr as ptr[Scope] = (deref self).current_scope
@@ -203,7 +220,7 @@ struct Sema:
                     let orig_sym as ptr[Symbol] = (deref mod_scope).symbols[s_name]
                     (deref (deref self).current_scope).symbols[s_name] = orig_sym
                 else:
-                    self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
+                    self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
                 s_idx = s_idx + 1 to i64
             return
         
@@ -384,18 +401,23 @@ struct Sema:
         // path6/path7 are already deinit'd inside the block if not resolved
                         
         if content.len == 0 to usize:
-            self.report_error(String.make("cannot find module" to cstr), node_span(node))
+            self.report_error_with_code("E0103" to cstr, String.make("cannot find module" to cstr), node_file_path(node, (deref self).current_file), node_span(node))
             return
             
+        if (deref self).engine != None to ptr[DiagnosticEngine]:
+            (deref (deref self).engine).register_source(resolved_path, content)
+
         extern fn strstr(haystack as cstr, needle as cstr) as cstr
         var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
         if strstr(resolved_path.data to cstr, ".nz" to cstr) != None to cstr:
             lowerer = make_lowerer_from_cstr(content.data to cstr, resolved_path.data to cstr)
         else:
             lowerer = make_lowerer_mantiq_from_cstr(content.data to cstr, resolved_path.data to cstr)
+        if (deref self).engine != None to ptr[DiagnosticEngine]:
+            (deref (deref self).engine).register_source(resolved_path, content)
         let root_ast as ptr[Node] = lowerer.lower_source()
         if root_ast == None to ptr[Node]:
-            self.report_error(String.make("compilation error in module" to cstr), node_span(node))
+            self.report_error_with_code("E0001" to cstr, String.make("compilation error in module" to cstr), resolved_path, node_span(node))
             content.deinit()
             return
             
@@ -440,7 +462,7 @@ struct Sema:
                 let orig_sym as ptr[Symbol] = (deref mod_scope).symbols[s_name]
                 (deref (deref self).current_scope).symbols[s_name] = orig_sym
             else:
-                self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
+                self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
             s_idx = s_idx + 1 to i64
             
         content.deinit()
@@ -467,7 +489,7 @@ struct Sema:
         elif nt == NodeType.VarDecl:
             let name as cstr = node_name(node).data to cstr
             if (deref (deref self).current_scope).parent == None to ptr[Scope] and (deref (deref self).current_scope).symbols.has(String.make(name)):
-                self.report_error(String.make("duplicate variable declaration" to cstr), node_span(node))
+                self.report_error_node("E0102" to cstr, String.make("duplicate variable declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(String.make(name), SymbolKind.Variable, node)
                 (deref (deref self).current_scope).symbols[String.make(name)] = sym
@@ -483,7 +505,7 @@ struct Sema:
                     (deref (deref self).current_scope).symbols[String.make(name)] = sym
             else:
                 if (deref (deref self).current_scope).symbols.has(String.make(name)):
-                    self.report_error(String.make("duplicate function declaration" to cstr), node_span(node))
+                    self.report_error_node("E0102" to cstr, String.make("duplicate function declaration" to cstr), node)
                 else:
                     let sym as ptr[Symbol] = make_symbol(String.make(name), SymbolKind.Function, node)
                     (deref (deref self).current_scope).symbols[String.make(name)] = sym
@@ -502,7 +524,7 @@ struct Sema:
                     let p_node as ptr[Node] = param_list[p_idx]
                     let p_name as cstr = node_name(p_node).data to cstr
                     if (deref child_scope).symbols.has(String.make(p_name)):
-                        self.report_error(String.make("duplicate parameter name" to cstr), node_span(p_node))
+                        self.report_error_node("E0102" to cstr, String.make("duplicate parameter name" to cstr), p_node)
                     else:
                         let p_sym as ptr[Symbol] = make_symbol(String.make(p_name), SymbolKind.Variable, p_node)
                         (deref child_scope).symbols[String.make(p_name)] = p_sym
@@ -515,14 +537,14 @@ struct Sema:
         elif nt == NodeType.ClassDecl:
             let name as String = node_name(node)
             if (deref (deref self).current_scope).symbols.has(name):
-                self.report_error(String.make("duplicate class declaration" to cstr), node_span(node))
+                self.report_error_node("E0102" to cstr, String.make("duplicate class declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Struct, node)
                 (deref (deref self).current_scope).symbols[name] = sym
         elif nt == NodeType.StructDecl:
             let name as String = node_name(node)
             if (deref (deref self).current_scope).symbols.has(name):
-                self.report_error(String.make("duplicate struct declaration" to cstr), node_span(node))
+                self.report_error_node("E0102" to cstr, String.make("duplicate struct declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Struct, node)
                 (deref (deref self).current_scope).symbols[name] = sym
@@ -538,7 +560,7 @@ struct Sema:
         elif nt == NodeType.EnumDecl:
             let name as String = node_name(node)
             if (deref (deref self).current_scope).symbols.has(name):
-                self.report_error(String.make("duplicate enum declaration" to cstr), node_span(node))
+                self.report_error_node("E0102" to cstr, String.make("duplicate enum declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Enum, node)
                 (deref (deref self).current_scope).symbols[name] = sym
@@ -561,7 +583,7 @@ struct Sema:
         elif nt == NodeType.UnionDecl:
             let name as String = node_name(node)
             if (deref (deref self).current_scope).symbols.has(name):
-                self.report_error(String.make("duplicate union declaration" to cstr), node_span(node))
+                self.report_error_node("E0102" to cstr, String.make("duplicate union declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Union, node)
                 (deref (deref self).current_scope).symbols[name] = sym
@@ -657,7 +679,7 @@ struct Sema:
                 return
             let resolved as ptr[Symbol] = self.lookup_symbol(String.make(name))
             if resolved == None to ptr[Symbol]:
-                self.report_error(String.make("undeclared variable" to cstr), node_span(node))
+                self.report_error_node("E0101" to cstr, String.make("undeclared variable" to cstr), node)
             else:
                 self.check_closure_capture(String.make(name), resolved)
         elif nt == NodeType.BinaryExpr:
@@ -674,7 +696,7 @@ struct Sema:
                         if (deref mod_sym).kind == SymbolKind.Module:
                             let mod_scope as ptr[Scope] = (deref self).loaded_modules[String.make(mod_name)]
                             if not (deref mod_scope).symbols.has(String.make(sym_name)):
-                                self.report_error(String.make("symbol not found in module" to cstr), node_span(node))
+                                self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
                         elif (deref mod_sym).kind == SymbolKind.Enum:
                             // Enum variant access (e.g. PassMode.Coerce) - valid
                             let _enum_ok as bool = True

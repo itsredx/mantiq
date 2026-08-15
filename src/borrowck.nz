@@ -5,11 +5,13 @@ from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
 import symbols
-from symbols import Node, Symbol, Scope, SymbolKind, Span, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_span, node_inferred_type, set_node_inferred_type, set_node_auto_drops
+from symbols import Node, Symbol, Scope, SymbolKind, Span, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_span, node_inferred_type, set_node_inferred_type, set_node_auto_drops, node_file_path
 import types
 from types import Type, TypeKind, is_copy_type
 import sema
 from sema import Sema, make_symbol
+import error
+from error import DiagnosticEngine, Diagnostic
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn printf(format as cstr, ...) as i32
@@ -60,14 +62,28 @@ struct BorrowChecker:
         (deref self).scope_depth = 0 to i32
 
     public fn report_error(self as ptr[BorrowChecker], msg as String, span as Span):
+        self.report_error_with_code("E0401" to cstr, msg, (deref self).current_file, span)
+
+    public fn report_error_with_code(self as ptr[BorrowChecker], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
         extern fn snprintf(str as ptr[u8], size as usize, format as cstr, file as cstr, row as u32, col as u32, err as cstr) as i32
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
-        let cap as usize = msg.len + 128 to usize
+        let cap as usize = msg.len + file_path.len + 128 to usize
         let buf as ptr[u8] = malloc(cap) to ptr[u8]
         let dummy_memset as ptr = memset(buf to ptr, 0 to i32, cap to i32)
-        let len as i32 = snprintf(buf, cap, "%s:%d:%d: borrow error: %s" to cstr, (deref self).current_file.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
+        let len as i32 = snprintf(buf, cap, "%s:%d:%d: borrow error: %s" to cstr, file_path.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
-        let r as i32 = printf("%s\n" to cstr, buf to cstr)
+        
+        if (deref self).sema != None to ptr[Sema]:
+            let s_ptr as ptr[Sema] = (deref self).sema
+            if (deref s_ptr).engine != None to ptr[DiagnosticEngine]:
+                return (deref (deref s_ptr).engine).report_error(code, msg, file_path, span)
+        else:
+            let r as i32 = printf("%s\n" to cstr, buf to cstr)
+        return None to ptr[Diagnostic]
+
+    public fn report_error_node(self as ptr[BorrowChecker], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+        let file_path as String = node_file_path(node, (deref self).current_file)
+        return self.report_error_with_code(code, msg, file_path, node_span(node))
 
     public fn mark_moved(self as ptr[BorrowChecker], name as String):
         if (deref self).symbol_states.has(name):
@@ -208,10 +224,16 @@ struct BorrowChecker:
             let info as VarInfo = (deref self).symbol_states[name]
             if info.state == ObjectState.Moved:
                 if self.is_local(name):
-                    self.report_error(String.make("use of moved variable" to cstr), node_span(node))
+                    let d as ptr[Diagnostic] = self.report_error_node("E0401" to cstr, String.make("use of moved variable" to cstr), node)
+                    if d != None to ptr[Diagnostic]:
+                        d.set_explanation(String.make("Nizam uses affine move semantics. Values that do not implement Copy are moved upon assignment or passing to a function." to cstr))
+                        d.add_help(String.make("Consider cloning the variable before moving, or borrowing via a reference." to cstr))
             elif info.state == ObjectState.Dropped:
                 if self.is_local(name):
-                    self.report_error(String.make("use of dropped variable" to cstr), node_span(node))
+                    let d as ptr[Diagnostic] = self.report_error_node("E0402" to cstr, String.make("use of dropped variable" to cstr), node)
+                    if d != None to ptr[Diagnostic]:
+                        d.set_explanation(String.make("The variable was explicitly dropped and cannot be referenced or accessed afterward." to cstr))
+                        d.add_help(String.make("Remove the earlier `drop(...)` call or re-initialize the variable." to cstr))
 
     public fn walk_ast(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:

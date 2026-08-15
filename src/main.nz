@@ -16,6 +16,8 @@ import borrowck
 from borrowck import BorrowChecker
 import codegen
 from codegen import LLVMCodegen
+import error
+from error import DiagnosticEngine
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
@@ -83,6 +85,10 @@ fn compiler_name(mode as i32) as cstr:
 
 // ── Compiler Pipeline ───────────────────────────────────────────────────
 fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32) as bool:
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make(path_cstr), String.make(source_cstr))
+
     var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
     if mode == LanguageMode.Nizam to i32:
         lowerer = make_lowerer_from_cstr(source_cstr, path_cstr)
@@ -95,6 +101,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
 
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref sema).init_sema(path_cstr)
+    (deref sema).engine = engine
     (deref sema).root_ast = root
     sema.declare_pass(root)
     sema.resolve_pass(root)
@@ -108,6 +115,10 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     (deref bc).sema = sema
     (deref bc).current_file = (deref sema).current_file
     (deref bc).walk_ast(root)
+
+    if engine.has_errors():
+        engine.emit_all_cached()
+        return False
 
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()

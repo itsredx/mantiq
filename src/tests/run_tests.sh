@@ -22,6 +22,13 @@ TEST_FILES=(
     "src/tests/test_ast.nz"
     "src/tests/test_error.nz"
     "src/tests/test_macro.nz"
+    "src/tests/test_sema.nz"
+    "src/tests/test_borrowck.nz"
+    "src/tests/test_ffi.nz"
+    "src/tests/test_lower.nz"
+    "src/tests/test_traverse.nz"
+    "src/tests/test_utils.nz"
+    "src/tests/test_codegen.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}
