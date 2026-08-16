@@ -259,6 +259,8 @@ struct Lowerer:
             return self.lower_unary_expr(ts_node)
         elif strcmp(kind, "if_stmt" to cstr) == 0:
             return self.lower_if_stmt(ts_node)
+        elif strcmp(kind, "match_stmt" to cstr) == 0:
+            return self.lower_match_stmt(ts_node)
         elif strcmp(kind, "ternary" to cstr) == 0:
             return self.lower_ternary(ts_node)
         elif strcmp(kind, "list_literal" to cstr) == 0:
@@ -359,6 +361,76 @@ struct Lowerer:
             return n
         else:
             return self.lower_node(ts_node)
+
+    public fn lower_match_stmt(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        var subject as ptr[Node] = None to ptr[Node]
+        let cases as List[ptr[Node]] = List[ptr[Node]]()
+
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            if ts_node_is_named_ptr(ref child):
+                let c_type as cstr = ts_node_type_ptr(ref child)
+                if strcmp(c_type, "comment" to cstr) != 0 and strcmp(c_type, "kw_match" to cstr) != 0 and strcmp(c_type, "match" to cstr) != 0:
+                    if strcmp(c_type, "match_case" to cstr) == 0:
+                        var pattern as ptr[Node] = None to ptr[Node]
+                        var guard as ptr[Node] = None to ptr[Node]
+                        var body as ptr[Node] = None to ptr[Node]
+                        var saw_if as bool = False
+
+                        let case_child_count as u32 = ts_node_child_count_ptr(ref child)
+                        var j as u32 = 0 to u32
+                        while j < case_child_count:
+                            var cc as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                            ts_node_child_ptr(ref child, j, ref cc)
+                            let cc_type as cstr = ts_node_type_ptr(ref cc)
+                            if strcmp(cc_type, "if" to cstr) == 0:
+                                saw_if = True
+                            elif ts_node_is_named_ptr(ref cc):
+                                if strcmp(cc_type, "comment" to cstr) != 0 and strcmp(cc_type, "kw_case" to cstr) != 0 and strcmp(cc_type, "case" to cstr) != 0:
+                                    if strcmp(cc_type, "block_body" to cstr) == 0 or strcmp(cc_type, "block" to cstr) == 0:
+                                        body = self.lower_block(ref cc)
+                                    elif strcmp(cc_type, "statement" to cstr) == 0 or strcmp(cc_type, "expr_stmt" to cstr) == 0 or strcmp(cc_type, "expression_statement" to cstr) == 0 or strcmp(cc_type, "jump_stmt" to cstr) == 0:
+                                        body = self.lower_node(ref cc)
+                                    elif saw_if:
+                                        guard = self.lower_node(ref cc)
+                                    elif pattern == None to ptr[Node]:
+                                        pattern = self.lower_node(ref cc)
+                                    elif guard == None to ptr[Node]:
+                                        guard = self.lower_node(ref cc)
+                            j = j + 1 to u32
+
+                        if pattern != None to ptr[Node]:
+                            var case_pat as ptr[Node] = pattern
+                            if guard != None to ptr[Node]:
+                                let g_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
+                                let g_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                                (deref g_data).op = String.make("if" to cstr)
+                                (deref g_data).left = pattern
+                                (deref g_data).right = guard
+                                (deref g_node).data = g_data to ptr[u8]
+                                case_pat = g_node
+
+                            let c_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
+                            let c_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                            (deref c_data).op = String.make("case" to cstr)
+                            (deref c_data).left = case_pat
+                            (deref c_data).right = body
+                            (deref c_node).data = c_data to ptr[u8]
+                            cases.append(c_node)
+                    elif subject == None to ptr[Node]:
+                        subject = self.lower_node(ref child)
+            i = i + 1 to u32
+
+        let n as ptr[Node] = make_node(NodeType.MatchStmt, span)
+        let data as ptr[MatchStmtData] = make[MatchStmtData](1 to usize) to ptr[MatchStmtData]
+        (deref data).left = subject
+        (deref data).declarations = cases
+        (deref n).data = data to ptr[u8]
+        return n
 
     public fn lower_ternary(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         let then_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
@@ -1622,11 +1694,96 @@ struct Lowerer:
         (deref n).data = data to ptr[u8]
         return n
 
-    public fn lower_enum_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
-        extern fn memset(s as ptr, c as i32, n as usize) as ptr
+    public fn lower_enum_variant(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         let span as Span = self.get_span(ts_node)
         var name as String = String.make("" to cstr)
-        let variants as List[ptr[Node]] = List[ptr[Node]]()
+        let params as List[ptr[Node]] = List[ptr[Node]]()
+
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            if ts_node_is_named_ptr(ref child):
+                let c_kind as cstr = ts_node_type_ptr(ref child)
+                if strcmp(c_kind, "identifier" to cstr) == 0:
+                    if name.len == 0 to usize:
+                        let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
+                        name = deref slice_ptr
+                        drop(slice_ptr to ptr)
+                elif strcmp(c_kind, "typed_params" to cstr) == 0:
+                    let tp_count as u32 = ts_node_child_count_ptr(ref child)
+                    var j as u32 = 0 to u32
+                    while j < tp_count:
+                        var tp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, j, ref tp_child)
+                        if ts_node_is_named_ptr(ref tp_child):
+                            let tp_kind as cstr = ts_node_type_ptr(ref tp_child)
+                            if strcmp(tp_kind, "param_decl" to cstr) == 0 or strcmp(tp_kind, "typed_var" to cstr) == 0 or strcmp(tp_kind, "param" to cstr) == 0 or strcmp(tp_kind, "typed_param" to cstr) == 0:
+                                let pd_count as u32 = ts_node_child_count_ptr(ref tp_child)
+                                var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+                                var annot_idx as u32 = 0 to u32
+                                while annot_idx < pd_count:
+                                    var pd_child_annot as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                    ts_node_child_ptr(ref tp_child, annot_idx, ref pd_child_annot)
+                                    if ts_node_is_named_ptr(ref pd_child_annot):
+                                        let pd_kind as cstr = ts_node_type_ptr(ref pd_child_annot)
+                                        if strcmp(pd_kind, "type_annotation" to cstr) == 0:
+                                            annot = self.lower_type_annotation(ref pd_child_annot)
+                                    annot_idx = annot_idx + 1 to u32
+                                
+                                var k as u32 = 0 to u32
+                                while k < pd_count:
+                                    var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                    ts_node_child_ptr(ref tp_child, k, ref pd_child)
+                                    if ts_node_is_named_ptr(ref pd_child):
+                                        let pd_kind as cstr = ts_node_type_ptr(ref pd_child)
+                                        if strcmp(pd_kind, "identifier" to cstr) == 0:
+                                            let p_slice as ptr[String] = self.slice_string_from_node(ref pd_child)
+                                            let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
+                                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                            (deref p_data).name = deref p_slice
+                                            (deref p_data).left = None to ptr[Node]
+                                            (deref p_data).is_mut = False
+
+                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                            (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+                                            if annot != None to ptr[TypeAnnotation]:
+                                                (deref p_wrapper).list.append(Some(annot))
+                                            else:
+                                                (deref p_wrapper).list.append(Empty)
+                                            let p_annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
+                                            (deref p_data).type_annots = p_annots_list_ptr
+                                            (deref p_node).data = p_data to ptr[u8]
+
+                                            params.append(p_node)
+                                            drop(p_slice to ptr)
+                                    k = k + 1 to u32
+                        j = j + 1 to u32
+            i = i + 1 to u32
+
+        if params.length() > 0 to i64:
+            let fn_node as ptr[Node] = make_node(NodeType.FunDecl, span)
+            let fn_data as ptr[FunDeclData] = make[FunDeclData](1 to usize) to ptr[FunDeclData]
+            (deref fn_data).name = name
+            (deref fn_data).params = params
+            (deref fn_data).body = None to ptr[Node]
+            (deref fn_data).is_extern = False
+            (deref fn_data).is_variadic = False
+            (deref fn_data).return_type_annot = None to ptr[TypeAnnotation]
+            (deref fn_node).data = fn_data to ptr[u8]
+            return fn_node
+        else:
+            let id_node as ptr[Node] = make_node(NodeType.Identifier, span)
+            let id_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            (deref id_data).name = name
+            (deref id_node).data = id_data to ptr[u8]
+            return id_node
+
+    public fn lower_enum_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        var name as String = String.make("" to cstr)
+        let declarations as List[ptr[Node]] = List[ptr[Node]]()
 
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var i as u32 = 0 to u32
@@ -1640,20 +1797,37 @@ struct Lowerer:
                         let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
                         name = deref slice_ptr
                         drop(slice_ptr to ptr)
+                elif strcmp(c_kind, "enum_body" to cstr) == 0:
+                    let eb_count as u32 = ts_node_child_count_ptr(ref child)
+                    var eb_i as u32 = 0 to u32
+                    while eb_i < eb_count:
+                        var eb_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, eb_i, ref eb_child)
+                        if ts_node_is_named_ptr(ref eb_child):
+                            let eb_kind as cstr = ts_node_type_ptr(ref eb_child)
+                            if strcmp(eb_kind, "enum_variant" to cstr) == 0:
+                                let v_lowered as ptr[Node] = self.lower_enum_variant(ref eb_child)
+                                if v_lowered != None to ptr[Node]:
+                                    declarations.append(v_lowered)
+                            elif strcmp(eb_kind, "fun_decl" to cstr) == 0 or strcmp(eb_kind, "named_function" to cstr) == 0 or strcmp(eb_kind, "function_definition" to cstr) == 0:
+                                let fn_lowered as ptr[Node] = self.lower_fun_decl(ref eb_child)
+                                if fn_lowered != None to ptr[Node]:
+                                    declarations.append(fn_lowered)
+                        eb_i = eb_i + 1 to u32
                 elif strcmp(c_kind, "enum_variant" to cstr) == 0:
-                    let v_name as ptr[String] = self.slice_string_from_node(ref child)
-                    let v_node as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ref child))
-                    let v_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
-                    (deref v_data).name = deref v_name
-                    (deref v_node).data = v_data to ptr[u8]
-                    variants.append(v_node)
-                    drop(v_name to ptr)
+                    let v_lowered as ptr[Node] = self.lower_enum_variant(ref child)
+                    if v_lowered != None to ptr[Node]:
+                        declarations.append(v_lowered)
+                elif strcmp(c_kind, "fun_decl" to cstr) == 0 or strcmp(c_kind, "named_function" to cstr) == 0 or strcmp(c_kind, "function_definition" to cstr) == 0:
+                    let fn_lowered as ptr[Node] = self.lower_fun_decl(ref child)
+                    if fn_lowered != None to ptr[Node]:
+                        declarations.append(fn_lowered)
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.EnumDecl, span)
         let data as ptr[EnumDeclData] = make[EnumDeclData](1 to usize) to ptr[EnumDeclData]
         (deref data).name = name
-        (deref data).declarations = variants
+        (deref data).declarations = declarations
         (deref n).data = data to ptr[u8]
         return n
 

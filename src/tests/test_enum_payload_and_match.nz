@@ -1,0 +1,55 @@
+// ── Payload Enums & Pattern Matching Test Suite ───────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+enum Shape:
+    Circle(radius as f32)
+    Rectangle(w as f32, h as f32)
+    Point
+
+    // Enums can have methods in Nizam
+    fn area(ref self) as f32:
+        match self:
+            case Circle(r): return 3.14 * r * r
+            case Rectangle(w, h): return w * h
+            case Point: return 0.0
+
+fn main() -> i32:
+    let p_header as i32 = printf("=== Running Payload Enums & Pattern Matching Tests ===\n\n" to cstr)
+
+    // ── Test 1: Circle Area ──────────────────────────────────────────────
+    let c as Shape = Circle(10.0 to f32)
+    let a1 as f32 = c.area()
+    var test1_passed as bool = False
+    if a1 > 313.0 to f32 and a1 < 315.0 to f32:
+        test1_passed = True
+        let _p as i32 = printf("Test 1 (Circle(10.0).area() -> ~314.0): PASSED! (got %f)\n" to cstr, a1 to f64)
+    else:
+        let _p as i32 = printf("Test 1 (Circle(10.0).area()): FAILED! (got %f)\n" to cstr, a1 to f64)
+
+    // ── Test 2: Rectangle Area ───────────────────────────────────────────
+    let r as Shape = Rectangle(4.0 to f32, 5.0 to f32)
+    let a2 as f32 = r.area()
+    var test2_passed as bool = False
+    if a2 == 20.0 to f32:
+        test2_passed = True
+        let _p as i32 = printf("Test 2 (Rectangle(4.0, 5.0).area() -> 20.0): PASSED! (got %f)\n" to cstr, a2 to f64)
+    else:
+        let _p as i32 = printf("Test 2 (Rectangle(4.0, 5.0).area()): FAILED! (got %f)\n" to cstr, a2 to f64)
+
+    // ── Test 3: Point Area ───────────────────────────────────────────────
+    let p as Shape = Point
+    let a3 as f32 = p.area()
+    var test3_passed as bool = False
+    if a3 == 0.0 to f32:
+        test3_passed = True
+        let _p as i32 = printf("Test 3 (Point.area() -> 0.0): PASSED! (got %f)\n" to cstr, a3 to f64)
+    else:
+        let _p as i32 = printf("Test 3 (Point.area()): FAILED! (got %f)\n" to cstr, a3 to f64)
+
+    // ── Summary ──────────────────────────────────────────────────────────
+    if test1_passed and test2_passed and test3_passed:
+        let _p as i32 = printf("\n>>> ALL TESTS PASSED! <<<\n" to cstr)
+        return 0
+    else:
+        let _p as i32 = printf("\n>>> SOME TESTS FAILED! <<<\n" to cstr)
+        return 1

@@ -1,0 +1,618 @@
+# Stage 1 (Zig compiler) -> Stage 2 (Nizam binary ./nizam)
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+
+# Stage 2 (./nizam) -> Stage 3 (/tmp/nizam-stage2-final)
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-final --lib-dir .
+
+# Stage 3 (/tmp/nizam-stage2-final) -> Stage 4 (/tmp/nizam-stage3-final)
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-final build src/main.nz -o /tmp/nizam-stage3-final --lib-dir .
+
+# Verify Stage 4 binary execution
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-final --versionLD_LIBRARY_PATH=. zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build and_test.nz -o /tmp/and_test --lib-dir . && /tmp/and_test
+LD_LIBRARY_PATH=. ./nizam build slice_test.nz -o /tmp/slice_test --lib-dir . && /tmp/slice_test
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build and_test.nz -o /tmp/and_test --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build and_test.nz -o /tmp/and_test --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build and_test.nz -o /tmp/and_test --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_codegen.nz -o /tmp/test_codegen --lib-dir . && /tmp/test_codegen
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-user build slice_test.nz -o /tmp/slice_test --lib-dir . && /tmp/slice_test
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-user build and_test.nz -o /tmp/and_test --lib-dir . && /tmp/and_test
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+cp /tmp/nizam-stage2-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+cp /tmp/nizam-stage2-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. /tmp/test_ast
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+cp /tmp/nizam-stage2-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+cp /tmp/nizam-stage2-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_traverse.nz -o /tmp/test_traverse --lib-dir . && /tmp/test_traverse
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+diff /tmp/nizam-stage2-user /tmp/nizam-stage3-user
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-user build src/main.nz -o /tmp/nizam-stage4-user --lib-dir .
+diff /tmp/nizam-stage3-user /tmp/nizam-stage4-user
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/nizam build src/main.nz -o ./nizam --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-user build src/main.nz -o /tmp/nizam-stage4-user --lib-dir .
+cp /tmp/bin_a ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_traverse.nz -o /tmp/test_traverse --lib-dir . && /tmp/test_traverse
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_traverse.nz -o /tmp/test_traverse --lib-dir . && /tmp/test_traverse
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ffi.nz -o /tmp/test_ffi --lib-dir . && /tmp/test_ffi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ffi.nz -o /tmp/test_ffi --lib-dir . && /tmp/test_ffi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_lower.nz -o /tmp/test_lower --lib-dir . && /tmp/test_lower
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_lower.nz -o /tmp/test_lower --lib-dir . && /tmp/test_lower
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_lower.nz -o /tmp/test_lower --lib-dir . && /tmp/test_lower
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_lower.nz -o /tmp/test_lower --lib-dir . && /tmp/test_lower
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+cp /tmp/nizam-stage3-user ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2-user --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-user build src/main.nz -o /tmp/nizam-stage3-user --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2-clean --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2-clean --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2-clean --lib-dir .
+LD_LIBRARY_PATH=. ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2-clean --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage2-clean build src/main.nz -o /tmp/nizam-stage3-clean --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage3-clean build src/main.nz -o /tmp/nizam-stage4-clean --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam-stage4-clean build src/main.nz -o /tmp/nizam-stage5-clean --lib-dir .
+diff -u /tmp/nizam-stage4-clean.ll /tmp/nizam-stage5-clean.ll && cmp /tmp/nizam-stage4-clean /tmp/nizam-stage5-clean
+cp /tmp/nizam-stage4-clean ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && cp /tmp/nizam-stage3 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. /tmp/nizam-stage4 build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam-stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage2 build src/main.nz -o /tmp/nizam-stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam-stage3 build src/main.nz -o /tmp/nizam-stage4 --lib-dir . && cp /tmp/nizam-stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ast.nz -o /tmp/test_ast --lib-dir . && /tmp/test_ast
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_traverse.nz -o /tmp/test_traverse --lib-dir . && /tmp/test_traverse
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_ffi.nz -o /tmp/test_ffi --lib-dir . && /tmp/test_ffi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_sema.nz -o /tmp/test_sema --lib-dir . && /tmp/test_sema
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_lower.nz -o /tmp/test_lower --lib-dir . && /tmp/test_lower
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_borrowck.nz -o /tmp/test_borrowck --lib-dir . && /tmp/test_borrowck
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+mantiq/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && diff /tmp/nizam_stage2.ll /tmp/nizam_stage3.ll && cp /tmp/nizam_stage3 ./nizam
+../mantiqz/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && diff /tmp/nizam_stage2.ll /tmp/nizam_stage3.ll && cp /tmp/nizam_stage3 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && diff /tmp/nizam_stage2.ll /tmp/nizam_stage3.ll && cp /tmp/nizam_stage3 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 and Stage 4 IR identical! Nizam self-hosting verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_codegen.nz -o /tmp/test_codegen --lib-dir . && /tmp/test_codegen
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_codegen.nz -o /tmp/test_codegen --lib-dir . && /tmp/test_codegen
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_codegen.nz -o /tmp/test_codegen --lib-dir . && /tmp/test_codegen
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_codegen.nz -o /tmp/test_codegen --lib-dir . && /tmp/test_codegen
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_utils.nz -o /tmp/test_utils --lib-dir . && /tmp/test_utils
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+# Running full test suite verification
+git status -s
+git diff
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_types.nz -o /tmp/test_types --lib-dir . && /tmp/test_types
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_types.nz -o /tmp/test_types --lib-dir . && /tmp/test_types
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Bootstrap verified!'
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam && echo 'Stage 4 == Stage 5 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && echo 'Stage 4 == Stage 5 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam && echo 'Stage 4 == Stage 5 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+cp tree_sitter_helper.c ../mantiqz/mantiq-compiler/zig-out/bin/tree_sitter_helper.c
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+zig cc -shared -fPIC -Isrc -Itree-sitter-mantiq/src tree-sitter-mantiq/src/parser.c tree-sitter-mantiq/src/scanner.c tree_sitter_helper.c -o libtree-sitter-mantiq.so && cp libtree-sitter-mantiq.so src/ && cp libtree-sitter-mantiq.so ../mantiqz/mantiq-compiler/zig-out/bin/
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+find /usr -name '*tree-sitter*' 2>/dev/null
+zig cc -shared -fPIC -Isrc -Itree-sitter-mantiq/src tree-sitter-mantiq/src/parser.c tree-sitter-mantiq/src/scanner.c tree_sitter_helper.c /usr/lib/x86_64-linux-gnu/libtree-sitter.a -o libtree-sitter-mantiq.so && cp libtree-sitter-mantiq.so src/ && cp libtree-sitter-mantiq.so ../mantiqz/mantiq-compiler/zig-out/bin/
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+git status
+cp src/libtree-sitter-mantiq.so ./libtree-sitter-mantiq.so && cp src/libtree-sitter-mantiq.so ../mantiqz/mantiq-compiler/zig-out/bin/
+nm -D src/libtree-sitter-mantiq.so | grep ts_
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+cp /usr/lib/x86_64-linux-gnu/libtree-sitter.so* ./ && cp /usr/lib/x86_64-linux-gnu/libtree-sitter.so* ../mantiqz/mantiq-compiler/zig-out/bin/
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+nm -D src/libtree-sitter-mantiq.so | grep ts_parser
+ls /home/red-x/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.26.7/src/lib.c
+zig cc -shared -fPIC -Isrc -Itree-sitter-mantiq/src -I/home/red-x/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.26.7/include -I/home/red-x/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.26.7/src tree-sitter-mantiq/src/parser.c tree-sitter-mantiq/src/scanner.c tree_sitter_helper.c /home/red-x/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tree-sitter-0.26.7/src/lib.c -o libtree-sitter-mantiq.so && cp libtree-sitter-mantiq.so src/ && cp libtree-sitter-mantiq.so ../mantiqz/mantiq-compiler/zig-out/bin/
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam && echo 'Stage 4 == Stage 5 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam && echo 'Stage 3 == Stage 4 Bit-for-Bit Verified!'
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir .
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_types.nz -o /tmp/test_types --lib-dir . && /tmp/test_types && LD_LIBRARY_PATH=. ./nizam build src/tests/test_abi.nz -o /tmp/test_abi --lib-dir . && /tmp/test_abi
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_std.nz -o /tmp/test_std --lib-dir . && /tmp/test_std
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_std.nz -o /tmp/test_std --lib-dir . && /tmp/test_std
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_std.nz -o /tmp/test_std --lib-dir . && /tmp/test_std
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_magic.nz -o /tmp/test_magic --lib-dir . && /tmp/test_magic
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_magic.nz -o /tmp/test_magic --lib-dir . && /tmp/test_magic
+chmod +x src/tests/run_tests.sh && ./src/tests/run_tests.sh
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_macro.nz -o /tmp/test_macro --lib-dir . && /tmp/test_macro
+./src/tests/run_tests.sh
+git status -s
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+gdb -batch -ex 'set env LD_LIBRARY_PATH=.' -ex 'run build src/main.nz -o /tmp/nizam_stage4 --lib-dir .' -ex 'bt' /tmp/nizam_stage3
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+gdb -batch -ex 'set env LD_LIBRARY_PATH=.' -ex 'run build src/main.nz -o /tmp/nizam_stage4 --lib-dir .' -ex 'bt' /tmp/nizam_stage3
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . || head -n 4060 /tmp/nizam_stage4.ll | tail -n 30
+gdb -batch -ex 'set env LD_LIBRARY_PATH=.' -ex 'b type_to_llvm' -ex 'run build src/main.nz -o /tmp/nizam_stage4 --lib-dir .' -ex 'p *t' -ex 'c' /tmp/nizam_stage3
+cat << 'EOF' > /tmp/test_fn.nz
+fn read_file_to_cstr(path as cstr) as cstr:
+    return path
+
+fn main():
+    let s as cstr = read_file_to_cstr("hello" to cstr)
+EOF
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build /tmp/test_fn.nz -o /tmp/test_fn --lib-dir .
+cat /tmp/test_fn.ll
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+gdb -batch -ex 'set env LD_LIBRARY_PATH=.' -ex 'run build src/main.nz -o /tmp/nizam_stage4 --lib-dir .' -ex 'bt' /tmp/nizam_stage3 & sleep 5; gdb -batch -p $(pgrep -f nizam_stage3 | head -n 1) -ex 'bt' -ex 'info threads'
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build /tmp/test_fn.nz -o /tmp/test_fn --lib-dir . && /tmp/test_fn
+python3 -c "
+import subprocess, time, signal, os
+p = subprocess.Popen(['gdb', '-batch', '-ex', 'set env LD_LIBRARY_PATH=.', '-ex', 'run build src/main.nz -o /tmp/nizam_stage4 --lib-dir .', '-ex', 'bt', '/tmp/nizam_stage3'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+time.sleep(3)
+p.send_signal(signal.SIGINT)
+time.sleep(1)
+out, err = p.communicate()
+print('STDOUT:\n', out)
+print('STDERR:\n', err)
+"
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll | head -n 50
+diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+gdb -batch -ex 'run' -ex 'bt' /tmp/test_abi
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+git status
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_types.nz -o /tmp/test_types --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_types.nz -o /tmp/test_types --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/tests/test_error.nz -o /tmp/test_error --lib-dir .
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+./src/tests/run_tests.sh > test_run.txt 2>&1
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./src/tests/run_tests.sh
+./src/tests/run_tests.sh > test_run.txt 2>&1
+git status
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./src/tests/run_tests.sh
+./src/tests/run_tests.sh > test_run.txt 2>&1
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./src/tests/run_tests.sh
+/tmp/test_error
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && COLUMNS=84 /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+COLUMNS=100 /tmp/test_error
+./src/tests/run_tests.sh
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+./nizam build src/tests/test_error.nz -o /tmp/test_error --lib-dir . && /tmp/test_error
+COLUMNS=80 /tmp/test_error
+COLUMNS=100 /tmp/test_error
+COLUMNS=120 /tmp/test_error
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . && LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . && diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . && diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+diff -u /tmp/nizam_stage3.ll /tmp/nizam_stage4.ll && cp /tmp/nizam_stage4 ./nizam
+LD_LIBRARY_PATH=. /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll && cp /tmp/nizam_stage5 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+diff -u /tmp/nizam_stage4.ll /tmp/nizam_stage5.ll
+cp /tmp/nizam_stage5 ./nizam
+LD_LIBRARY_PATH=. ./nizam build src/tests/test_tagged_imports_and_options.nz -o /tmp/test_tagged_imports_and_options --lib-dir .
+/tmp/test_tagged_imports_and_options
+timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+LD_LIBRARY_PATH=. timeout 15s ./nizam build test_entry.nz -o /tmp/test_entry --lib-dir .
+LD_LIBRARY_PATH=. timeout 30s ./nizam build src/tests/test_multifile_error.nz -o /tmp/test_multifile_error --lib-dir . && timeout 10s /tmp/test_multifile_error
+timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+git add src/codegen.nz src/error.nz src/lower.nz src/sema.nz src/symbols.nz src/typecheck.nz src/tests/run_tests.sh src/tests/test_error.nz src/tests/path_helper.nz src/tests/test_multifile_error.nz src/tests/test_tagged_imports_and_options.nz vendor/grep.nz
+git commit -m "feat(compiler): implement tagged imports, postfix optionals, and file-relative diagnostics"
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+LD_LIBRARY_PATH=. timeout 30s ./nizam build src/tests/test_match.nz -o /tmp/test_match --lib-dir . && timeout 10s /tmp/test_match
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+LD_LIBRARY_PATH=. timeout 30s ./nizam build src/tests/test_enum_payload_and_match.nz -o /tmp/test_enum_payload_and_match --lib-dir . && timeout 10s /tmp/test_enum_payload_and_match
+timeout 90s bash src/tests/run_tests.sh
+git add runtime.c src/codegen.nz src/lower.nz src/sema.nz src/symbols.nz src/tests/run_tests.sh src/tests/test_enum_payload_and_match.nz src/tests/test_match.nz src/typecheck.nz research/cmd
+git commit -m "feat(compiler): implement payload enums, enum member methods, and pattern destructuring"

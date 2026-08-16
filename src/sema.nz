@@ -13,6 +13,9 @@ from types import Type
 import error
 from error import DiagnosticEngine, Diagnostic, Severity
 
+extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+extern fn free(p as ptr)
+
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
@@ -609,7 +612,7 @@ struct Sema:
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Enum, node)
                 (deref (deref self).current_scope).symbols[name] = sym
-            // Create child scope and register each variant as a Variable
+            // Create child scope
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
             (deref self).current_scope = child_scope
@@ -620,8 +623,56 @@ struct Sema:
             while v_i < v_count:
                 let v_node as ptr[Node] = v_list[v_i]
                 let v_name as String = node_name(v_node)
-                let v_sym as ptr[Symbol] = make_symbol(v_name, SymbolKind.Variable, v_node)
-                (deref child_scope).symbols[v_name] = v_sym
+                let v_kind as NodeType = node_kind(v_node)
+                if v_kind == NodeType.FunDecl:
+                    if node_body(v_node) != None to ptr[Node]:
+                        let m_sym as ptr[Symbol] = make_symbol(v_name, SymbolKind.Function, v_node)
+                        (deref child_scope).symbols[v_name] = m_sym
+                        let m_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                        let _ as i32 = sprintf(m_buf, "%s_%s" to cstr, name.data to cstr, v_name.data to cstr)
+                        let mangled_m as String = String.make(m_buf to cstr)
+                        let m_sym_p as ptr[Symbol] = make_symbol(mangled_m, SymbolKind.Function, v_node)
+                        (deref parent_scope).symbols[mangled_m] = m_sym_p
+                        free(m_buf to ptr)
+
+                        let m_parent as ptr[Scope] = (deref self).current_scope
+                        let m_child as ptr[Scope] = make_scope(m_parent, v_node)
+                        (deref self).current_scope = m_child
+                        (deref self).fn_scopes[v_node to usize] = m_child
+                        let p_list as List[ptr[Node]] = node_params(v_node)
+                        let p_count as i64 = p_list.length()
+                        var pi as i64 = 0 to i64
+                        while pi < p_count:
+                            let p_node as ptr[Node] = p_list[pi]
+                            let p_name as String = node_name(p_node)
+                            if not (deref m_child).symbols.has(p_name):
+                                let p_sym as ptr[Symbol] = make_symbol(p_name, SymbolKind.Variable, p_node)
+                                (deref m_child).symbols[p_name] = p_sym
+                            pi = pi + 1 to i64
+                        if node_body(v_node) != None to ptr[Node]:
+                            self.declare_pass(node_body(v_node))
+                        let self_ref_m as ptr[Sema] = self
+                        (deref self_ref_m).current_scope = m_parent
+                    else:
+                        let v_sym as ptr[Symbol] = make_symbol(v_name, SymbolKind.Function, v_node)
+                        (deref child_scope).symbols[v_name] = v_sym
+                        (deref parent_scope).symbols[v_name] = v_sym
+                        let m_buf2 as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                        let _ as i32 = sprintf(m_buf2, "%s_%s" to cstr, name.data to cstr, v_name.data to cstr)
+                        let mangled_m2 as String = String.make(m_buf2 to cstr)
+                        let v_sym_m2 as ptr[Symbol] = make_symbol(mangled_m2, SymbolKind.Function, v_node)
+                        (deref parent_scope).symbols[mangled_m2] = v_sym_m2
+                        free(m_buf2 to ptr)
+                else:
+                    let v_sym as ptr[Symbol] = make_symbol(v_name, SymbolKind.Variable, v_node)
+                    (deref child_scope).symbols[v_name] = v_sym
+                    (deref parent_scope).symbols[v_name] = v_sym
+                    let m_buf3 as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                    let _ as i32 = sprintf(m_buf3, "%s_%s" to cstr, name.data to cstr, v_name.data to cstr)
+                    let mangled_m3 as String = String.make(m_buf3 to cstr)
+                    let v_sym_m3 as ptr[Symbol] = make_symbol(mangled_m3, SymbolKind.Variable, v_node)
+                    (deref parent_scope).symbols[mangled_m3] = v_sym_m3
+                    free(m_buf3 to ptr)
                 v_i = v_i + 1 to i64
             let self_ref_en as ptr[Sema] = self
             (deref self_ref_en).current_scope = parent_scope
@@ -681,6 +732,48 @@ struct Sema:
             if option_has_value(else_opt):
                 let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
                 self.declare_pass(else_node)
+        elif nt == NodeType.MatchStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.declare_pass(node_left(node))
+            let cases as List[ptr[Node]] = node_declarations(node)
+            let case_cnt as i64 = cases.length()
+            var ci as i64 = 0 to i64
+            while ci < case_cnt:
+                let case_node as ptr[Node] = cases[ci]
+                let parent_scope as ptr[Scope] = (deref self).current_scope
+                let child_scope as ptr[Scope] = make_scope(parent_scope, case_node)
+                (deref self).current_scope = child_scope
+                (deref self).fn_scopes[case_node to usize] = child_scope
+
+                var pat_node as ptr[Node] = node_left(case_node)
+                if pat_node != None to ptr[Node]:
+                    if node_kind(pat_node) == NodeType.BinaryExpr and strcmp(node_op(pat_node).data to cstr, "if" to cstr) == 0:
+                        pat_node = node_left(pat_node)
+
+                    if node_kind(pat_node) == NodeType.Identifier:
+                        let pat_name as String = node_name(pat_node)
+                        if strcmp(pat_name.data to cstr, "_" to cstr) != 0:
+                            let sym as ptr[Symbol] = make_symbol(pat_name, SymbolKind.Variable, pat_node)
+                            (deref child_scope).symbols[pat_name] = sym
+                    elif node_kind(pat_node) == NodeType.CallExpr:
+                        let pat_args as List[ptr[Node]] = node_params(pat_node)
+                        let pa_count as i64 = pat_args.length()
+                        var pa_i as i64 = 0 to i64
+                        while pa_i < pa_count:
+                            let pa_n as ptr[Node] = pat_args[pa_i]
+                            if node_kind(pa_n) == NodeType.Identifier:
+                                let pa_name as String = node_name(pa_n)
+                                if strcmp(pa_name.data to cstr, "_" to cstr) != 0:
+                                    let sym as ptr[Symbol] = make_symbol(pa_name, SymbolKind.Variable, pa_n)
+                                    (deref child_scope).symbols[pa_name] = sym
+                            pa_i = pa_i + 1 to i64
+
+                if node_right(case_node) != None to ptr[Node]:
+                    self.declare_pass(node_right(case_node))
+
+                let self_ref_mc as ptr[Sema] = self
+                (deref self_ref_mc).current_scope = parent_scope
+                ci = ci + 1 to i64
         elif nt == NodeType.ImportDecl:
             self.load_imported_module(node)
 
@@ -709,6 +802,8 @@ struct Sema:
         elif nt == NodeType.FunDecl:
             // Extern functions have no body or child scope — skip resolve
             if node_is_extern(node):
+                return
+            if not (deref self).fn_scopes.has(node to usize):
                 return
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
@@ -836,3 +931,32 @@ struct Sema:
                     self.resolve_pass(node_body(node))
                 let self_ref_ud2 as ptr[Sema] = self
                 (deref self_ref_ud2).current_scope = parent_scope
+        elif nt == NodeType.MatchStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.resolve_pass(node_left(node))
+            let cases as List[ptr[Node]] = node_declarations(node)
+            let case_cnt as i64 = cases.length()
+            var ci as i64 = 0 to i64
+            while ci < case_cnt:
+                let case_node as ptr[Node] = cases[ci]
+                let parent_scope as ptr[Scope] = (deref self).current_scope
+                if (deref self).fn_scopes.has(case_node to usize):
+                    let child_scope as ptr[Scope] = (deref self).fn_scopes[case_node to usize]
+                    (deref self).current_scope = child_scope
+
+                    let pat_wrapper as ptr[Node] = node_left(case_node)
+                    if pat_wrapper != None to ptr[Node]:
+                        if node_kind(pat_wrapper) == NodeType.BinaryExpr and strcmp(node_op(pat_wrapper).data to cstr, "if" to cstr) == 0:
+                            let inner_pat as ptr[Node] = node_left(pat_wrapper)
+                            if node_kind(inner_pat) != NodeType.Identifier:
+                                self.resolve_pass(inner_pat)
+                            self.resolve_pass(node_right(pat_wrapper))
+                        elif node_kind(pat_wrapper) != NodeType.Identifier:
+                            self.resolve_pass(pat_wrapper)
+
+                    if node_right(case_node) != None to ptr[Node]:
+                        self.resolve_pass(node_right(case_node))
+
+                    let self_ref_m2 as ptr[Sema] = self
+                    (deref self_ref_m2).current_scope = parent_scope
+                ci = ci + 1 to i64

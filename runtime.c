@@ -967,5 +967,18 @@ void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
     mantiq_free(name);
 }
 
-
-
+void format_llvm_float(double val, int is_f32, char* out_buf) {
+    if (val == 0.0) {
+        strcpy(out_buf, "0.000000e+00");
+        return;
+    }
+    uint64_t u = 0;
+    if (is_f32) {
+        float f = (float)val;
+        double d = (double)f;
+        memcpy(&u, &d, sizeof(uint64_t));
+    } else {
+        memcpy(&u, &val, sizeof(uint64_t));
+    }
+    sprintf(out_buf, "0x%016llX", (unsigned long long)u);
+}

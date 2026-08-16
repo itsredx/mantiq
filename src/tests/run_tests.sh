@@ -31,6 +31,8 @@ TEST_FILES=(
     "src/tests/test_codegen.nz"
     "src/tests/test_tagged_imports_and_options.nz"
     "src/tests/test_multifile_error.nz"
+    "src/tests/test_match.nz"
+    "src/tests/test_enum_payload_and_match.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

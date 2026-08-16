@@ -1,0 +1,108 @@
+// ── Pattern Matching Test Suite ──────────────────────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+fn score_eval(score as i32) as i32:
+    var result as i32 = 0
+    match score:
+        case 100:
+            result = 1
+        case 90..99:
+            result = 2
+        case x if x < 50:
+            result = 3
+        case _:
+            result = 4
+    return result
+
+fn score_eval_early_return(score as i32) as i32:
+    match score:
+        case 100:
+            return 10
+        case 90..99:
+            return 20
+        case x if x < 50:
+            return 30
+        case _:
+            return 40
+
+fn test_guards(val as i32) as i32:
+    match val:
+        case x if x == 10:
+            return 100
+        case x if x > 20:
+            return 200
+        case _:
+            return 300
+
+fn main() -> i32:
+    let p_header as i32 = printf("=== Running Pattern Matching Tests ===\n\n" to cstr)
+
+    // ── Test 1: Literal Match ────────────────────────────────────────────
+    let res1 as i32 = score_eval(100)
+    var test1_passed as bool = False
+    if res1 == 1:
+        test1_passed = True
+        let _p as i32 = printf("Test 1 (Literal Match 100 -> 1): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 1 (Literal Match 100 -> 1): FAILED! (got %d)\n" to cstr, res1)
+
+    // ── Test 2: Range Match ──────────────────────────────────────────────
+    let res2_a as i32 = score_eval(90)
+    let res2_b as i32 = score_eval(95)
+    let res2_c as i32 = score_eval(99)
+    var test2_passed as bool = False
+    if res2_a == 2 and res2_b == 2 and res2_c == 2:
+        test2_passed = True
+        let _p as i32 = printf("Test 2 (Range Match 90..99 -> 2): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 2 (Range Match 90..99 -> 2): FAILED!\n" to cstr)
+
+    // ── Test 3: Guarded Match ────────────────────────────────────────────
+    let res3_a as i32 = score_eval(40)
+    let res3_b as i32 = score_eval(0)
+    let res3_c as i32 = score_eval(-10)
+    var test3_passed as bool = False
+    if res3_a == 3 and res3_b == 3 and res3_c == 3:
+        test3_passed = True
+        let _p as i32 = printf("Test 3 (Guarded Match x < 50 -> 3): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 3 (Guarded Match x < 50 -> 3): FAILED!\n" to cstr)
+
+    // ── Test 4: Wildcard Fallthrough Match ────────────────────────────────
+    let res4 as i32 = score_eval(75)
+    var test4_passed as bool = False
+    if res4 == 4:
+        test4_passed = True
+        let _p as i32 = printf("Test 4 (Wildcard Match _ -> 4): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 4 (Wildcard Match _ -> 4): FAILED!\n" to cstr)
+
+    // ── Test 5: Early Returns Inside Match Arms ──────────────────────────
+    let r_100 as i32 = score_eval_early_return(100)
+    let r_95 as i32 = score_eval_early_return(95)
+    let r_40 as i32 = score_eval_early_return(40)
+    let r_75 as i32 = score_eval_early_return(75)
+    var test5_passed as bool = False
+    if r_100 == 10 and r_95 == 20 and r_40 == 30 and r_75 == 40:
+        test5_passed = True
+        let _p as i32 = printf("Test 5 (Early Returns in Match Arms): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 5 (Early Returns in Match Arms): FAILED!\n" to cstr)
+
+    // ── Test 6: Multiple Guard Evaluations ───────────────────────────────
+    let g1 as i32 = test_guards(10)
+    let g2 as i32 = test_guards(25)
+    let g3 as i32 = test_guards(15)
+    var test6_passed as bool = False
+    if g1 == 100 and g2 == 200 and g3 == 300:
+        test6_passed = True
+        let _p as i32 = printf("Test 6 (Multiple Guard Arms Evaluation): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 6 (Multiple Guard Arms Evaluation): FAILED!\n" to cstr)
+
+    if test1_passed and test2_passed and test3_passed and test4_passed and test5_passed and test6_passed:
+        let _p_all as i32 = printf("\n>>> ALL PATTERN MATCHING TESTS PASSED <<<\n" to cstr)
+        return 0
+    else:
+        let _p_fail as i32 = printf("\n>>> SOME PATTERN MATCHING TESTS FAILED <<<\n" to cstr)
+        return 1

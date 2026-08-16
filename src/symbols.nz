@@ -178,8 +178,7 @@ struct WithStmtData:
 
 struct MatchStmtData:
     public var left as ptr[Node]
-    public var body as ptr[Node]
-    public var else_branch as Option[ptr[Node]]
+    public var declarations as List[ptr[Node]]
 
 struct TryStmtData:
     public var left as ptr[Node]
@@ -669,9 +668,6 @@ fn node_body(n as ptr[Node]) as ptr[Node]:
     elif k == NodeType.WithStmt:
         let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
         r = (deref d).body
-    elif k == NodeType.MatchStmt:
-        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
-        r = (deref d).body
     elif k == NodeType.TryStmt:
         let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
         r = (deref d).body
@@ -707,9 +703,6 @@ fn set_node_body(n as ptr[Node], body as ptr[Node]):
         (deref d).body = body
     elif k == NodeType.WithStmt:
         let d as ptr[WithStmtData] = (deref n).data to ptr[WithStmtData]
-        (deref d).body = body
-    elif k == NodeType.MatchStmt:
-        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         (deref d).body = body
     elif k == NodeType.TryStmt:
         let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
@@ -748,6 +741,9 @@ fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
     elif k == NodeType.DictLiteral:
         let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
         r = (deref d).declarations
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        r = (deref d).declarations
     return r
 
 fn node_declarations_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
@@ -769,6 +765,9 @@ fn node_declarations_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
     elif k == NodeType.DictLiteral:
         let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
         return ref (deref d).declarations
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        return ref (deref d).declarations
     return None to ptr[List[ptr[Node]]]
 
 fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
@@ -789,6 +788,9 @@ fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
         (deref d).declarations = decls
     elif k == NodeType.DictLiteral:
         let d as ptr[DictLiteralData] = (deref n).data to ptr[DictLiteralData]
+        (deref d).declarations = decls
+    elif k == NodeType.MatchStmt:
+        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         (deref d).declarations = decls
 
 // params accessor (5 node types have it):
@@ -951,9 +953,6 @@ fn node_else_branch(n as ptr[Node]) as Option[ptr[Node]]:
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         r = (deref d).else_branch
-    elif k == NodeType.MatchStmt:
-        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
-        r = (deref d).else_branch
     return r
 
 fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
@@ -962,9 +961,6 @@ fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
     let k as NodeType = (deref n).kind
     if k == NodeType.IfStmt:
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
-        (deref d).else_branch = branch
-    elif k == NodeType.MatchStmt:
-        let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         (deref d).else_branch = branch
 
 // val accessor (NumberLiteral, BooleanLiteral):

@@ -479,8 +479,17 @@ fn type_to_llvm(t as ptr[Type]) as String:
                 let res as String = String.make(buf to cstr)
                 free(buf to ptr)
                 return res
-        return String.make("ptr" to cstr)
     if k == TypeKind.Enum:
+        let e_name as cstr = (deref t).name.data to cstr
+        if e_name != None to cstr and (deref t).name.len > 0 to usize:
+            let e_len as usize = (deref t).name.len
+            let buf as ptr[u8] = make[u8](e_len + 2 to usize) to ptr[u8]
+            buf[0] = 37 to u8
+            let _m as ptr = memcpy((buf to usize + 1 to usize) to ptr, e_name to ptr, e_len)
+            buf[e_len + 1 to usize] = 0 to u8
+            let res as String = String.make(buf to cstr)
+            free(buf to ptr)
+            return res
         return String.make("i32" to cstr)
     if k == TypeKind.Union:
         let u_name as cstr = (deref t).name.data to cstr
@@ -624,6 +633,7 @@ struct LLVMCodegen:
     public var struct_field_indices as Dict[String, i32]
     public var current_break_label as String
     public var current_continue_label as String
+    public var enum_variant_tags as Dict[String, i32]
 
     public fn init_cg(self as ptr[LLVMCodegen]):
         (deref self).type_out = StringBuilder.make()
@@ -648,6 +658,7 @@ struct LLVMCodegen:
         (deref self).struct_field_indices = Dict[String, i32]()
         (deref self).current_break_label = String.make("" to cstr)
         (deref self).current_continue_label = String.make("" to cstr)
+        (deref self).enum_variant_tags = Dict[String, i32]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make(32 to usize) to ptr[u8]
@@ -833,7 +844,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr }")
         self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32 }")
-        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
@@ -856,7 +867,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("CastExprData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("BlockStmtData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("WithStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
-        self.register_builtin_struct("MatchStmtData", "{ ptr, ptr, { i8, ptr } }")
+        self.register_builtin_struct("MatchStmtData", "{ ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("TryStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("ThrowStmtData", "{ ptr }")
         self.register_builtin_struct("ListLiteralData", "{ { ptr, i64, i64 } }")
@@ -944,8 +955,7 @@ struct LLVMCodegen:
         self.register_field_idx("WithStmtData" to cstr, "name" to cstr, 1 to i32)
         self.register_field_idx("WithStmtData" to cstr, "body" to cstr, 2 to i32)
         self.register_field_idx("MatchStmtData" to cstr, "left" to cstr, 0 to i32)
-        self.register_field_idx("MatchStmtData" to cstr, "body" to cstr, 1 to i32)
-        self.register_field_idx("MatchStmtData" to cstr, "else_branch" to cstr, 2 to i32)
+        self.register_field_idx("MatchStmtData" to cstr, "declarations" to cstr, 1 to i32)
         self.register_field_idx("TryStmtData" to cstr, "left" to cstr, 0 to i32)
         self.register_field_idx("TryStmtData" to cstr, "name" to cstr, 1 to i32)
         self.register_field_idx("TryStmtData" to cstr, "body" to cstr, 2 to i32)
@@ -1190,6 +1200,8 @@ struct LLVMCodegen:
             self.emit_return(node)
         elif nt == NodeType.IfStmt:
             self.emit_if(node)
+        elif nt == NodeType.MatchStmt:
+            self.emit_match_stmt(node)
         elif nt == NodeType.WhileStmt:
             self.emit_while(node)
         elif nt == NodeType.ForStmt:
@@ -1703,15 +1715,13 @@ struct LLVMCodegen:
                     is_float = True
             let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
             if is_float:
-                let _ as i32 = sprintf(buf, "%g" to cstr, val)
-                extern fn strstr(haystack as cstr, needle as cstr) as cstr
-                extern fn strlen(s as cstr) as usize
-                let b_c as cstr = buf to cstr
-                if strstr(b_c, "." to cstr) == None to cstr and strstr(b_c, "e" to cstr) == None to cstr and strstr(b_c, "E" to cstr) == None to cstr:
-                    let blen as usize = strlen(b_c)
-                    (deref ((buf to usize + blen) to ptr[u8])) = 46 to u8
-                    (deref ((buf to usize + blen + 1 to usize) to ptr[u8])) = 48 to u8
-                    (deref ((buf to usize + blen + 2 to usize) to ptr[u8])) = 0 to u8
+                var is_f32 as i32 = 1
+                if inf_t != None to ptr[Type] and (deref inf_t).kind == TypeKind.F64:
+                    is_f32 = 0
+                elif strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0:
+                    is_f32 = 0
+                extern fn format_llvm_float(val as f64, is_f32 as i32, out_buf as ptr[u8])
+                format_llvm_float(val, is_f32, buf)
             else:
                 let _ as i32 = sprintf(buf, "%lld" to cstr, val to i64)
             return buf
@@ -1729,8 +1739,18 @@ struct LLVMCodegen:
                     return "0" to ptr[u8]
             var var_type as String = type_to_llvm(node_inferred_type(node))
             let id_nm_str as String = node_name(node)
-            if strcmp(id_nm_str.data to cstr, "self" to cstr) == 0 and strcmp(var_type.data to cstr, "{ ptr, i64, i64 }" to cstr) != 0:
+            if strcmp(id_nm_str.data to cstr, "self" to cstr) == 0 and strcmp(var_type.data to cstr, "{ ptr, i64, i64 }" to cstr) != 0 and (var_type.len == 0 to usize or deref (var_type.data) != 37 to u8):
                 var_type = String.make("ptr" to cstr)
+            if not (deref self).var_slots.has(id_nm_str) and (deref self).enum_variant_tags.has(id_nm_str) and ((deref self).program_functions.has(id_nm_str) or (deref self).defined_functions.has(id_nm_str)):
+                let reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, reg to cstr)
+                append_cstr(ref (deref self).main_out, " = call ")
+                append_str(ref (deref self).main_out, var_type)
+                append_cstr(ref (deref self).main_out, " @")
+                append_str(ref (deref self).main_out, id_nm_str)
+                append_cstr(ref (deref self).main_out, "()\n")
+                return reg
             if strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize:
                 if (deref self).var_types.has(id_nm_str):
                     let vt as String = (deref self).var_types[id_nm_str]
@@ -1879,6 +1899,27 @@ struct LLVMCodegen:
                     let v_cstr as cstr = variant_name.data to cstr
                     if strcmp(id_name, "NodeType" to cstr) == 0 or strcmp(id_name, "TypeKind" to cstr) == 0 or strcmp(id_name, "LanguageMode" to cstr) == 0 or strcmp(id_name, "SymbolKind" to cstr) == 0 or strcmp(id_name, "LabelKind" to cstr) == 0 or strcmp(id_name, "Severity" to cstr) == 0 or strcmp(id_name, "ObjectState" to cstr) == 0 or strcmp(id_name, "Endianness" to cstr) == 0 or strcmp(id_name, "PassMode" to cstr) == 0 or strcmp(id_name, "ImportKind" to cstr) == 0:
                         return get_enum_variant_val(id_name, v_cstr)
+                    let full_v_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                    let _ as i32 = sprintf(full_v_buf, "%s.%s" to cstr, id_name, v_cstr)
+                    let full_v_name as String = String.make(full_v_buf to cstr)
+                    if (deref self).enum_variant_tags.has(full_v_name) and ((deref self).program_functions.has(variant_name) or (deref self).defined_functions.has(variant_name)):
+                        free(full_v_buf to ptr)
+                        var ret_t as String = type_to_llvm(node_inferred_type(node))
+                        if ret_t.len == 0 to usize or strcmp(ret_t.data to cstr, "void" to cstr) == 0:
+                            let t_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                            let _ as i32 = sprintf(t_buf, "%%%s" to cstr, id_name)
+                            ret_t = String.make(t_buf to cstr)
+                            free(t_buf to ptr)
+                        let reg as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, reg to cstr)
+                        append_cstr(ref (deref self).main_out, " = call ")
+                        append_str(ref (deref self).main_out, ret_t)
+                        append_cstr(ref (deref self).main_out, " @")
+                        append_str(ref (deref self).main_out, variant_name)
+                        append_cstr(ref (deref self).main_out, "()\n")
+                        return reg
+                    free(full_v_buf to ptr)
             let obj_val as ptr[u8] = self.emit_expr(obj)
             let field_name as String = node_name(node)
             var target_st_type as String = type_to_llvm(node_inferred_type(obj))
@@ -2434,6 +2475,8 @@ struct LLVMCodegen:
                         field_idx = 20 to i32
                     elif strcmp(f_cstr, "current_continue_label" to cstr) == 0:
                         field_idx = 21 to i32
+                    elif strcmp(f_cstr, "enum_variant_tags" to cstr) == 0:
+                        field_idx = 22 to i32
                 elif strcmp(s_cstr, "Scope" to cstr) == 0:
                     if strcmp(f_cstr, "parent" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2554,10 +2597,8 @@ struct LLVMCodegen:
                 elif strcmp(s_cstr, "MatchStmtData" to cstr) == 0:
                     if strcmp(f_cstr, "left" to cstr) == 0:
                         field_idx = 0 to i32
-                    elif strcmp(f_cstr, "body" to cstr) == 0:
+                    elif strcmp(f_cstr, "declarations" to cstr) == 0:
                         field_idx = 1 to i32
-                    elif strcmp(f_cstr, "else_branch" to cstr) == 0:
-                        field_idx = 2 to i32
                 elif strcmp(s_cstr, "ClosureExprData" to cstr) == 0:
                     if strcmp(f_cstr, "params" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2810,14 +2851,12 @@ struct LLVMCodegen:
     public fn float_const_reg(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         let f_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
         let f_val as f64 = node_val(node)
-        let _ as i32 = sprintf(f_buf, "%g" to cstr, f_val)
-        extern fn strstr(haystack as cstr, needle as cstr) as cstr
-        extern fn strlen(s as cstr) as usize
-        if strstr(f_buf to cstr, "." to cstr) == None to cstr and strstr(f_buf to cstr, "e" to cstr) == None to cstr and strstr(f_buf to cstr, "E" to cstr) == None to cstr:
-            let flen as usize = strlen(f_buf to cstr)
-            (deref ((f_buf to usize + flen) to ptr[u8])) = 46 to u8
-            (deref ((f_buf to usize + flen + 1 to usize) to ptr[u8])) = 48 to u8
-            (deref ((f_buf to usize + flen + 2 to usize) to ptr[u8])) = 0 to u8
+        let inf_t as ptr[Type] = node_inferred_type(node)
+        var is_f32 as i32 = 1
+        if inf_t != None to ptr[Type] and (deref inf_t).kind == TypeKind.F64:
+            is_f32 = 0
+        extern fn format_llvm_float(val as f64, is_f32 as i32, out_buf as ptr[u8])
+        format_llvm_float(f_val, is_f32, f_buf)
         return f_buf
 
     public fn emit_binary_expr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
@@ -3319,15 +3358,30 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, reg to cstr)
 
         if op.data == None:
-            append_cstr(ref (deref self).main_out, " = add ")
+            if is_fop:
+                append_cstr(ref (deref self).main_out, " = fadd ")
+            else:
+                append_cstr(ref (deref self).main_out, " = add ")
         elif strcmp(op.data to cstr, "+" to cstr) == 0:
-            append_cstr(ref (deref self).main_out, " = add ")
+            if is_fop:
+                append_cstr(ref (deref self).main_out, " = fadd ")
+            else:
+                append_cstr(ref (deref self).main_out, " = add ")
         elif strcmp(op.data to cstr, "-" to cstr) == 0:
-            append_cstr(ref (deref self).main_out, " = sub ")
+            if is_fop:
+                append_cstr(ref (deref self).main_out, " = fsub ")
+            else:
+                append_cstr(ref (deref self).main_out, " = sub ")
         elif strcmp(op.data to cstr, "*" to cstr) == 0:
-            append_cstr(ref (deref self).main_out, " = mul ")
+            if is_fop:
+                append_cstr(ref (deref self).main_out, " = fmul ")
+            else:
+                append_cstr(ref (deref self).main_out, " = mul ")
         elif strcmp(op.data to cstr, "/" to cstr) == 0:
-            append_cstr(ref (deref self).main_out, " = sdiv ")
+            if is_fop:
+                append_cstr(ref (deref self).main_out, " = fdiv ")
+            else:
+                append_cstr(ref (deref self).main_out, " = sdiv ")
         elif strcmp(op.data to cstr, "%" to cstr) == 0:
             append_cstr(ref (deref self).main_out, " = srem ")
         elif strcmp(op.data to cstr, "or" to cstr) == 0:
@@ -3388,6 +3442,10 @@ struct LLVMCodegen:
         let args as List[ptr[Node]] = node_params(node)
         let callee_name_ptr as ptr[String] = node_name_ptr(callee)
         var ret_type as String = type_to_llvm(node_inferred_type(node))
+        if ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0:
+            let callee_t as ptr[Type] = node_inferred_type(callee)
+            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
+                ret_type = type_to_llvm((deref callee_t).return_type)
         if strcmp(ret_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(ret_type.data to cstr, "ptr" to cstr) == 0:
             var is_dict_list as bool = False
             var c_n as cstr = None to cstr
@@ -4246,7 +4304,7 @@ struct LLVMCodegen:
             if obj_node != None to ptr[Node]:
                 let obj_t as ptr[Type] = node_inferred_type(obj_node)
                 if obj_t != None to ptr[Type]:
-                    if (deref obj_t).kind == TypeKind.Struct:
+                    if (deref obj_t).kind == TypeKind.Struct or (deref obj_t).kind == TypeKind.Enum or (deref obj_t).kind == TypeKind.Union:
                         s_nm = (deref obj_t).name
                     elif (deref obj_t).kind == TypeKind.String:
                         s_nm = String.make("String" to cstr)
@@ -4256,7 +4314,7 @@ struct LLVMCodegen:
                         s_nm = String.make("Dict" to cstr)
                     elif (deref obj_t).kind == TypeKind.RawPointer and (deref obj_t).payload != None to ptr[Type]:
                         let pl as ptr[Type] = (deref obj_t).payload
-                        if (deref pl).kind == TypeKind.Struct:
+                        if (deref pl).kind == TypeKind.Struct or (deref pl).kind == TypeKind.Enum or (deref pl).kind == TypeKind.Union:
                             s_nm = (deref pl).name
                         elif (deref pl).kind == TypeKind.String:
                             s_nm = String.make("String" to cstr)
@@ -4943,6 +5001,383 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, "  br label %")
             append_cstr(ref (deref self).main_out, end_label to cstr)
             append_cstr(ref (deref self).main_out, "\n")
+
+        append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, end_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+
+    public fn emit_match_stmt(self as ptr[LLVMCodegen], node as ptr[Node]):
+        let subject_node as ptr[Node] = node_left(node)
+        if subject_node == None to ptr[Node]:
+            return
+
+        let subject_reg as ptr[u8] = self.emit_expr(subject_node)
+        var subject_type as String = type_to_llvm(node_inferred_type(subject_node))
+        if subject_type.len == 0 to usize or strcmp(subject_type.data to cstr, "void" to cstr) == 0:
+            subject_type = String.make("i32" to cstr)
+
+        let is_ptr_subject as bool = strcmp(subject_type.data to cstr, "ptr" to cstr) == 0
+        var subj_slot as ptr[u8] = subject_reg
+        if not is_ptr_subject and subject_type.len > 0 to usize and deref (subject_type.data) == 37 to u8:
+            let temp_slot as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, temp_slot to cstr)
+            append_cstr(ref (deref self).main_out, " = alloca ")
+            append_str(ref (deref self).main_out, subject_type)
+            append_cstr(ref (deref self).main_out, "\n")
+            append_cstr(ref (deref self).main_out, "  store ")
+            append_str(ref (deref self).main_out, subject_type)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, subject_reg to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+            append_cstr(ref (deref self).main_out, temp_slot to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+            subj_slot = temp_slot
+
+        let cases as List[ptr[Node]] = node_declarations(node)
+        let case_count as i64 = cases.length()
+        let end_label as ptr[u8] = self.fresh_label()
+
+        let case_labels as List[ptr[u8]] = List[ptr[u8]]()
+        var ci as i64 = 0 to i64
+        while ci < case_count:
+            case_labels.append(self.fresh_label())
+            ci = ci + 1 to i64
+
+        if case_count > 0 to i64:
+            append_cstr(ref (deref self).main_out, "  br label %")
+            append_cstr(ref (deref self).main_out, case_labels[0 to i64] to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+        else:
+            append_cstr(ref (deref self).main_out, "  br label %")
+            append_cstr(ref (deref self).main_out, end_label to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+
+        ci = 0 to i64
+        while ci < case_count:
+            let case_node as ptr[Node] = cases[ci]
+            let curr_case_lbl as ptr[u8] = case_labels[ci]
+            var next_lbl as ptr[u8] = end_label
+            if ci + 1 to i64 < case_count:
+                next_lbl = case_labels[ci + 1 to i64]
+
+            let body_label as ptr[u8] = self.fresh_label()
+            let guard_label as ptr[u8] = self.fresh_label()
+
+            append_cstr(ref (deref self).main_out, "\n")
+            append_cstr(ref (deref self).main_out, curr_case_lbl to cstr)
+            append_cstr(ref (deref self).main_out, ":\n")
+
+            let pat_wrapper as ptr[Node] = node_left(case_node)
+            let case_body as ptr[Node] = node_right(case_node)
+            var inner_pat as ptr[Node] = pat_wrapper
+            var guard_expr as ptr[Node] = None to ptr[Node]
+            if pat_wrapper != None to ptr[Node]:
+                if node_kind(pat_wrapper) == NodeType.BinaryExpr and strcmp(node_op(pat_wrapper).data to cstr, "if" to cstr) == 0:
+                    inner_pat = node_left(pat_wrapper)
+                    guard_expr = node_right(pat_wrapper)
+
+            var is_wildcard as bool = False
+            var is_call_pat as bool = False
+            var matched_cond as ptr[u8] = "1" to ptr[u8]
+
+            if inner_pat != None to ptr[Node]:
+                let pat_k as NodeType = node_kind(inner_pat)
+                if pat_k == NodeType.Identifier:
+                    let pat_name as String = node_name(inner_pat)
+                    if strcmp(pat_name.data to cstr, "_" to cstr) == 0:
+                        is_wildcard = True
+                        matched_cond = "1" to ptr[u8]
+                    elif (deref self).enum_variant_tags.has(pat_name):
+                        let v_tag as i32 = (deref self).enum_variant_tags[pat_name]
+                        let tag_ptr as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, tag_ptr to cstr)
+                        append_cstr(ref (deref self).main_out, " = getelementptr inbounds { i32, [32 x i8] }, ptr ")
+                        append_cstr(ref (deref self).main_out, subj_slot to cstr)
+                        append_cstr(ref (deref self).main_out, ", i32 0, i32 0\n")
+
+                        let tag_val as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, tag_val to cstr)
+                        append_cstr(ref (deref self).main_out, " = load i32, ptr ")
+                        append_cstr(ref (deref self).main_out, tag_ptr to cstr)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        let cmp as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, cmp to cstr)
+                        append_cstr(ref (deref self).main_out, " = icmp eq i32 ")
+                        append_cstr(ref (deref self).main_out, tag_val to cstr)
+                        append_cstr(ref (deref self).main_out, ", ")
+                        let t_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        let _st as i32 = sprintf(t_buf, "%d" to cstr, v_tag)
+                        append_cstr(ref (deref self).main_out, t_buf to cstr)
+                        free(t_buf to ptr)
+                        append_cstr(ref (deref self).main_out, "\n")
+                        matched_cond = cmp
+                    else:
+                        var count as i32 = 0 to i32
+                        if (deref self).var_counts.has(pat_name):
+                            count = (deref self).var_counts[pat_name]
+                        set_dict_i32(ref (deref self).var_counts, pat_name, count + 1 to i32)
+                        var slot_name as String = pat_name
+                        if count > 0 to i32:
+                            let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                            let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, pat_name.data to cstr, count)
+                            slot_name = String.make(slot_buf to cstr)
+                        set_dict_str(ref (deref self).var_slots, pat_name, slot_name)
+                        set_dict_str(ref (deref self).var_types, pat_name, subject_type)
+
+                        append_cstr(ref (deref self).main_out, "  %")
+                        append_str(ref (deref self).main_out, slot_name)
+                        append_cstr(ref (deref self).main_out, " = alloca ")
+                        append_str(ref (deref self).main_out, subject_type)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        append_cstr(ref (deref self).main_out, "  store ")
+                        append_str(ref (deref self).main_out, subject_type)
+                        append_cstr(ref (deref self).main_out, " ")
+                        append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ", ptr %")
+                        append_str(ref (deref self).main_out, slot_name)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        is_wildcard = True
+                        matched_cond = "1" to ptr[u8]
+                elif pat_k == NodeType.CallExpr:
+                    is_call_pat = True
+                    let callee as ptr[Node] = node_left(inner_pat)
+                    let callee_name as String = node_name(callee)
+                    var v_tag as i32 = 0 to i32
+                    if (deref self).enum_variant_tags.has(callee_name):
+                        v_tag = (deref self).enum_variant_tags[callee_name]
+
+                    let tag_ptr as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, tag_ptr to cstr)
+                    append_cstr(ref (deref self).main_out, " = getelementptr inbounds { i32, [32 x i8] }, ptr ")
+                    append_cstr(ref (deref self).main_out, subj_slot to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 0\n")
+
+                    let tag_val as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, tag_val to cstr)
+                    append_cstr(ref (deref self).main_out, " = load i32, ptr ")
+                    append_cstr(ref (deref self).main_out, tag_ptr to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+                    let cmp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cmp to cstr)
+                    append_cstr(ref (deref self).main_out, " = icmp eq i32 ")
+                    append_cstr(ref (deref self).main_out, tag_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", ")
+                    let t_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                    let _st as i32 = sprintf(t_buf, "%d" to cstr, v_tag)
+                    append_cstr(ref (deref self).main_out, t_buf to cstr)
+                    free(t_buf to ptr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    matched_cond = cmp
+                elif pat_k == NodeType.BinaryExpr and strcmp(node_op(inner_pat).data to cstr, ".." to cstr) == 0:
+                    let low_node as ptr[Node] = node_left(inner_pat)
+                    let high_node as ptr[Node] = node_right(inner_pat)
+                    let low_reg as ptr[u8] = self.emit_expr(low_node)
+                    let high_reg as ptr[u8] = self.emit_expr(high_node)
+
+                    let cmp1 as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cmp1 to cstr)
+                    append_cstr(ref (deref self).main_out, " = icmp sge ")
+                    append_str(ref (deref self).main_out, subject_type)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, low_reg to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+                    let cmp2 as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cmp2 to cstr)
+                    append_cstr(ref (deref self).main_out, " = icmp sle ")
+                    append_str(ref (deref self).main_out, subject_type)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, high_reg to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+                    let combined as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, combined to cstr)
+                    append_cstr(ref (deref self).main_out, " = and i1 ")
+                    append_cstr(ref (deref self).main_out, cmp1 to cstr)
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, cmp2 to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    matched_cond = combined
+                else:
+                    let pat_reg as ptr[u8] = self.emit_expr(inner_pat)
+                    var pat_type as String = type_to_llvm(node_inferred_type(inner_pat))
+                    if pat_type.len == 0 to usize or strcmp(pat_type.data to cstr, "void" to cstr) == 0:
+                        pat_type = subject_type
+
+                    let cmp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cmp to cstr)
+                    if strcmp(subject_type.data to cstr, "double" to cstr) == 0 or strcmp(subject_type.data to cstr, "float" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, " = fcmp oeq ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = icmp eq ")
+                    append_str(ref (deref self).main_out, subject_type)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, pat_reg to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    matched_cond = cmp
+
+            if guard_expr != None to ptr[Node]:
+                if is_wildcard:
+                    append_cstr(ref (deref self).main_out, "  br label %")
+                    append_cstr(ref (deref self).main_out, guard_label to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                else:
+                    append_cstr(ref (deref self).main_out, "  br i1 ")
+                    append_cstr(ref (deref self).main_out, matched_cond to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, guard_label to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, next_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+                append_cstr(ref (deref self).main_out, "\n")
+                append_cstr(ref (deref self).main_out, guard_label to cstr)
+                append_cstr(ref (deref self).main_out, ":\n")
+
+                let guard_reg as ptr[u8] = self.emit_expr(guard_expr)
+                var guard_type as String = cond_llvm_type(guard_expr)
+                var guard_bool as ptr[u8] = guard_reg
+                let is_g_cmp as bool = node_kind(guard_expr) == NodeType.BinaryExpr or node_kind(guard_expr) == NodeType.BooleanLiteral
+                if not is_g_cmp and strcmp(guard_type.data to cstr, "i1" to cstr) != 0:
+                    let g_temp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, g_temp to cstr)
+                    append_cstr(ref (deref self).main_out, " = icmp ne ")
+                    append_str(ref (deref self).main_out, guard_type)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, guard_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    guard_bool = g_temp
+
+                append_cstr(ref (deref self).main_out, "  br i1 ")
+                append_cstr(ref (deref self).main_out, guard_bool to cstr)
+                append_cstr(ref (deref self).main_out, ", label %")
+                append_cstr(ref (deref self).main_out, body_label to cstr)
+                append_cstr(ref (deref self).main_out, ", label %")
+                append_cstr(ref (deref self).main_out, next_lbl to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+            else:
+                if is_wildcard:
+                    append_cstr(ref (deref self).main_out, "  br label %")
+                    append_cstr(ref (deref self).main_out, body_label to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                else:
+                    append_cstr(ref (deref self).main_out, "  br i1 ")
+                    append_cstr(ref (deref self).main_out, matched_cond to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, body_label to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, next_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+            append_cstr(ref (deref self).main_out, "\n")
+            append_cstr(ref (deref self).main_out, body_label to cstr)
+            append_cstr(ref (deref self).main_out, ":\n")
+
+            if is_call_pat:
+                let pat_args as List[ptr[Node]] = node_params(inner_pat)
+                let pa_count as i64 = pat_args.length()
+                let pay_ptr as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, pay_ptr to cstr)
+                append_cstr(ref (deref self).main_out, " = getelementptr inbounds { i32, [32 x i8] }, ptr ")
+                append_cstr(ref (deref self).main_out, subj_slot to cstr)
+                append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n")
+
+                var cur_off as i64 = 0 to i64
+                var pai as i64 = 0 to i64
+                while pai < pa_count:
+                    let arg_node as ptr[Node] = pat_args[pai]
+                    if node_kind(arg_node) == NodeType.Identifier:
+                        let arg_name as String = node_name(arg_node)
+                        var arg_llvm_t as String = type_to_llvm(node_inferred_type(arg_node))
+                        if arg_llvm_t.len == 0 to usize or strcmp(arg_llvm_t.data to cstr, "void" to cstr) == 0:
+                            arg_llvm_t = String.make("float" to cstr)
+
+                        let field_slot as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, field_slot to cstr)
+                        append_cstr(ref (deref self).main_out, " = getelementptr inbounds i8, ptr ")
+                        append_cstr(ref (deref self).main_out, pay_ptr to cstr)
+                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        let off_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        let _so as i32 = sprintf(off_buf, "%lld" to cstr, cur_off)
+                        append_cstr(ref (deref self).main_out, off_buf to cstr)
+                        free(off_buf to ptr)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        let val_loaded as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, val_loaded to cstr)
+                        append_cstr(ref (deref self).main_out, " = load ")
+                        append_str(ref (deref self).main_out, arg_llvm_t)
+                        append_cstr(ref (deref self).main_out, ", ptr ")
+                        append_cstr(ref (deref self).main_out, field_slot to cstr)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        var count as i32 = 0 to i32
+                        if (deref self).var_counts.has(arg_name):
+                            count = (deref self).var_counts[arg_name]
+                        set_dict_i32(ref (deref self).var_counts, arg_name, count + 1 to i32)
+                        var slot_name as String = arg_name
+                        if count > 0 to i32:
+                            let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                            let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, arg_name.data to cstr, count)
+                            slot_name = String.make(slot_buf to cstr)
+                        set_dict_str(ref (deref self).var_slots, arg_name, slot_name)
+                        set_dict_str(ref (deref self).var_types, arg_name, arg_llvm_t)
+
+                        append_cstr(ref (deref self).main_out, "  %")
+                        append_str(ref (deref self).main_out, slot_name)
+                        append_cstr(ref (deref self).main_out, " = alloca ")
+                        append_str(ref (deref self).main_out, arg_llvm_t)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        append_cstr(ref (deref self).main_out, "  store ")
+                        append_str(ref (deref self).main_out, arg_llvm_t)
+                        append_cstr(ref (deref self).main_out, " ")
+                        append_cstr(ref (deref self).main_out, val_loaded to cstr)
+                        append_cstr(ref (deref self).main_out, ", ptr %")
+                        append_str(ref (deref self).main_out, slot_name)
+                        append_cstr(ref (deref self).main_out, "\n")
+
+                        if strcmp(arg_llvm_t.data to cstr, "double" to cstr) == 0 or strcmp(arg_llvm_t.data to cstr, "i64" to cstr) == 0:
+                            cur_off = cur_off + 8 to i64
+                        elif strcmp(arg_llvm_t.data to cstr, "float" to cstr) == 0 or strcmp(arg_llvm_t.data to cstr, "i32" to cstr) == 0:
+                            cur_off = cur_off + 4 to i64
+                        else:
+                            cur_off = cur_off + 8 to i64
+                    pai = pai + 1 to i64
+
+            if case_body != None to ptr[Node]:
+                self.emit_node(case_body)
+
+            append_cstr(ref (deref self).main_out, "  br label %")
+            append_cstr(ref (deref self).main_out, end_label to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+
+            ci = ci + 1 to i64
 
         append_cstr(ref (deref self).main_out, "\n")
         append_cstr(ref (deref self).main_out, end_label to cstr)
@@ -5666,7 +6101,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0:
                     return True
         let index as ptr[Node] = node_right(node)
         if index != None to ptr[Node]:
@@ -5704,7 +6139,7 @@ struct LLVMCodegen:
                 let f_c as cstr = f_nm.data to cstr
                 if strcmp(f_c, "struct_sizes" to cstr) == 0:
                     return String.make("i64" to cstr)
-                if strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0:
+                if strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0:
                     return String.make("i32" to cstr)
                 if strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
                     return String.make("i1" to cstr)
@@ -5761,7 +6196,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(node)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0:
                     return 24 to i64
         return 8 to i64
 
@@ -5789,7 +6224,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0:
                     is_struct_val = True
         if is_struct_val and (deref coll_val) == 37 to u8:
             let ext as ptr[u8] = self.fresh_temp()
@@ -6312,15 +6747,173 @@ struct LLVMCodegen:
             return make_struct_type(String.make(name))
         return make_struct_type(String.make(name))
 
+    public fn emit_single_constructor(self as ptr[LLVMCodegen], enum_name as String, fn_name as String, tag as i32, params_ptr as ptr[List[ptr[Node]]]):
+        if (deref self).defined_functions.has(fn_name):
+            return
+        set_dict_bool(ref (deref self).defined_functions, fn_name, True)
+        set_dict_bool(ref (deref self).program_functions, fn_name, True)
+
+        let params as List[ptr[Node]] = deref params_ptr
+        let p_count as i64 = params.length()
+
+        append_cstr(ref (deref self).main_out, "\ndefine %")
+        append_str(ref (deref self).main_out, enum_name)
+        append_cstr(ref (deref self).main_out, " @")
+        append_str(ref (deref self).main_out, fn_name)
+        append_cstr(ref (deref self).main_out, "(")
+
+        var pi as i64 = 0 to i64
+        while pi < p_count:
+            if pi > 0 to i64:
+                append_cstr(ref (deref self).main_out, ", ")
+            let p as ptr[Node] = params[pi]
+            let pt_obj as ptr[Type] = self.resolve_make_elem_type(p)
+            var pt as String = type_to_llvm(pt_obj)
+            if pt.len == 0 to usize or strcmp(pt.data to cstr, "void" to cstr) == 0:
+                pt = String.make("float" to cstr)
+            append_str(ref (deref self).main_out, pt)
+            append_cstr(ref (deref self).main_out, " %p")
+            let p_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+            let _s as i32 = sprintf(p_buf, "%lld" to cstr, pi)
+            append_cstr(ref (deref self).main_out, p_buf to cstr)
+            free(p_buf to ptr)
+            pi = pi + 1 to i64
+
+        append_cstr(ref (deref self).main_out, ") {\nentry:\n")
+        append_cstr(ref (deref self).main_out, "  %res = alloca %")
+        append_str(ref (deref self).main_out, enum_name)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        append_cstr(ref (deref self).main_out, "  %tag_ptr = getelementptr inbounds { i32, [32 x i8] }, ptr %res, i32 0, i32 0\n")
+        append_cstr(ref (deref self).main_out, "  store i32 ")
+        let t_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+        let _st as i32 = sprintf(t_buf, "%d" to cstr, tag)
+        append_cstr(ref (deref self).main_out, t_buf to cstr)
+        free(t_buf to ptr)
+        append_cstr(ref (deref self).main_out, ", ptr %tag_ptr\n")
+
+        if p_count > 0 to i64:
+            append_cstr(ref (deref self).main_out, "  %pay_buf = getelementptr inbounds { i32, [32 x i8] }, ptr %res, i32 0, i32 1\n")
+            var byte_offset as i64 = 0 to i64
+            pi = 0 to i64
+            while pi < p_count:
+                let p as ptr[Node] = params[pi]
+                let pt_obj as ptr[Type] = self.resolve_make_elem_type(p)
+                var pt as String = type_to_llvm(pt_obj)
+                if pt.len == 0 to usize or strcmp(pt.data to cstr, "void" to cstr) == 0:
+                    pt = String.make("float" to cstr)
+                let slot as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, slot to cstr)
+                append_cstr(ref (deref self).main_out, " = getelementptr inbounds i8, ptr %pay_buf, i64 ")
+                let off_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                let _so as i32 = sprintf(off_buf, "%lld" to cstr, byte_offset)
+                append_cstr(ref (deref self).main_out, off_buf to cstr)
+                free(off_buf to ptr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, pt)
+                append_cstr(ref (deref self).main_out, " %p")
+                let p_buf2 as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                let _s2 as i32 = sprintf(p_buf2, "%lld" to cstr, pi)
+                append_cstr(ref (deref self).main_out, p_buf2 to cstr)
+                free(p_buf2 to ptr)
+                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, slot to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                if strcmp(pt.data to cstr, "double" to cstr) == 0 or strcmp(pt.data to cstr, "i64" to cstr) == 0:
+                    byte_offset = byte_offset + 8 to i64
+                elif strcmp(pt.data to cstr, "float" to cstr) == 0 or strcmp(pt.data to cstr, "i32" to cstr) == 0:
+                    byte_offset = byte_offset + 4 to i64
+                else:
+                    byte_offset = byte_offset + 8 to i64
+
+                pi = pi + 1 to i64
+
+        append_cstr(ref (deref self).main_out, "  %ret_val = load %")
+        append_str(ref (deref self).main_out, enum_name)
+        append_cstr(ref (deref self).main_out, ", ptr %res\n")
+        append_cstr(ref (deref self).main_out, "  ret %")
+        append_str(ref (deref self).main_out, enum_name)
+        append_cstr(ref (deref self).main_out, " %ret_val\n}\n")
+
+    public fn emit_enum_variant_constructor(self as ptr[LLVMCodegen], enum_name as String, var_name as String, tag as i32, params_ptr as ptr[List[ptr[Node]]]):
+        let full_name_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+        let _ as i32 = sprintf(full_name_buf, "%s_%s" to cstr, enum_name.data to cstr, var_name.data to cstr)
+        let full_name as String = String.make(full_name_buf to cstr)
+        self.emit_single_constructor(enum_name, full_name, tag, params_ptr)
+        self.emit_single_constructor(enum_name, var_name, tag, params_ptr)
+        free(full_name_buf to ptr)
+
     public fn emit_enum_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)
         if (deref self).defined_types.has(name):
             return
         set_dict_bool(ref (deref self).defined_types, name, True)
 
+        let decls as List[ptr[Node]] = node_declarations(node)
+        let count as i64 = decls.length()
+
+        var has_payloads as bool = False
+        var i as i64 = 0 to i64
+        while i < count:
+            let d as ptr[Node] = decls[i]
+            if node_kind(d) == NodeType.FunDecl:
+                if node_body(d) == None to ptr[Node] and node_params(d).length() > 0 to i64:
+                    has_payloads = True
+            i = i + 1 to i64
+
         append_cstr(ref (deref self).type_out, "%" to cstr)
         append_str(ref (deref self).type_out, name)
-        append_cstr(ref (deref self).type_out, " = type i32\n\n" to cstr)
+        if has_payloads:
+            append_cstr(ref (deref self).type_out, " = type { i32, [32 x i8] }\n\n" to cstr)
+        else:
+            append_cstr(ref (deref self).type_out, " = type i32\n\n" to cstr)
+
+        var variant_tag as i32 = 0 to i32
+        i = 0 to i64
+        while i < count:
+            let d as ptr[Node] = decls[i]
+            let d_kind as NodeType = node_kind(d)
+            let v_name as String = node_name(d)
+            if d_kind == NodeType.FunDecl:
+                if node_body(d) != None to ptr[Node]:
+                    // Member method (e.g. fn area(ref self) as f32:)
+                    let old_fn_name as String = node_name(d)
+                    let mangled_name_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                    let _ as i32 = sprintf(mangled_name_buf, "%s_%s" to cstr, name.data to cstr, old_fn_name.data to cstr)
+                    let mangled_name as String = String.make(mangled_name_buf to cstr)
+                    set_node_name(d, mangled_name)
+                    self.emit_fun_decl(d)
+                    set_node_name(d, old_fn_name)
+                    free(mangled_name_buf to ptr)
+                else:
+                    let v_params as List[ptr[Node]] = node_params(d)
+                    let full_v_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                    let _ as i32 = sprintf(full_v_buf, "%s.%s" to cstr, name.data to cstr, v_name.data to cstr)
+                    let full_v_name as String = String.make(full_v_buf to cstr)
+                    set_dict_i32(ref (deref self).enum_variant_tags, full_v_name, variant_tag)
+                    set_dict_i32(ref (deref self).enum_variant_tags, v_name, variant_tag)
+                    free(full_v_buf to ptr)
+
+                    self.emit_enum_variant_constructor(name, v_name, variant_tag, ref v_params)
+                    variant_tag = variant_tag + 1 to i32
+            else:
+                let full_v_buf2 as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                let _ as i32 = sprintf(full_v_buf2, "%s.%s" to cstr, name.data to cstr, v_name.data to cstr)
+                let full_v_name2 as String = String.make(full_v_buf2 to cstr)
+                set_dict_i32(ref (deref self).enum_variant_tags, full_v_name2, variant_tag)
+                set_dict_i32(ref (deref self).enum_variant_tags, v_name, variant_tag)
+                free(full_v_buf2 to ptr)
+
+                if has_payloads:
+                    var empty_p as List[ptr[Node]] = List[ptr[Node]]()
+                    self.emit_enum_variant_constructor(name, v_name, variant_tag, ref empty_p)
+
+                variant_tag = variant_tag + 1 to i32
+            i = i + 1 to i64
 
     public fn emit_union_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)
