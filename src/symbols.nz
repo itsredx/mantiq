@@ -123,6 +123,7 @@ struct IdentifierData:
 
 struct NumberLiteralData:
     public var val as f64
+    public var is_float as bool
 
 struct StringLiteralData:
     public var str_val as String
@@ -966,7 +967,7 @@ fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
 // val accessor (NumberLiteral, BooleanLiteral):
 fn node_val(n as ptr[Node]) as f64:
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
-        return 0 to f64
+        return 0.0
     let k as NodeType = (deref n).kind
     if k == NodeType.NumberLiteral:
         let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
@@ -974,7 +975,7 @@ fn node_val(n as ptr[Node]) as f64:
     elif k == NodeType.BooleanLiteral:
         let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
         return (deref d).val
-    return 0 to f64
+    return 0.0
 
 fn set_node_val(n as ptr[Node], val as f64):
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
@@ -986,6 +987,23 @@ fn set_node_val(n as ptr[Node], val as f64):
     elif k == NodeType.BooleanLiteral:
         let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
         (deref d).val = val
+
+fn node_is_float(n as ptr[Node]) as bool:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return False
+    let k as NodeType = (deref n).kind
+    if k == NodeType.NumberLiteral:
+        let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
+        return (deref d).is_float
+    return False
+
+fn set_node_is_float(n as ptr[Node], is_flt as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.NumberLiteral:
+        let d as ptr[NumberLiteralData] = (deref n).data to ptr[NumberLiteralData]
+        (deref d).is_float = is_flt
 
 fn node_str_val(n as ptr[Node]) as String:
     var r as String = String.make("" to cstr)

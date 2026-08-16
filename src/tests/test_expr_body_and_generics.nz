@@ -1,0 +1,58 @@
+// ── Expression Body & Generics Test Suite ─────────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+// Expression Body (Lambda style)
+fn square(x as f64) as f64 => x * x
+
+fn add(a as i32, b as i32) as i32 => a + b
+
+fn is_even(n as i32) as bool => (n % 2) == 0
+
+fn wrap[T](val as T) as List[T, 1]:
+    return [val]
+
+fn main() -> i32:
+    let _hdr as i32 = printf("=== Running Expression Body & Generics Tests ===\n\n" to cstr)
+
+    // Test 1: Expression Body with floats (square)
+    let s as f64 = square(7.0)
+    var test1_passed as bool = False
+    if s > 48.99 to f64 and s < 49.01 to f64:
+        test1_passed = True
+        let _p as i32 = printf("Test 1 (square(7.0) -> 49.0): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 1 (square(7.0)): FAILED! (got %f)\n" to cstr, s)
+
+    // Test 2: Expression Body with binary int op (add)
+    let sum as i32 = add(15, 27)
+    var test2_passed as bool = False
+    if sum == 42:
+        test2_passed = True
+        let _p as i32 = printf("Test 2 (add(15, 27) -> 42): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 2 (add(15, 27)): FAILED! (got %d)\n" to cstr, sum)
+
+    // Test 3: Expression Body with boolean comparison (is_even)
+    let even as bool = is_even(42)
+    var test3_passed as bool = False
+    if even:
+        test3_passed = True
+        let _p as i32 = printf("Test 3 (is_even(42) -> True): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 3 (is_even(42)): FAILED!\n" to cstr)
+
+    // Test 4: Generic wrap function returning List[T, 1]
+    let w_i32 as List[i32, 1] = wrap[i32](100)
+    var test4_passed as bool = False
+    if w_i32[0] == 100:
+        test4_passed = True
+        let _p as i32 = printf("Test 4 (wrap[i32](100)[0] -> 100): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 4 (wrap[i32](100)[0]): FAILED! (got %d)\n" to cstr, w_i32[0])
+
+    if test1_passed and test2_passed and test3_passed and test4_passed:
+        let _all_ok as i32 = printf("\n>>> ALL EXPRESSION BODY & GENERICS TESTS PASSED <<<\n" to cstr)
+        return 0
+    else:
+        let _err as i32 = printf("\n>>> SOME TESTS FAILED <<<\n" to cstr)
+        return 1

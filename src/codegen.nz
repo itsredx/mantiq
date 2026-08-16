@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, set_node_inferred_type, set_node_name
+from symbols import Node, NodeType, TypeAnnotation, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, set_node_inferred_type, set_node_name
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
@@ -854,7 +854,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("ClassDeclData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("BinaryExprData", "{ { ptr, i64, i64 }, ptr, ptr }")
         self.register_builtin_struct("IdentifierData", "{ { ptr, i64, i64 } }")
-        self.register_builtin_struct("NumberLiteralData", "{ double }")
+        self.register_builtin_struct("NumberLiteralData", "{ double, i8 }")
         self.register_builtin_struct("StringLiteralData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("MacroDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("MacroInvocationData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
@@ -926,6 +926,7 @@ struct LLVMCodegen:
         self.register_field_idx("BinaryExprData" to cstr, "right" to cstr, 2 to i32)
         self.register_field_idx("IdentifierData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("NumberLiteralData" to cstr, "val" to cstr, 0 to i32)
+        self.register_field_idx("NumberLiteralData" to cstr, "is_float" to cstr, 1 to i32)
         self.register_field_idx("StringLiteralData" to cstr, "str_val" to cstr, 0 to i32)
         self.register_field_idx("MacroDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("MacroDeclData" to cstr, "params" to cstr, 1 to i32)
@@ -1701,7 +1702,7 @@ struct LLVMCodegen:
         if nt == NodeType.NumberLiteral:
             let val as f64 = node_val(node)
             let inf_t as ptr[Type] = node_inferred_type(node)
-            var is_float as bool = False
+            var is_float as bool = node_is_float(node)
             if inf_t != None to ptr[Type]:
                 let tk as TypeKind = (deref inf_t).kind
                 if tk == TypeKind.F32 or tk == TypeKind.F64:
@@ -1757,11 +1758,11 @@ struct LLVMCodegen:
                     if strcmp(vt.data to cstr, "void" to cstr) != 0 and strcmp(vt.data to cstr, "{ ptr, ptr }" to cstr) != 0 and vt.len > 0 to usize:
                         var_type = vt
                     elif (deref self).var_slots.has(id_nm_str):
-                        var_type = String.make("i64" to cstr)
+                        var_type = String.make("ptr" to cstr)
                     else:
                         return "0" to ptr[u8]
                 elif (deref self).var_slots.has(id_nm_str):
-                    var_type = String.make("i64" to cstr)
+                    var_type = String.make("ptr" to cstr)
                 else:
                     return "0" to ptr[u8]
             let reg as ptr[u8] = self.fresh_temp()
@@ -3318,6 +3319,31 @@ struct LLVMCodegen:
                         append_str(ref (deref self).main_out, operand_type)
                         append_cstr(ref (deref self).main_out, "\n")
                         real_left = cv_l
+                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(left_t_str.data to cstr, "double" to cstr) == 0 or strcmp(left_t_str.data to cstr, "float" to cstr) == 0):
+                    let cv_l as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_l to cstr)
+                    if strcmp(operand_type.data to cstr, "double" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, " = fpext float ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                    append_cstr(ref (deref self).main_out, left_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_left = cv_l
+                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(left_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i8" to cstr) == 0):
+                    let cv_l as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_l to cstr)
+                    append_cstr(ref (deref self).main_out, " = sitofp ")
+                    append_str(ref (deref self).main_out, left_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, left_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_left = cv_l
             if not right_is_ptr and strcmp(right_t_str.data to cstr, operand_type.data to cstr) != 0:
                 if strcmp(operand_type.data to cstr, "i64" to cstr) == 0 or strcmp(operand_type.data to cstr, "i32" to cstr) == 0 or strcmp(operand_type.data to cstr, "i16" to cstr) == 0 or strcmp(operand_type.data to cstr, "i8" to cstr) == 0:
                     if strcmp(right_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
@@ -3345,6 +3371,31 @@ struct LLVMCodegen:
                         append_str(ref (deref self).main_out, operand_type)
                         append_cstr(ref (deref self).main_out, "\n")
                         real_right = cv_r
+                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(right_t_str.data to cstr, "double" to cstr) == 0 or strcmp(right_t_str.data to cstr, "float" to cstr) == 0):
+                    let cv_r as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_r to cstr)
+                    if strcmp(operand_type.data to cstr, "double" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, " = fpext float ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                    append_cstr(ref (deref self).main_out, right_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_right = cv_r
+                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(right_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0):
+                    let cv_r as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_r to cstr)
+                    append_cstr(ref (deref self).main_out, " = sitofp ")
+                    append_str(ref (deref self).main_out, right_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, right_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_right = cv_r
 
         let is_fop as bool = strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0 or strcmp(operand_type.data to cstr, "half" to cstr) == 0 or strcmp(operand_type.data to cstr, "bfloat" to cstr) == 0
         if is_fop:
@@ -4189,6 +4240,8 @@ struct LLVMCodegen:
                             arg_type = String.make("i8" to cstr)
             if strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
                 arg_type = String.make("ptr" to cstr)
+            if node_kind(arg_node) == NodeType.IndexExpr:
+                arg_type = self.index_value_llvm(arg_node)
             if node_kind(arg_node) == NodeType.MemberExpr:
                 let f_nm as String = node_name(arg_node)
                 if f_nm.data != None:
@@ -4200,7 +4253,23 @@ struct LLVMCodegen:
                     elif strcmp(fc, "name" to cstr) == 0 or strcmp(fc, "file_path" to cstr) == 0 or strcmp(fc, "message" to cstr) == 0 or strcmp(fc, "source_code" to cstr) == 0 or strcmp(fc, "current_file" to cstr) == 0:
                         arg_type = String.make("{ ptr, i64, i64 }" to cstr)
             if node_kind(arg_node) == NodeType.NumberLiteral:
-                arg_type = String.make("i64" to cstr)
+                let num_t as ptr[Type] = node_inferred_type(arg_node)
+                if num_t != None to ptr[Type]:
+                    let nk as TypeKind = (deref num_t).kind
+                    if nk == TypeKind.F64:
+                        arg_type = String.make("double" to cstr)
+                    elif nk == TypeKind.F32:
+                        arg_type = String.make("float" to cstr)
+                    elif nk == TypeKind.I32 or nk == TypeKind.U32:
+                        arg_type = String.make("i32" to cstr)
+                    elif nk == TypeKind.I16 or nk == TypeKind.U16:
+                        arg_type = String.make("i16" to cstr)
+                    elif nk == TypeKind.I8 or nk == TypeKind.U8:
+                        arg_type = String.make("i8" to cstr)
+                    else:
+                        arg_type = String.make("i64" to cstr)
+                else:
+                    arg_type = String.make("i64" to cstr)
             elif node_kind(arg_node) == NodeType.StringLiteral:
                 arg_type = String.make("ptr" to cstr)
             elif node_kind(arg_node) == NodeType.BooleanLiteral:
@@ -4212,13 +4281,17 @@ struct LLVMCodegen:
                     extern fn strstr(haystack as cstr, needle as cstr) as cstr
                     if strstr(c_op, "ptr" to cstr) != None to cstr:
                         arg_type = String.make("ptr" to cstr)
+                    elif strstr(c_op, "f64" to cstr) != None to cstr:
+                        arg_type = String.make("double" to cstr)
+                    elif strstr(c_op, "f32" to cstr) != None to cstr:
+                        arg_type = String.make("float" to cstr)
                     elif strstr(c_op, "i64" to cstr) != None to cstr or strstr(c_op, "usize" to cstr) != None to cstr:
                         arg_type = String.make("i64" to cstr)
                     elif strstr(c_op, "i32" to cstr) != None to cstr:
                         arg_type = String.make("i32" to cstr)
                     elif strstr(c_op, "i8" to cstr) != None to cstr or strstr(c_op, "u8" to cstr) != None to cstr or strstr(c_op, "bool" to cstr) != None to cstr:
                         arg_type = String.make("i8" to cstr)
-            if (deref (arg_val to ptr[u8])) >= 48 to u8 and (deref (arg_val to ptr[u8])) <= 57 to u8:
+            if (deref (arg_val to ptr[u8])) >= 48 to u8 and (deref (arg_val to ptr[u8])) <= 57 to u8 and strncmp(arg_val to cstr, "0x" to cstr, 2 to usize) != 0 and strcmp(arg_type.data to cstr, "double" to cstr) != 0 and strcmp(arg_type.data to cstr, "float" to cstr) != 0:
                 arg_type = String.make("i32" to cstr)
 
             if strcmp(arg_type.data to cstr, "i8" to cstr) == 0:
@@ -4296,6 +4369,16 @@ struct LLVMCodegen:
         var fn_target_name as String = String.make("" to cstr)
         if callee_name_ptr != None to ptr[String]:
             fn_target_name = deref callee_name_ptr
+            if fn_target_name.len > 0 to usize:
+                let bp2 as cstr = strchr(fn_target_name.data to cstr, '[' to i32)
+                if bp2 != None to cstr:
+                    let base_len2 as usize = (bp2 to usize) - (fn_target_name.data to usize)
+                    if base_len2 > 0 to usize:
+                        let buf2 as ptr[u8] = make[u8](base_len2 + 1 to usize) to ptr[u8]
+                        let _m2 as ptr = memcpy(buf2 to ptr, fn_target_name.data to ptr, base_len2)
+                        buf2[base_len2] = 0 to u8
+                        fn_target_name = String.make(buf2 to cstr)
+                        free(buf2 to ptr)
 
         if node_kind(callee) == NodeType.MemberExpr:
             let method_name as String = node_name(callee)
@@ -4910,6 +4993,26 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, val_reg to cstr)
                 append_cstr(ref (deref self).main_out, " to i8\n")
                 real_val = b_temp
+            elif strcmp(ret_type.data to cstr, "float" to cstr) == 0:
+                let val_t_str as String = type_to_llvm(node_inferred_type(val))
+                if strcmp(val_t_str.data to cstr, "double" to cstr) == 0:
+                    let f_temp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, f_temp to cstr)
+                    append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                    append_cstr(ref (deref self).main_out, real_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to float\n")
+                    real_val = f_temp
+            elif strcmp(ret_type.data to cstr, "double" to cstr) == 0:
+                let val_t_str as String = type_to_llvm(node_inferred_type(val))
+                if strcmp(val_t_str.data to cstr, "float" to cstr) == 0:
+                    let f_temp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, f_temp to cstr)
+                    append_cstr(ref (deref self).main_out, " = fpext float ")
+                    append_cstr(ref (deref self).main_out, real_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to double\n")
+                    real_val = f_temp
             append_cstr(ref (deref self).main_out, "  ret ")
             append_str(ref (deref self).main_out, ret_type)
             append_cstr(ref (deref self).main_out, " ")
@@ -5796,7 +5899,7 @@ struct LLVMCodegen:
                     source_type = (deref self).var_types[id_nm_str]
             elif node_kind(operand) == NodeType.NumberLiteral:
                 extern fn strstr(haystack as cstr, needle as cstr) as cstr
-                if strstr(operand_val to cstr, "." to cstr) != None to cstr:
+                if node_is_float(operand) or strncmp(operand_val to cstr, "0x" to cstr, 2 to usize) == 0 or strstr(operand_val to cstr, "." to cstr) != None to cstr or strstr(operand_val to cstr, "e" to cstr) != None to cstr or strstr(operand_val to cstr, "E" to cstr) != None to cstr:
                     source_type = String.make("double" to cstr)
                 else:
                     source_type = String.make("i64" to cstr)
@@ -5910,7 +6013,12 @@ struct LLVMCodegen:
         if src_is_float and tgt_is_float:
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
-            append_cstr(ref (deref self).main_out, " = fpext ")
+            if strcmp(source_type.data to cstr, "double" to cstr) == 0 and (strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0):
+                append_cstr(ref (deref self).main_out, " = fptrunc ")
+            elif strcmp(source_type.data to cstr, "float" to cstr) == 0 and (strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0):
+                append_cstr(ref (deref self).main_out, " = fptrunc ")
+            else:
+                append_cstr(ref (deref self).main_out, " = fpext ")
             append_str(ref (deref self).main_out, source_type)
             append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, operand_val to cstr)
@@ -6025,6 +6133,8 @@ struct LLVMCodegen:
         var elem_size as i64 = 8 to i64
         if elem_t != None to ptr[Type]:
             elem_type = type_to_llvm(elem_t)
+            if strcmp(elem_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                elem_type = String.make("ptr" to cstr)
             elem_size = self.type_llvm_byte_size(elem_t)
         if elem_size <= 0 to i64:
             elem_size = 8 to i64

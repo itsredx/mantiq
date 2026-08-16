@@ -761,6 +761,9 @@ struct Lowerer:
         let n as ptr[Node] = make_node(NodeType.NumberLiteral, span)
         let data as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
         (deref data).val = val
+        extern fn strchr(s as cstr, c as i32) as cstr
+        let is_flt as bool = strchr(num_str.data to cstr, '.' to i32) != None to cstr
+        (deref data).is_float = is_flt
         (deref n).data = data to ptr[u8]
         return n
 
@@ -1244,6 +1247,14 @@ struct Lowerer:
                         j = j + 1 to u32
                 elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
                     body_ast = self.lower_node(ref child)
+                elif strcmp(c_kind, "return_annotation" to cstr) != 0 and strcmp(c_kind, "generic_params" to cstr) != 0 and strcmp(c_kind, "typed_params" to cstr) != 0 and strcmp(c_kind, "identifier" to cstr) != 0 and strcmp(c_kind, "decorator" to cstr) != 0 and strcmp(c_kind, "fun_modifier" to cstr) != 0 and strcmp(c_kind, "extern" to cstr) != 0:
+                    let expr_node as ptr[Node] = self.lower_node(ref child)
+                    if expr_node != None to ptr[Node]:
+                        let ret_stmt as ptr[Node] = make_node(NodeType.ReturnStmt, self.get_span(ref child))
+                        let ret_data as ptr[ReturnStmtData] = make[ReturnStmtData](1 to usize) to ptr[ReturnStmtData]
+                        (deref ret_data).body = expr_node
+                        (deref ret_stmt).data = ret_data to ptr[u8]
+                        body_ast = ret_stmt
                 elif strcmp(c_kind, "return_annotation" to cstr) == 0:
                     let ra_count as u32 = ts_node_child_count_ptr(ref child)
                     var ra_idx as u32 = 0 to u32
