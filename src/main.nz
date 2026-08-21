@@ -37,6 +37,122 @@ extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
 extern fn strlen(s as cstr) as usize
 
+// ── Performance Monitor ─────────────────────────────────────────────────
+extern fn mantiq_perf_now_ns() as i64
+extern fn mantiq_perf_rss_bytes() as i64
+extern fn mantiq_alloc_count() as i64
+extern fn mantiq_alloc_bytes() as i64
+extern fn mantiq_free_count() as i64
+
+fn perf_now_ns() as i64:
+    return mantiq_perf_now_ns()
+
+fn perf_rss_bytes() as i64:
+    return mantiq_perf_rss_bytes()
+
+struct PerfPhase:
+    public var name as cstr
+    public var time_ns as i64
+    public var rss_start as i64
+    public var rss_end as i64
+
+struct PerfState:
+    public var phase_buf as ptr[PerfPhase]
+    public var phase_count as i64
+    public var wall_start as i64
+    public var rss_start as i64
+    public var enabled as bool
+    public var allocs_start as i64
+    public var bytes_start as i64
+    public var frees_start as i64
+
+fn perf_init() as PerfState:
+    return PerfState(phase_buf = make[PerfPhase](16 to usize) to ptr[PerfPhase], phase_count = 0 to i64, wall_start = perf_now_ns(), rss_start = perf_rss_bytes(), enabled = False, allocs_start = mantiq_alloc_count(), bytes_start = mantiq_alloc_bytes(), frees_start = mantiq_free_count())
+
+fn perf_begin(p as ptr[PerfState], name as cstr) as i64:
+    return perf_now_ns()
+
+fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
+    if not (deref p).enabled:
+        return
+    let t1 as i64 = perf_now_ns()
+    let rss_now as i64 = perf_rss_bytes()
+    let idx as i64 = (deref p).phase_count
+    if idx < 16 to i64:
+        let base as usize = (deref p).phase_buf to usize
+        let offset as usize = idx to usize * 32 to usize
+        let p_ptr as ptr[PerfPhase] = (base + offset) to ptr[PerfPhase]
+        deref p_ptr = PerfPhase(name = name, time_ns = t1 - t0, rss_start = (deref p).rss_start, rss_end = rss_now)
+        (deref p).phase_count = idx + 1 to i64
+
+fn perf_print(p as ptr[PerfState]):
+    if not (deref p).enabled:
+        return
+    let wall_end as i64 = perf_now_ns()
+    let total_ns as i64 = wall_end - (deref p).wall_start
+    let buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+
+    let _f0 as i32 = printf("\n" to cstr)
+    let _f1 as i32 = printf("┌─ Performance Report ──────────────────────────────────────────────┐\n" to cstr)
+
+    // total time
+    if total_ns < 1000000 to i64:
+        let _ as i32 = sprintf(buf, "%ld.%ld ms", total_ns / 1000000 to i64, (total_ns % 1000000 to i64) / 100000 to i64)
+    elif total_ns < 1000000000 to i64:
+        let _ as i32 = sprintf(buf, "%ld.%ld ms", total_ns / 1000000 to i64, (total_ns % 1000000 to i64) / 100000 to i64)
+    else:
+        let _ as i32 = sprintf(buf, "%ld.%ld s", total_ns / 1000000000 to i64, (total_ns % 1000000000 to i64) / 100000000 to i64)
+    let _f2 as i32 = printf("│  Total time:   %-51s │\n" to cstr, buf)
+
+    // peak RSS
+    let peak_rss as i64 = (deref p).rss_start
+    let _ as i32 = sprintf(buf, "%ld KB", peak_rss / 1024 to i64)
+    let _f3 as i32 = printf("│  Peak RSS:     %-51s │\n" to cstr, buf)
+
+    let _f4 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
+    let _f5 as i32 = printf("│  %-28s %14s %12s            │\n" to cstr, "Phase" to cstr, "Time" to cstr, "RSS Δ" to cstr)
+    let _f6 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
+
+    var i as i64 = 0 to i64
+    let cnt as i64 = (deref p).phase_count
+    while i < cnt:
+        let base as usize = (deref p).phase_buf to usize
+        let offset as usize = i to usize * 32 to usize
+        let ph_ptr as ptr[PerfPhase] = (base + offset) to ptr[PerfPhase]
+        let ph as PerfPhase = deref ph_ptr
+        let t_ns as i64 = ph.time_ns
+        if t_ns < 1000000 to i64:
+            let _ as i32 = sprintf(buf, "%ld.%ld ms", t_ns / 1000000 to i64, (t_ns % 1000000 to i64) / 100000 to i64)
+        elif t_ns < 1000000000 to i64:
+            let _ as i32 = sprintf(buf, "%ld.%ld ms", t_ns / 1000000 to i64, (t_ns % 1000000 to i64) / 100000 to i64)
+        else:
+            let _ as i32 = sprintf(buf, "%ld.%ld s", t_ns / 1000000000 to i64, (t_ns % 1000000000 to i64) / 100000000 to i64)
+
+        let rss_delta as i64 = ph.rss_end - ph.rss_start
+        let rss_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        if rss_delta >= 0 to i64:
+            let _ as i32 = sprintf(rss_buf, "+%ld KB", rss_delta / 1024 to i64)
+        else:
+            let _ as i32 = sprintf(rss_buf, "%ld KB", rss_delta / 1024 to i64)
+        let _fp as i32 = printf("│  %-28s %14s %12s            │\n" to cstr, ph.name, buf, rss_buf)
+        i = i + 1 to i64
+
+    let _f7 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
+    let alloc_now as i64 = mantiq_alloc_count()
+    let bytes_now as i64 = mantiq_alloc_bytes()
+    let free_now as i64 = mantiq_free_count()
+    let allocs as i64 = alloc_now - (deref p).allocs_start
+    let bytes as i64 = bytes_now - (deref p).bytes_start
+    let frees as i64 = free_now - (deref p).frees_start
+    var _sa as i32 = sprintf(buf, "%ld", allocs)
+    let _f7a as i32 = printf("│  Allocations:   %-51s │\n" to cstr, buf)
+    _sa = sprintf(buf, "%ld KB", bytes / 1024 to i64)
+    let _f7b as i32 = printf("│  Alloc bytes:   %-51s │\n" to cstr, buf)
+    _sa = sprintf(buf, "%ld", frees)
+    let _f7c as i32 = printf("│  Frees:         %-51s │\n" to cstr, buf)
+    let _f7d as i32 = printf("└───────────────────────────────────────────────────────────────────┘\n" to cstr)
+    let _f8 as i32 = fflush(None to ptr)
+
 // ── File I/O Helper ──────────────────────────────────────────────────────
 fn read_file_to_cstr(path as cstr) as cstr:
     let f as ptr = fopen(path, "rb" to cstr)
@@ -84,47 +200,64 @@ fn compiler_name(mode as i32) as cstr:
     return "Mantiq" to cstr
 
 // ── Compiler Pipeline ───────────────────────────────────────────────────
-fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32) as bool:
+fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, perf as ptr[PerfState]) as bool:
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make(path_cstr), String.make(source_cstr))
 
+    // ── Phase 1: Parse / Lower ──
+    let t0 as i64 = perf_begin(perf, "parse")
     var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
     if mode == LanguageMode.Nizam to i32:
         lowerer = make_lowerer_from_cstr(source_cstr, path_cstr)
     else:
         lowerer = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
     let root as ptr[Node] = (deref lowerer).lower_source()
+    perf_end(perf, "parse", t0)
     if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
         return False
 
+    // ── Phase 2: Semantic Analysis ──
+    let t1 as i64 = perf_begin(perf, "sema")
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref sema).init_sema(path_cstr)
     (deref sema).engine = engine
     (deref sema).root_ast = root
     sema.declare_pass(root)
     sema.resolve_pass(root)
+    perf_end(perf, "sema", t1)
 
+    // ── Phase 3: Type Checking ──
+    let t2 as i64 = perf_begin(perf, "typecheck")
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc).init_tc(sema)
     let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
+    perf_end(perf, "typecheck", t2)
 
+    // ── Phase 4: Borrow Checking ──
+    let t3 as i64 = perf_begin(perf, "borrowck")
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     (deref bc).init_bc()
     (deref bc).sema = sema
     (deref bc).current_file = (deref sema).current_file
     (deref bc).walk_ast(root)
+    perf_end(perf, "borrowck", t3)
 
     if engine.has_errors():
         engine.emit_all_cached()
         return False
 
+    // ── Phase 5: Code Generation ──
+    let t4 as i64 = perf_begin(perf, "codegen")
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
     let ir_str as String = (deref cg).generate(root)
+    perf_end(perf, "codegen", t4)
 
+    // ── Phase 6: Write IR ──
+    let t5 as i64 = perf_begin(perf, "write_ir")
     let ll_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
     let _ll0 as i32 = sprintf(ll_buf, "%s.ll" to cstr, out_file)
     let ll_path as cstr = ll_buf to cstr
@@ -134,7 +267,10 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         return False
     let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
     fclose(f_ll)
+    perf_end(perf, "write_ir", t5)
 
+    // ── Phase 7: Link ──
+    let t6 as i64 = perf_begin(perf, "link")
     let lib_dir as cstr = compiler_lib_dir()
     let cmd_buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
     var _sp as i32 = 0
@@ -143,6 +279,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     else:
         _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file)
     let res as i32 = system(cmd_buf to cstr)
+    perf_end(perf, "link", t6)
+
     return res == 0
 
 // ── CLI Driver ──────────────────────────────────────────────────────────
@@ -160,8 +298,16 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         bin_name = "nizam" to cstr
     let self_name as cstr = compiler_name(default_mode)
 
+    // scan for --profile flag
+    var prof_flag as bool = False
+    var ai as i32 = 1 to i32
+    while ai < argc:
+        if strcmp(get_arg(argv, ai), "--profile" to cstr) == 0:
+            prof_flag = True
+        ai = ai + 1 to i32
+
     if argc < 2:
-        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>]\n  run <file.nz>\n  version\n" to cstr, self_name, bin_name)
+        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--profile]\n  run <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
 
@@ -173,13 +319,15 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:
-            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>]\n" to cstr, bin_name)
+            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--profile]\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2)
         var out_path as cstr = "a.out" to cstr
-        if argc >= 5:
-            if strcmp(get_arg(argv, 3), "-o" to cstr) == 0:
-                out_path = get_arg(argv, 4)
+        var arg_i as i32 = 3 to i32
+        while arg_i < argc - 1:
+            if strcmp(get_arg(argv, arg_i), "-o" to cstr) == 0:
+                out_path = get_arg(argv, arg_i + 1 to i32)
+            arg_i = arg_i + 1 to i32
 
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
@@ -187,7 +335,10 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode)
+        var perf as PerfState = perf_init()
+        perf.enabled = prof_flag
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, ref perf)
+        perf_print(ref perf)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
             let _ff1 as i32 = fflush(None to ptr)
@@ -199,7 +350,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "run" to cstr) == 0:
         if argc < 3:
-            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz>\n" to cstr, bin_name)
+            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--profile]\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2)
         let pidv as i32 = getpid()
@@ -212,7 +363,10 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p10 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
 
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode)
+        var perf as PerfState = perf_init()
+        perf.enabled = prof_flag
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, ref perf)
+        perf_print(ref perf)
         if ok:
             let res as i32 = system(out_path)
             return res
@@ -222,6 +376,3 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     let _p12 as i32 = printf("Unknown command: %s\nRun '%s' for usage.\n" to cstr, cmd, bin_name)
     return 1 to i32
-
-
-    

@@ -1,0 +1,48 @@
+// ── Lifetimes & Pointers Test Suite ──────────────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+fn add_refs(a as life[x] i32, b as ref i32) as i32:
+    return (deref a) + (deref b)
+
+fn main() -> i32:
+    let _hdr as i32 = printf("=== Running Lifetimes & Pointers Tests ===\n\n" to cstr)
+
+    var num as i32 = 42
+
+    // Test 1: Lifetime Reference life[a] i32
+    let r as life[a] i32 = ref num
+    let val1 as i32 = deref r
+    var test1_passed as bool = False
+    if val1 == 42:
+        test1_passed = True
+        let _p as i32 = printf("Test 1 (life[a] i32 & deref -> 42): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 1 (life[a] i32): FAILED! (got %d)\n" to cstr, val1)
+
+    // Test 2: Raw Pointer ptr[i32]
+    let p as ptr[i32] = ref num
+    let val2 as i32 = deref p
+    var test2_passed as bool = False
+    if val2 == 42:
+        test2_passed = True
+        let _p as i32 = printf("Test 2 (ptr[i32] & deref -> 42): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 2 (ptr[i32]): FAILED! (got %d)\n" to cstr, val2)
+
+    // Test 3: Passing lifetime & ref arguments to function
+    var num2 as i32 = 58
+    let r2 as life[b] i32 = ref num2
+    let total as i32 = add_refs(r, r2)
+    var test3_passed as bool = False
+    if total == 100:
+        test3_passed = True
+        let _p as i32 = printf("Test 3 (add_refs(life[a], life[b]) -> 100): PASSED!\n" to cstr)
+    else:
+        let _p as i32 = printf("Test 3 (add_refs): FAILED! (got %d)\n" to cstr, total)
+
+    if test1_passed and test2_passed and test3_passed:
+        let _all_ok as i32 = printf("\n>>> ALL LIFETIMES & POINTERS TESTS PASSED <<<\n" to cstr)
+        return 0
+    else:
+        let _err as i32 = printf("\n>>> SOME TESTS FAILED <<<\n" to cstr)
+        return 1

@@ -34,6 +34,7 @@ TEST_FILES=(
     "src/tests/test_match.nz"
     "src/tests/test_enum_payload_and_match.nz"
     "src/tests/test_expr_body_and_generics.nz"
+    "src/tests/test_lifetimes_and_pointers.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

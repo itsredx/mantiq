@@ -110,25 +110,42 @@ struct Lowerer:
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var first_name_start as usize = 0 to usize
         var last_name_end as usize = 0 to usize
-        var idx as u32 = 1 to u32
+        var idx as u32 = 0 to u32
         while idx < count:
             var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, idx, ref child)
-            if ts_node_is_named_ptr(ref child):
-                let child_kind as cstr = ts_node_type_ptr(ref child)
-                if strcmp(child_kind, "ref" to cstr) == 0:
-                    (deref annot).is_ref = True
-                elif strcmp(child_kind, "mut" to cstr) == 0:
-                    (deref annot).is_mut = True
-                elif strcmp(child_kind, "identifier" to cstr) == 0:
-                    if first_name_start == 0 to usize:
-                        first_name_start = ts_node_start_byte_ptr(ref child) to usize
-                    last_name_end = ts_node_end_byte_ptr(ref child) to usize
-                    let name_slice as ptr[String] = self.slice_string_from_node(ref child)
-                    (deref annot).name = deref name_slice
-                    drop(name_slice to ptr)
-                elif strcmp(child_kind, "generic_params" to cstr) == 0:
-                    last_name_end = ts_node_end_byte_ptr(ref child) to usize
+            let child_kind as cstr = ts_node_type_ptr(ref child)
+            if strcmp(child_kind, "ref" to cstr) == 0:
+                (deref annot).is_ref = True
+            elif strcmp(child_kind, "mut" to cstr) == 0:
+                (deref annot).is_mut = True
+            elif strcmp(child_kind, "life" to cstr) == 0:
+                (deref annot).is_ref = True
+                let l_cnt as u32 = ts_node_child_count_ptr(ref child)
+                var li as u32 = 0 to u32
+                while li < l_cnt:
+                    var l_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                    ts_node_child_ptr(ref child, li, ref l_child)
+                    let l_kind as cstr = ts_node_type_ptr(ref l_child)
+                    if strcmp(l_kind, "lifetime_args" to cstr) == 0 or strcmp(l_kind, "identifier" to cstr) == 0 or strcmp(l_kind, "expression" to cstr) == 0:
+                        let lt_slice as ptr[String] = self.slice_string_from_node(ref l_child)
+                        (deref annot).lifetime = Some(deref lt_slice)
+                        drop(lt_slice to ptr)
+                    li = li + 1 to u32
+            elif strcmp(child_kind, "expression" to cstr) == 0 or strcmp(child_kind, "lifetime_args" to cstr) == 0:
+                if (deref annot).is_ref and first_name_start == 0 to usize:
+                    let lt_slice as ptr[String] = self.slice_string_from_node(ref child)
+                    (deref annot).lifetime = Some(deref lt_slice)
+                    drop(lt_slice to ptr)
+            elif strcmp(child_kind, "identifier" to cstr) == 0:
+                if first_name_start == 0 to usize:
+                    first_name_start = ts_node_start_byte_ptr(ref child) to usize
+                last_name_end = ts_node_end_byte_ptr(ref child) to usize
+                let name_slice as ptr[String] = self.slice_string_from_node(ref child)
+                (deref annot).name = deref name_slice
+                drop(name_slice to ptr)
+            elif strcmp(child_kind, "generic_params" to cstr) == 0:
+                last_name_end = ts_node_end_byte_ptr(ref child) to usize
             idx = idx + 1 to u32
         
         if first_name_start > 0 to usize:
@@ -1081,8 +1098,27 @@ struct Lowerer:
         if not ts_node_is_null_ptr(ref target_ts):
             let t_start as usize = ts_node_start_byte_ptr(ref target_ts) to usize
             let t_end as usize = ts_node_end_byte_ptr(ref target_ts) to usize
-            if t_end > t_start:
-                let slice_ptr as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, t_start, t_end) to ptr[String]
+            var t_full_end as usize = t_end
+            let src_data as ptr[u8] = (deref self).source_code.data
+            let src_len as usize = (deref self).source_code.len
+            if t_end < src_len:
+                let after_ptr as ptr[u8] = (src_data to usize + t_end to usize) to ptr[u8]
+                if (deref after_ptr) == 91 to u8:
+                    var depth as i32 = 1 to i32
+                    var j as usize = t_end + 1 to usize
+                    while j < src_len and depth > 0:
+                        let ch as u8 = deref ((src_data to usize + j to usize) to ptr[u8])
+                        if ch == 91 to u8:
+                            depth = depth + 1 to i32
+                        elif ch == 93 to u8:
+                            depth = depth - 1 to i32
+                        if depth > 0:
+                            j = j + 1 to usize
+                        else:
+                            t_full_end = j + 1 to usize
+                            j = src_len
+            if t_full_end > t_start:
+                let slice_ptr as ptr[String] = slice_string(src_data, src_len, t_start, t_full_end) to ptr[String]
                 target_name = deref slice_ptr
                 drop(slice_ptr to ptr)
         else:

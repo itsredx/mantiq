@@ -16,6 +16,7 @@ from error import Diagnostic
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
+extern fn printf(fmt as cstr, ...) as i32
 
 struct OptionLayout:
     public var has_val as u8
@@ -45,7 +46,7 @@ struct TypeChecker:
         (deref self).inferred_return_type = None to ptr[Type]
         (deref self).current_struct_type = None to ptr[Type]
 
-    public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
+    public fn resolve_base_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
         let name_data as ptr[u8] = (deref annot).name.data
         let name_len as usize = (deref annot).name.len
         if name_data == None to ptr[u8] or name_len == 0 to usize:
@@ -329,6 +330,17 @@ struct TypeChecker:
 
         return make_struct_type(String.make(name))
 
+    public fn resolve_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
+        if annot == None to ptr[TypeAnnotation]:
+            return make_type(TypeKind.Void)
+        let base_t as ptr[Type] = self.resolve_base_type_annotation(annot)
+        if (deref annot).is_ref:
+            return make_ptr_type(base_t)
+        let lt_opt as ptr[u8] = (ref (deref annot).lifetime) to ptr[u8]
+        if option_has_value(lt_opt):
+            return make_ptr_type(base_t)
+        return base_t
+
     public fn check_nizam_import(self as ptr[TypeChecker], name as cstr, span as Span, file_path as String):
         if (deref (deref self).sema).mode to i32 == LanguageMode.Nizam to i32:
             extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
@@ -580,6 +592,7 @@ struct TypeChecker:
         elif nt == NodeType.VarDecl:
             let name as cstr = node_name(node).data to cstr
             var annotated_type as ptr[Type] = None to ptr[Type]
+            var annot_val as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
             
             if node_type_annots(node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                 let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
@@ -588,7 +601,7 @@ struct TypeChecker:
                     let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
                     if option_has_value(opt_ref to ptr[u8]):
                         let val_p as ptr[u8] = option_value(opt_ref to ptr[u8])
-                        let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
+                        annot_val = val_p to ptr[TypeAnnotation]
                         if annot_val != None to ptr[TypeAnnotation]:
                             annotated_type = self.resolve_type_annotation(annot_val)
                             self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))

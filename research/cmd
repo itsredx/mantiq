@@ -624,3 +624,11 @@ LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_
 diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
 LD_LIBRARY_PATH=. timeout 30s ./nizam build src/tests/test_expr_body_and_generics.nz -o /tmp/test_expr_body_and_generics --lib-dir . && timeout 10s /tmp/test_expr_body_and_generics
 timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+LD_LIBRARY_PATH=. timeout 15s ./nizam build src/tests/test_lifetimes_and_pointers.nz -o /tmp/test_lifetimes_and_pointers --profile --lib-dir . && timeout 5s /tmp/test_lifetimes_and_pointers
+timeout 90s bash src/tests/run_tests.sh

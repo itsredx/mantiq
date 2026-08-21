@@ -145,6 +145,18 @@ fn set_dict_drops(dict_ptr as ptr[Dict[usize, List[String]]], addr as usize, dro
     (deref dict_ptr)[addr] = drops
 
 fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
+    if strcmp(s_cstr, "PerfPhase" to cstr) == 0:
+        if strcmp(f_cstr, "name" to cstr) == 0:
+            return String.make("ptr" to cstr)
+        elif strcmp(f_cstr, "time_ns" to cstr) == 0 or strcmp(f_cstr, "rss_start" to cstr) == 0 or strcmp(f_cstr, "rss_end" to cstr) == 0:
+            return String.make("i64" to cstr)
+    elif strcmp(s_cstr, "PerfState" to cstr) == 0:
+        if strcmp(f_cstr, "phase_buf" to cstr) == 0:
+            return String.make("ptr" to cstr)
+        elif strcmp(f_cstr, "phase_count" to cstr) == 0 or strcmp(f_cstr, "wall_start" to cstr) == 0 or strcmp(f_cstr, "rss_start" to cstr) == 0 or strcmp(f_cstr, "allocs_start" to cstr) == 0 or strcmp(f_cstr, "bytes_start" to cstr) == 0 or strcmp(f_cstr, "frees_start" to cstr) == 0:
+            return String.make("i64" to cstr)
+        elif strcmp(f_cstr, "enabled" to cstr) == 0:
+            return String.make("i8" to cstr)
     if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0:
         return String.make("{ ptr, i64, i64 }" to cstr)
     elif strcmp(f_cstr, "kind" to cstr) == 0 or strcmp(f_cstr, "mode" to cstr) == 0 or strcmp(f_cstr, "severity" to cstr) == 0 or strcmp(f_cstr, "error_count" to cstr) == 0 or strcmp(f_cstr, "warning_count" to cstr) == 0 or strcmp(f_cstr, "panic_count" to cstr) == 0 or strcmp(f_cstr, "temp_counter" to cstr) == 0 or strcmp(f_cstr, "label_counter" to cstr) == 0 or strcmp(f_cstr, "string_counter" to cstr) == 0 or strcmp(f_cstr, "closure_counter" to cstr) == 0 or strcmp(f_cstr, "endianness" to cstr) == 0 or strcmp(f_cstr, "scope_depth" to cstr) == 0:
@@ -159,7 +171,7 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
         return String.make("i8" to cstr)
     elif strcmp(f_cstr, "node_kind" to cstr) == 0 or strcmp(f_cstr, "start_byte" to cstr) == 0 or strcmp(f_cstr, "end_byte" to cstr) == 0 or strcmp(f_cstr, "start_row" to cstr) == 0 or strcmp(f_cstr, "start_col" to cstr) == 0 or strcmp(f_cstr, "end_row" to cstr) == 0 or strcmp(f_cstr, "end_col" to cstr) == 0:
         return String.make("i32" to cstr)
-    elif strcmp(f_cstr, "x" to cstr) == 0 or strcmp(f_cstr, "y" to cstr) == 0 or strcmp(f_cstr, "z" to cstr) == 0 or strcmp(f_cstr, "w" to cstr) == 0 or strcmp(f_cstr, "next_hygiene_id" to cstr) == 0 or strcmp(f_cstr, "len" to cstr) == 0 or strcmp(f_cstr, "cap" to cstr) == 0 or strcmp(f_cstr, "capacity" to cstr) == 0 or strcmp(f_cstr, "length" to cstr) == 0 or strcmp(f_cstr, "count" to cstr) == 0 or strcmp(f_cstr, "size" to cstr) == 0 or strcmp(f_cstr, "index" to cstr) == 0 or strcmp(f_cstr, "pointer_size" to cstr) == 0:
+    elif strcmp(f_cstr, "x" to cstr) == 0 or strcmp(f_cstr, "y" to cstr) == 0 or strcmp(f_cstr, "z" to cstr) == 0 or strcmp(f_cstr, "w" to cstr) == 0 or strcmp(f_cstr, "next_hygiene_id" to cstr) == 0 or strcmp(f_cstr, "len" to cstr) == 0 or strcmp(f_cstr, "cap" to cstr) == 0 or strcmp(f_cstr, "capacity" to cstr) == 0 or strcmp(f_cstr, "length" to cstr) == 0 or strcmp(f_cstr, "count" to cstr) == 0 or strcmp(f_cstr, "size" to cstr) == 0 or strcmp(f_cstr, "index" to cstr) == 0 or strcmp(f_cstr, "pointer_size" to cstr) == 0 or strcmp(f_cstr, "wall_start" to cstr) == 0 or strcmp(f_cstr, "rss_start" to cstr) == 0 or strcmp(f_cstr, "rss_end" to cstr) == 0 or strcmp(f_cstr, "time_ns" to cstr) == 0:
         return String.make("i64" to cstr)
     elif strcmp(f_cstr, "left" to cstr) == 0 or strcmp(f_cstr, "right" to cstr) == 0 or strcmp(f_cstr, "body" to cstr) == 0 or strcmp(f_cstr, "cond" to cstr) == 0 or strcmp(f_cstr, "then_branch" to cstr) == 0 or strcmp(f_cstr, "inferred_type" to cstr) == 0 or strcmp(f_cstr, "data" to cstr) == 0 or strcmp(f_cstr, "buffer" to cstr) == 0 or strcmp(f_cstr, "return_type_annot" to cstr) == 0 or strcmp(f_cstr, "type_annots" to cstr) == 0 or strcmp(f_cstr, "payload" to cstr) == 0 or strcmp(f_cstr, "return_type" to cstr) == 0 or strcmp(f_cstr, "sema" to cstr) == 0 or strcmp(f_cstr, "current_scope" to cstr) == 0 or strcmp(f_cstr, "global_scope" to cstr) == 0 or strcmp(f_cstr, "current_function_return" to cstr) == 0 or strcmp(f_cstr, "inferred_return_type" to cstr) == 0 or strcmp(f_cstr, "decl_node" to cstr) == 0 or strcmp(f_cstr, "root_ast" to cstr) == 0 or strcmp(f_cstr, "parent" to cstr) == 0 or strcmp(f_cstr, "closure_node" to cstr) == 0 or strcmp(f_cstr, "resolved_type" to cstr) == 0 or strcmp(f_cstr, "current_struct_type" to cstr) == 0 or strcmp(f_cstr, "val_ptr" to cstr) == 0:
         return String.make("ptr" to cstr)
@@ -450,7 +462,7 @@ fn type_to_llvm(t as ptr[Type]) as String:
         let t_name as cstr = (deref t).name.data to cstr
         if t_name != None to cstr:
             extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-            if strcmp(t_name, "ptr" to cstr) == 0 or strncmp(t_name, "ptr[" to cstr, 4 to usize) == 0:
+            if strcmp(t_name, "ptr" to cstr) == 0 or strncmp(t_name, "ptr[" to cstr, 4 to usize) == 0 or strcmp(t_name, "cstr" to cstr) == 0:
                 return String.make("ptr" to cstr)
             if strcmp(t_name, "String" to cstr) == 0 or strcmp(t_name, "List" to cstr) == 0 or strcmp(t_name, "Dict" to cstr) == 0:
                 return String.make("{ ptr, i64, i64 }" to cstr)
@@ -535,6 +547,10 @@ fn type_size(t as ptr[Type]) as i64:
             return 64 to i64
         elif strcmp(sn, "TSNode" to cstr) == 0:
             return 32 to i64
+        elif strcmp(sn, "PerfPhase" to cstr) == 0:
+            return 32 to i64
+        elif strcmp(sn, "PerfState" to cstr) == 0:
+            return 64 to i64
     return 256 to i64
 
 fn is_struct_byval(t as String) as bool:
@@ -1341,18 +1357,21 @@ struct LLVMCodegen:
                     if option_has_value(opt_ref):
                         let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
                         if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
-                            let pa_name as cstr = (deref pa).name.data to cstr
-                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                            if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                            if (deref pa).is_ref:
                                 param_type = String.make("ptr" to cstr)
-                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
-                                param_type = String.make("i32" to cstr)
-                            elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
-                                param_type = String.make("i64" to cstr)
-                            elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
-                                param_type = String.make("i8" to cstr)
-                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
-                                param_type = String.make("{ ptr, i64, i64 }" to cstr)
+                            else:
+                                let pa_name as cstr = (deref pa).name.data to cstr
+                                extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                                if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                                    param_type = String.make("ptr" to cstr)
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                    param_type = String.make("i32" to cstr)
+                                elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
+                                    param_type = String.make("i64" to cstr)
+                                elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
+                                    param_type = String.make("i8" to cstr)
+                                elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
+                                    param_type = String.make("{ ptr, i64, i64 }" to cstr)
             if param_type.len == 0 to usize:
                 param_type = String.make("i64" to cstr)
             let is_bv as bool = is_struct_byval(param_type)
@@ -1399,18 +1418,21 @@ struct LLVMCodegen:
                     if option_has_value(p_opt_ref):
                         let pa as ptr[TypeAnnotation] = option_unwrap_ptr(p_opt_ref) to ptr[TypeAnnotation]
                         if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
-                            let pa_name as cstr = (deref pa).name.data to cstr
-                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                            if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                            if (deref pa).is_ref:
                                 p_type = String.make("ptr" to cstr)
-                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
-                                p_type = String.make("i32" to cstr)
-                            elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
-                                p_type = String.make("i64" to cstr)
-                            elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
-                                p_type = String.make("i8" to cstr)
-                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
-                                p_type = String.make("{ ptr, i64, i64 }" to cstr)
+                            else:
+                                let pa_name as cstr = (deref pa).name.data to cstr
+                                extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                                if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                                    p_type = String.make("ptr" to cstr)
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                    p_type = String.make("i32" to cstr)
+                                elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
+                                    p_type = String.make("i64" to cstr)
+                                elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
+                                    p_type = String.make("i8" to cstr)
+                                elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
+                                    p_type = String.make("{ ptr, i64, i64 }" to cstr)
             if p_type.len == 0 to usize:
                 p_type = String.make("i64" to cstr)
             set_dict_str(ref (deref self).var_types, p_name, p_type)
@@ -1476,34 +1498,37 @@ struct LLVMCodegen:
                     if option_has_value(opt_ref):
                         let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
                         if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
-                            let pa_name as cstr = (deref pa).name.data to cstr
-                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                            extern fn strlen(s as cstr) as usize
-                            let pa_len as usize = strlen(pa_name)
-                            if (pa_len > 1 to usize and (deref (((deref pa).name.data to usize + pa_len - 1 to usize) to ptr[u8])) == 63 to u8) or strncmp(pa_name, "Option", 6 to usize) == 0:
-                                var_type = String.make("{ i8, ptr }" to cstr)
-                            elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
-                                var_type = String.make("i64" to cstr)
-                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0:
-                                var_type = String.make("i32" to cstr)
-                            elif strcmp(pa_name, "i16" to cstr) == 0 or strcmp(pa_name, "u16" to cstr) == 0:
-                                var_type = String.make("i16" to cstr)
-                            elif strcmp(pa_name, "i8" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "byte" to cstr) == 0:
-                                var_type = String.make("i8" to cstr)
-                            elif strcmp(pa_name, "f64" to cstr) == 0:
-                                var_type = String.make("double" to cstr)
-                            elif strcmp(pa_name, "f32" to cstr) == 0:
-                                var_type = String.make("float" to cstr)
-                            elif strcmp(pa_name, "ptr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                            if (deref pa).is_ref:
                                 var_type = String.make("ptr" to cstr)
-                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
-                                var_type = String.make("{ ptr, i64, i64 }" to cstr)
                             else:
-                                var_type = String.make(pa_name)
-                                if (deref var_type.data) != 37 to u8 and strcmp(pa_name, "ptr" to cstr) != 0 and (deref var_type.data) != 105 to u8:
-                                    let s_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
-                                    let _ as i32 = sprintf(s_buf, "%%%s" to cstr, pa_name)
-                                    var_type = String.make(s_buf to cstr)
+                                let pa_name as cstr = (deref pa).name.data to cstr
+                                extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                                extern fn strlen(s as cstr) as usize
+                                let pa_len as usize = strlen(pa_name)
+                                if (pa_len > 1 to usize and (deref (((deref pa).name.data to usize + pa_len - 1 to usize) to ptr[u8])) == 63 to u8) or strncmp(pa_name, "Option", 6 to usize) == 0:
+                                    var_type = String.make("{ i8, ptr }" to cstr)
+                                elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
+                                    var_type = String.make("i64" to cstr)
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0:
+                                    var_type = String.make("i32" to cstr)
+                                elif strcmp(pa_name, "i16" to cstr) == 0 or strcmp(pa_name, "u16" to cstr) == 0:
+                                    var_type = String.make("i16" to cstr)
+                                elif strcmp(pa_name, "i8" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "byte" to cstr) == 0:
+                                    var_type = String.make("i8" to cstr)
+                                elif strcmp(pa_name, "f64" to cstr) == 0:
+                                    var_type = String.make("double" to cstr)
+                                elif strcmp(pa_name, "f32" to cstr) == 0:
+                                    var_type = String.make("float" to cstr)
+                                elif strcmp(pa_name, "ptr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
+                                    var_type = String.make("ptr" to cstr)
+                                elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
+                                    var_type = String.make("{ ptr, i64, i64 }" to cstr)
+                                else:
+                                    var_type = String.make(pa_name)
+                                    if (deref var_type.data) != 37 to u8 and strcmp(pa_name, "ptr" to cstr) != 0 and (deref var_type.data) != 105 to u8:
+                                        let s_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                                        let _ as i32 = sprintf(s_buf, "%%%s" to cstr, pa_name)
+                                        var_type = String.make(s_buf to cstr)
         if (strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize) and init_node != None to ptr[Node]:
             if node_kind(init_node) == NodeType.CallExpr:
                 let c_node as ptr[Node] = node_left(init_node)
@@ -4251,7 +4276,8 @@ struct LLVMCodegen:
                     elif strcmp(fc, "use_color" to cstr) == 0 or strcmp(fc, "is_ref" to cstr) == 0 or strcmp(fc, "is_mut" to cstr) == 0:
                         arg_type = String.make("i1" to cstr)
                     elif strcmp(fc, "name" to cstr) == 0 or strcmp(fc, "file_path" to cstr) == 0 or strcmp(fc, "message" to cstr) == 0 or strcmp(fc, "source_code" to cstr) == 0 or strcmp(fc, "current_file" to cstr) == 0:
-                        arg_type = String.make("{ ptr, i64, i64 }" to cstr)
+                        if strcmp(arg_type.data to cstr, "{ ptr, i64, i64 }" to cstr) != 0 and strcmp(arg_type.data to cstr, "ptr" to cstr) != 0:
+                            arg_type = String.make("{ ptr, i64, i64 }" to cstr)
             if node_kind(arg_node) == NodeType.NumberLiteral:
                 let num_t as ptr[Type] = node_inferred_type(arg_node)
                 if num_t != None to ptr[Type]:
@@ -5832,7 +5858,10 @@ struct LLVMCodegen:
             if strcmp(pointee_t.data to cstr, "void" to cstr) == 0:
                 pointee_t = String.make("i8" to cstr)
             var ptr_reg as ptr[u8] = operand_val
+            var needs_inttoptr as bool = False
             if node_kind(operand) == NodeType.BinaryExpr:
+                needs_inttoptr = True
+            if needs_inttoptr:
                 let p_temp as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, p_temp to cstr)
