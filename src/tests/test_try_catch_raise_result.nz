@@ -1,0 +1,62 @@
+// ── Try, Catch, Raise, Result & Option Unboxing Test ─────────────────
+
+fn divide(a as i32, b as i32) as Result[i32, i32]:
+    if b == 0:
+        raise 404 to i32
+    return Ok(a / b)
+
+fn find_item(idx as i32) as Option[i32]:
+    if idx < 0:
+        return Empty
+    return Some(idx * 10 to i32)
+
+fn fallible_op(fail as bool) as Result[i32, i32]:
+    if fail:
+        return Err(999 to i32)
+    return Ok(100 to i32)
+
+fn main() as i32:
+    // 1. Successful divide with try catch
+    let res1 as i32 = try divide(100 to i32, 2 to i32) catch err: 0 to i32
+    if res1 != 50 to i32:
+        return 1 to i32
+
+    // 2. Fallible divide triggering raise and catch fallback
+    var caught_err as i32 = 0 to i32
+    let res2 as i32 = try divide(100 to i32, 0 to i32) catch err:
+        caught_err = err
+        -1 to i32
+    if res2 != -1 to i32:
+        return 2 to i32
+    if caught_err != 404 to i32:
+        return 3 to i32
+
+    // 3. Fallible op with explicit Err return
+    let res3 as i32 = try fallible_op(False) catch err: -5 to i32
+    if res3 != 100 to i32:
+        return 4 to i32
+
+    let res4 as i32 = try fallible_op(True) catch err: err + 1 to i32
+    if res4 != 1000 to i32:
+        return 5 to i32
+
+    // 4. Option unboxing with Some and Empty
+    let opt1 as i32 = try find_item(5 to i32) catch _: -1 to i32
+    if opt1 != 50 to i32:
+        return 6 to i32
+
+    let opt2 as i32 = try find_item(-1 to i32) catch _: -99 to i32
+    if opt2 != -99 to i32:
+        return 7 to i32
+
+    // 5. Nested try catch expressions
+    let nested as i32 = try divide(try divide(100 to i32, 2 to i32) catch e1: 10 to i32, 5 to i32) catch e2: -1 to i32
+    if nested != 10 to i32:
+        return 8 to i32
+
+    // 6. Inline try catch without binding
+    let res5 as i32 = try divide(40 to i32, 4 to i32) catch: 0 to i32
+    if res5 != 10 to i32:
+        return 9 to i32
+
+    return 0 to i32

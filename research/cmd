@@ -668,3 +668,12 @@ diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./niza
 timeout 90s bash src/tests/run_tests.sh
 git add src/ && git add -f research/cmd
 git commit -m "feat(compiler): implement context managers, with statements, loop vectorization, and compound assignments"
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir . --emit-llvm /tmp/nizam_stage3.ll
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir . --emit-llvm /tmp/nizam_stage4.ll
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir . --emit-llvm /tmp/nizam_stage5.ll
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir . --emit-llvm /tmp/nizam_stage6.ll
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+git add src/ && git add -f research/cmd
+git commit -m "feat(compiler): implement tagged-union Result/Option unboxing, try-catch handlers, and raise codegen"

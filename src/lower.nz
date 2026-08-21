@@ -205,7 +205,7 @@ struct Lowerer:
             return self.lower_import(ts_node)
         elif strcmp(kind, "call_expression" to cstr) == 0:
             return self.lower_call_expr(ts_node)
-        elif strcmp(kind, "jump_stmt" to cstr) == 0:
+        elif strcmp(kind, "jump_stmt" to cstr) == 0 or strcmp(kind, "raise_statement" to cstr) == 0 or strcmp(kind, "throw_stmt" to cstr) == 0:
             return self.lower_jump_stmt(ts_node)
         elif strcmp(kind, "while_stmt" to cstr) == 0:
             return self.lower_while_stmt(ts_node)
@@ -213,8 +213,10 @@ struct Lowerer:
             return self.lower_for_stmt(ts_node)
         elif strcmp(kind, "member_expression" to cstr) == 0:
             return self.lower_member_expr(ts_node)
-        elif strcmp(kind, "with_stmt" to cstr) == 0:
+        elif strcmp(kind, "with_stmt" to cstr) == 0 or strcmp(kind, "with_statement" to cstr) == 0:
             return self.lower_with_stmt(ts_node)
+        elif strcmp(kind, "try_expr" to cstr) == 0 or strcmp(kind, "try_stmt" to cstr) == 0 or strcmp(kind, "try_statement" to cstr) == 0:
+            return self.lower_try_stmt(ts_node)
         elif strcmp(kind, "pass_stmt" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.NumberLiteral, self.get_span(ts_node))
             let data as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
@@ -1568,6 +1570,25 @@ struct Lowerer:
         let text_ptr as ptr[u8] = (deref self).source_code.data to ptr[u8]
         let is_return as bool = text_len >= 6 and text_ptr[span.start_byte to usize] == 114 to u8 and text_ptr[span.start_byte to usize + 1] == 101 to u8 and text_ptr[span.start_byte to usize + 2] == 116 to u8 and text_ptr[span.start_byte to usize + 3] == 117 to u8 and text_ptr[span.start_byte to usize + 4] == 114 to u8 and text_ptr[span.start_byte to usize + 5] == 110 to u8
         
+        let is_raise as bool = text_len >= 5 and text_ptr[span.start_byte to usize] == 114 to u8 and text_ptr[span.start_byte to usize + 1] == 97 to u8 and text_ptr[span.start_byte to usize + 2] == 105 to u8 and text_ptr[span.start_byte to usize + 3] == 115 to u8 and text_ptr[span.start_byte to usize + 4] == 101 to u8
+        if is_raise:
+            var raise_val as ptr[Node] = None to ptr[Node]
+            let count as u32 = ts_node_child_count_ptr(ts_node)
+            var i as u32 = 0 to u32
+            while i < count:
+                var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                ts_node_child_ptr(ts_node, i, ref child)
+                if ts_node_is_named_ptr(ref child):
+                    let c_kind as cstr = ts_node_type_ptr(ref child)
+                    if strcmp(c_kind, "expression" to cstr) == 0 or strcmp(c_kind, "primary" to cstr) == 0 or strcmp(c_kind, "binary_expression" to cstr) == 0 or strcmp(c_kind, "call_expression" to cstr) == 0 or strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "number" to cstr) == 0 or strcmp(c_kind, "string" to cstr) == 0:
+                        raise_val = self.lower_node(ref child)
+                i = i + 1 to u32
+            let n as ptr[Node] = make_node(NodeType.ThrowStmt, span)
+            let data as ptr[ThrowStmtData] = make[ThrowStmtData](1 to usize) to ptr[ThrowStmtData]
+            (deref data).left = raise_val
+            (deref n).data = data to ptr[u8]
+            return n
+            
         if not is_return:
             let is_break as bool = text_len >= 5 and text_ptr[span.start_byte to usize] == 98 to u8 and text_ptr[span.start_byte to usize + 1] == 114 to u8 and text_ptr[span.start_byte to usize + 2] == 101 to u8 and text_ptr[span.start_byte to usize + 3] == 97 to u8 and text_ptr[span.start_byte to usize + 4] == 107 to u8
             let is_continue as bool = text_len >= 8 and text_ptr[span.start_byte to usize] == 99 to u8 and text_ptr[span.start_byte to usize + 1] == 111 to u8 and text_ptr[span.start_byte to usize + 2] == 110 to u8 and text_ptr[span.start_byte to usize + 3] == 116 to u8
@@ -1738,6 +1759,83 @@ struct Lowerer:
         (deref data).left = expr_node
         (deref data).name = var_name
         (deref data).body = body_node
+        (deref n).data = data to ptr[u8]
+        return n
+
+    public fn lower_try_stmt(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        var body_node as ptr[Node] = None to ptr[Node]
+        var catch_body as ptr[Node] = None to ptr[Node]
+        var err_var as String = String.make("" to cstr)
+        var finally_node as ptr[Node] = None to ptr[Node]
+        var in_except as bool = False
+        
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            let c_kind as cstr = ts_node_type_ptr(ref child)
+            if strcmp(c_kind, "comment" to cstr) == 0:
+                let dummy_c as i32 = 0
+            elif strcmp(c_kind, "except" to cstr) == 0 or strcmp(c_kind, "catch" to cstr) == 0 or strcmp(c_kind, "kw_except" to cstr) == 0 or strcmp(c_kind, "kw_catch" to cstr) == 0:
+                in_except = True
+            elif strcmp(c_kind, "except_clause" to cstr) == 0 or strcmp(c_kind, "catch_clause" to cstr) == 0:
+                in_except = True
+                let ec_count as u32 = ts_node_child_count_ptr(ref child)
+                var j as u32 = 0 to u32
+                while j < ec_count:
+                    var ec_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                    ts_node_child_ptr(ref child, j, ref ec_child)
+                    if ts_node_is_named_ptr(ref ec_child):
+                        let ec_kind as cstr = ts_node_type_ptr(ref ec_child)
+                        if strcmp(ec_kind, "block_body" to cstr) == 0 or strcmp(ec_kind, "block" to cstr) == 0:
+                            catch_body = self.lower_block(ref ec_child)
+                        elif strcmp(ec_kind, "identifier" to cstr) == 0:
+                            let slice_ptr as ptr[String] = self.slice_string_from_node(ref ec_child)
+                            err_var = deref slice_ptr
+                            drop(slice_ptr to ptr)
+                        elif strcmp(ec_kind, "as_pattern" to cstr) == 0:
+                            let ec_node as ptr[Node] = self.lower_node(ref ec_child)
+                            if ec_node != None to ptr[Node] and node_kind(ec_node) == NodeType.Identifier:
+                                err_var = node_name(ec_node)
+                        elif catch_body == None to ptr[Node]:
+                            catch_body = self.lower_node(ref ec_child)
+                    j = j + 1 to u32
+            elif strcmp(c_kind, "finally_clause" to cstr) == 0:
+                let fc_count as u32 = ts_node_child_count_ptr(ref child)
+                var j as u32 = 0 to u32
+                while j < fc_count:
+                    var fc_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                    ts_node_child_ptr(ref child, j, ref fc_child)
+                    if ts_node_is_named_ptr(ref fc_child):
+                        let fc_kind as cstr = ts_node_type_ptr(ref fc_child)
+                        if strcmp(fc_kind, "block_body" to cstr) == 0 or strcmp(fc_kind, "block" to cstr) == 0:
+                            finally_node = self.lower_block(ref fc_child)
+                    j = j + 1 to u32
+            elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
+                if in_except:
+                    catch_body = self.lower_block(ref child)
+                else:
+                    body_node = self.lower_block(ref child)
+            elif ts_node_is_named_ptr(ref child):
+                if in_except:
+                    if strcmp(c_kind, "identifier" to cstr) == 0 and err_var.len == 0 to usize:
+                        let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
+                        err_var = deref slice_ptr
+                        drop(slice_ptr to ptr)
+                    elif catch_body == None to ptr[Node]:
+                        catch_body = self.lower_node(ref child)
+                else:
+                    if strcmp(c_kind, "kw_try" to cstr) != 0 and strcmp(c_kind, "try" to cstr) != 0 and body_node == None to ptr[Node]:
+                        body_node = self.lower_node(ref child)
+            i = i + 1 to u32
+            
+        let n as ptr[Node] = make_node(NodeType.TryStmt, span)
+        let data as ptr[TryStmtData] = make[TryStmtData](1 to usize) to ptr[TryStmtData]
+        (deref data).left = body_node
+        (deref data).name = err_var
+        (deref data).body = catch_body
         (deref n).data = data to ptr[u8]
         return n
 

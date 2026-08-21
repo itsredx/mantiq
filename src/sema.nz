@@ -744,6 +744,26 @@ struct Sema:
                 self.declare_pass(node_body(node))
             let self_ref_w1 as ptr[Sema] = self
             (deref self_ref_w1).current_scope = parent_scope
+        elif nt == NodeType.TryStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.declare_pass(node_left(node))
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
+            (deref self).current_scope = child_scope
+            (deref self).fn_scopes[node to usize] = child_scope
+            
+            let var_name as String = node_name(node)
+            if var_name.len > 0 to usize and strcmp(var_name.data to cstr, "_" to cstr) != 0:
+                let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
+                (deref child_scope).symbols[var_name] = sym
+            
+            if node_body(node) != None to ptr[Node]:
+                self.declare_pass(node_body(node))
+            let self_ref_t1 as ptr[Sema] = self
+            (deref self_ref_t1).current_scope = parent_scope
+        elif nt == NodeType.ThrowStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.declare_pass(node_left(node))
         elif nt == NodeType.IfStmt:
             if node_then_branch(node) != None to ptr[Node]:
                 self.declare_pass(node_then_branch(node))
@@ -948,6 +968,22 @@ struct Sema:
                 self.resolve_pass(node_body(node))
             let self_ref_w2 as ptr[Sema] = self
             (deref self_ref_w2).current_scope = parent_scope
+        elif nt == NodeType.TryStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.resolve_pass(node_left(node))
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            if (deref self).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
+                (deref self).current_scope = child_scope
+                if node_body(node) != None to ptr[Node]:
+                    self.resolve_pass(node_body(node))
+                let self_ref_t2 as ptr[Sema] = self
+                (deref self_ref_t2).current_scope = parent_scope
+            elif node_body(node) != None to ptr[Node]:
+                self.resolve_pass(node_body(node))
+        elif nt == NodeType.ThrowStmt:
+            if node_left(node) != None to ptr[Node]:
+                self.resolve_pass(node_left(node))
         elif nt == NodeType.StructDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             if (deref self).fn_scopes.has(node to usize):
