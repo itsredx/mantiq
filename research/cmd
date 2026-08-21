@@ -632,3 +632,21 @@ LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_
 diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
 LD_LIBRARY_PATH=. timeout 15s ./nizam build src/tests/test_lifetimes_and_pointers.nz -o /tmp/test_lifetimes_and_pointers --profile --lib-dir . && timeout 5s /tmp/test_lifetimes_and_pointers
 timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+timeout 45s ../mantiqz/mantiq-compiler/zig-out/bin/mantiq build src/main.nz -o /tmp/nizam_stage2 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/tests/test_systems_and_type_intrinsics.nz -o /tmp/test_systems_and_type_intrinsics --lib-dir . && timeout 10s /tmp/test_systems_and_type_intrinsics
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/tests/test_user_snippet.nz -o /tmp/test_user_snippet --lib-dir . && timeout 10s /tmp/test_user_snippet
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage2 build src/main.nz -o /tmp/nizam_stage3 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage3 build src/main.nz -o /tmp/nizam_stage4 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage4 build src/main.nz -o /tmp/nizam_stage5 --lib-dir .
+LD_LIBRARY_PATH=. timeout 45s /tmp/nizam_stage5 build src/main.nz -o /tmp/nizam_stage6 --lib-dir .
+diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./nizam
+timeout 90s bash src/tests/run_tests.sh
+git add src/ && git add -f research/cmd
+git commit -m "feat(compiler): implement type aliases, top-level globals, systems modifiers, and compile-time type intrinsics"

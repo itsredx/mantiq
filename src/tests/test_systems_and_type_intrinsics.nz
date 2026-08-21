@@ -1,0 +1,64 @@
+// ── Systems Modifiers & Type Aliases Test ─────────────────────────────
+
+type _Type = i32
+type Point2D = Point
+
+struct Point:
+    var x as i32
+    var y as i32
+
+const _C = 100
+static var _st = 200
+
+inline fn _inl():
+    pass
+
+extern fn _ext()
+
+fn _sys():
+    volatile var _vol = 1
+    atomic var _at = 1
+
+fn main() as i32:
+    _inl()
+    _sys()
+    
+    // Type aliases in variable declarations
+    let a as _Type = 42
+    if a != 42:
+        return 1
+        
+    let p as Point2D = Point(x = 10 to i32, y = 20 to i32)
+    if p.x != 10 to i32 or p.y != 20 to i32:
+        return 2
+
+    // Globals
+    if _C != 100:
+        return 3
+    if _st != 200:
+        return 4
+    _st = 250
+    if _st != 250:
+        return 5
+
+    // Type intrinsics size(T) and alignof(T)
+    let sz_i32 = size(_Type)
+    let al_i32 = alignof(_Type)
+    if sz_i32 != 4 or al_i32 != 4:
+        return 6
+
+    let sz_i64 = size(i64)
+    let al_i64 = alignof(i64)
+    if sz_i64 != 8 or al_i64 != 8:
+        return 7
+
+    let sz_pt = size(Point)
+    let al_pt = alignof(Point)
+    if sz_pt != 8 or al_pt != 8:
+        return 8
+
+    let sz_pt2 = size(Point2D)
+    if sz_pt2 != 8:
+        return 9
+
+    return 0

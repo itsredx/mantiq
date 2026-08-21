@@ -318,10 +318,25 @@ struct TypeChecker:
                     return make_ptr_type(elem_type)
             return make_ptr_type(make_type(TypeKind.Void))
 
-        // Check if user-defined struct/class/enum in scope
+        // Check if user-defined struct/class/enum/type alias in scope
         let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
         if sym != None to ptr[Symbol]:
-            if (deref sym).kind == SymbolKind.Struct:
+            if (deref sym).kind == SymbolKind.TypeAlias:
+                if (deref sym).resolved_type != None to ptr[Type]:
+                    return (deref sym).resolved_type
+                let d_node as ptr[Node] = (deref sym).decl_node
+                if d_node != None to ptr[Node]:
+                    let ann_list as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(d_node)
+                    if ann_list != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref ann_list).length() > 0 to i64:
+                        let opt_ann as Option[ptr[TypeAnnotation]] = (deref ann_list)[0]
+                        let opt_ref as ptr[OptionLayout] = (ref opt_ann) to ptr[OptionLayout]
+                        if option_has_value(opt_ref to ptr[u8]):
+                            let ta_ptr as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
+                            if ta_ptr != None to ptr[TypeAnnotation]:
+                                let res_t as ptr[Type] = self.resolve_type_annotation(ta_ptr)
+                                (deref sym).resolved_type = res_t
+                                return res_t
+            elif (deref sym).kind == SymbolKind.Struct:
                 return make_struct_type(String.make(name))
             elif (deref sym).kind == SymbolKind.Enum:
                 return make_enum_type(String.make(name))
@@ -852,6 +867,17 @@ struct TypeChecker:
                     
         elif nt == NodeType.CallExpr:
             let callee as ptr[Node] = node_left(node)
+            var is_type_intrinsic as bool = False
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+                let c_name as String = node_name(callee)
+                let c_data as cstr = c_name.data to cstr
+                let c_len as usize = c_name.len
+                if (c_len == 4 to usize and strncmp(c_data, "size" to cstr, 4 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "size_of" to cstr, 7 to usize) == 0) or (c_len == 6 to usize and strncmp(c_data, "sizeof" to cstr, 6 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "alignof" to cstr, 7 to usize) == 0) or (c_len == 8 to usize and strncmp(c_data, "align_of" to cstr, 8 to usize) == 0):
+                    is_type_intrinsic = True
+            if is_type_intrinsic:
+                ret_type = make_type(TypeKind.I64)
+                set_node_inferred_type(node, ret_type)
+                return ret_type
             let callee_t as ptr[Type] = self.typecheck_node(callee)
             var generic_ctor_t as ptr[Type] = None to ptr[Type]
             if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
@@ -948,6 +974,8 @@ struct TypeChecker:
                     if some_arg_t != None to ptr[Type]:
                         (deref some_t).payload = some_arg_t
                 ret_type = some_t
+            elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "size" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "size_of" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "sizeof" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "alignof" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "align_of" to cstr) == 0):
+                ret_type = make_type(TypeKind.I64)
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "make" to cstr) == 0:
                 ret_type = make_ptr_type(make_type(TypeKind.Any))
             elif generic_ctor_t != None to ptr[Type]:
@@ -1123,8 +1151,12 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.Void)
 
         elif nt == NodeType.UnaryExpr:
-            let operand_t as ptr[Type] = self.typecheck_node(node_left(node))
             let op as String = node_op(node)
+            if op.data != None to ptr[u8] and strcmp(op.data to cstr, "size" to cstr) == 0:
+                ret_type = make_type(TypeKind.I64)
+                set_node_inferred_type(node, ret_type)
+                return ret_type
+            let operand_t as ptr[Type] = self.typecheck_node(node_left(node))
             if strcmp(op.data to cstr, "not" to cstr) == 0:
                 ret_type = make_type(TypeKind.Boolean)
             elif strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "+" to cstr) == 0:

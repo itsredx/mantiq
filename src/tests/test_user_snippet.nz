@@ -1,0 +1,22 @@
+// ── Exact User Snippet Verification ───────────────────────────────────
+
+type _Type = i32
+const _C = 1
+// Systems Modifiers
+inline fn _inl(): 
+    pass
+static var _st = 1
+extern fn _ext()
+fn _sys():
+    volatile var _vol = 1
+    atomic var _at = 1
+
+fn _mem():
+    let _sz = size(_Type)
+    let _al = alignof(_Type)
+
+fn main() as i32:
+    _inl()
+    _sys()
+    _mem()
+    return 0

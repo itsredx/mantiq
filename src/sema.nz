@@ -72,6 +72,7 @@ fn read_file_to_str(path as cstr) as String:
     return String(data = buf, len = read_bytes, capacity = cap)
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
 extern fn printf(format as cstr, ...) as i32
 extern fn strdup(s as cstr) as cstr
 
@@ -535,28 +536,28 @@ struct Sema:
                 self.declare_pass(decls[i])
                 i = i + 1 to i64
         elif nt == NodeType.VarDecl:
-            let name as cstr = node_name(node).data to cstr
-            if (deref (deref self).current_scope).parent == None to ptr[Scope] and (deref (deref self).current_scope).symbols.has(String.make(name)):
+            let name as String = node_name(node)
+            if (deref (deref self).current_scope).parent == None to ptr[Scope] and (deref (deref self).current_scope).symbols.has(name):
                 self.report_error_node("E0102" to cstr, String.make("duplicate variable declaration" to cstr), node)
             else:
-                let sym as ptr[Symbol] = make_symbol(String.make(name), SymbolKind.Variable, node)
-                (deref (deref self).current_scope).symbols[String.make(name)] = sym
+                let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Variable, node)
+                (deref (deref self).current_scope).symbols[name] = sym
             
             if node_left(node) != None to ptr[Node]:
                 self.declare_pass(node_left(node))
         elif nt == NodeType.FunDecl:
-            let name as cstr = node_name(node).data to cstr
+            let name as String = node_name(node)
             if node_is_extern(node):
                 // Extern functions don't report duplicates — they re-declare external symbols
-                if not (deref (deref self).current_scope).symbols.has(String.make(name)):
-                    let sym as ptr[Symbol] = make_symbol(String.make(name), SymbolKind.Function, node)
-                    (deref (deref self).current_scope).symbols[String.make(name)] = sym
+                if not (deref (deref self).current_scope).symbols.has(name):
+                    let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Function, node)
+                    (deref (deref self).current_scope).symbols[name] = sym
             else:
-                if (deref (deref self).current_scope).symbols.has(String.make(name)):
+                if (deref (deref self).current_scope).symbols.has(name):
                     self.report_error_node("E0102" to cstr, String.make("duplicate function declaration" to cstr), node)
                 else:
-                    let sym as ptr[Symbol] = make_symbol(String.make(name), SymbolKind.Function, node)
-                    (deref (deref self).current_scope).symbols[String.make(name)] = sym
+                    let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Function, node)
+                    (deref (deref self).current_scope).symbols[name] = sym
             
             // Only create child scope and register params if there's a body (non-extern)
             if not node_is_extern(node):
@@ -691,6 +692,12 @@ struct Sema:
                 self.declare_pass(node_body(node))
             let self_ref_ud as ptr[Sema] = self
             (deref self_ref_ud).current_scope = parent_scope
+        elif nt == NodeType.FieldDecl:
+            let name as String = node_name(node)
+            if name.len > 0 to usize:
+                if not (deref (deref self).current_scope).symbols.has(name):
+                    let sym as ptr[Symbol] = make_symbol(name, SymbolKind.TypeAlias, node)
+                    (deref (deref self).current_scope).symbols[name] = sym
         elif nt == NodeType.WhileStmt:
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
@@ -814,14 +821,21 @@ struct Sema:
             let self_ref_2 as ptr[Sema] = self
             (deref self_ref_2).current_scope = parent_scope
         elif nt == NodeType.Identifier:
-            let name as cstr = node_name(node).data to cstr
-            if strcmp(name, "break" to cstr) == 0 or strcmp(name, "continue" to cstr) == 0 or strcmp(name, "None" to cstr) == 0 or strcmp(name, "True" to cstr) == 0 or strcmp(name, "False" to cstr) == 0 or strcmp(name, "Empty" to cstr) == 0:
+            let name as String = node_name(node)
+            if name.len == 0 to usize:
                 return
-            let resolved as ptr[Symbol] = self.lookup_symbol(String.make(name))
+            let n_cstr as cstr = name.data to cstr
+            let n_len as usize = name.len
+            if (n_len == 5 to usize and strncmp(n_cstr, "break" to cstr, 5 to usize) == 0) or (n_len == 8 to usize and strncmp(n_cstr, "continue" to cstr, 8 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "None" to cstr, 4 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "True" to cstr, 4 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "False" to cstr, 5 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "Empty" to cstr, 5 to usize) == 0):
+                return
+            // Allow primitive types used in type intrinsics/casts
+            if (n_len == 3 to usize and (strncmp(n_cstr, "i32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "ptr" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i128" to cstr, 4 to usize) == 0)) or (n_len == 2 to usize and (strncmp(n_cstr, "i8" to cstr, 2 to usize) == 0 or strncmp(n_cstr, "u8" to cstr, 2 to usize) == 0)) or (n_len == 4 to usize and (strncmp(n_cstr, "bool" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "cstr" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "void" to cstr, 4 to usize) == 0)) or (n_len == 5 to usize and (strncmp(n_cstr, "usize" to cstr, 5 to usize) == 0 or strncmp(n_cstr, "isize" to cstr, 5 to usize) == 0)):
+                return
+            let resolved as ptr[Symbol] = self.lookup_symbol(name)
             if resolved == None to ptr[Symbol]:
                 self.report_error_node("E0101" to cstr, String.make("undeclared variable" to cstr), node)
             else:
-                self.check_closure_capture(String.make(name), resolved)
+                self.check_closure_capture(name, resolved)
         elif nt == NodeType.BinaryExpr:
             let op as cstr = node_op(node).data to cstr
             if strcmp(op, "." to cstr) == 0:
@@ -853,14 +867,23 @@ struct Sema:
                 self.resolve_pass(node_left(node))
                 self.resolve_pass(node_right(node))
         elif nt == NodeType.CallExpr:
-            if node_left(node) != None to ptr[Node]:
-                self.resolve_pass(node_left(node))
-            let args as List[ptr[Node]] = node_params(node)
-            let arg_count as i64 = args.length()
-            var a_idx as i64 = 0 to i64
-            while a_idx < arg_count:
-                self.resolve_pass(args[a_idx])
-                a_idx = a_idx + 1 to i64
+            let callee as ptr[Node] = node_left(node)
+            var is_type_intrinsic as bool = False
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+                let c_name as String = node_name(callee)
+                let c_data as cstr = c_name.data to cstr
+                let c_len as usize = c_name.len
+                if (c_len == 4 to usize and strncmp(c_data, "size" to cstr, 4 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "size_of" to cstr, 7 to usize) == 0) or (c_len == 6 to usize and strncmp(c_data, "sizeof" to cstr, 6 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "alignof" to cstr, 7 to usize) == 0) or (c_len == 8 to usize and strncmp(c_data, "align_of" to cstr, 8 to usize) == 0):
+                    is_type_intrinsic = True
+            if not is_type_intrinsic:
+                if callee != None to ptr[Node]:
+                    self.resolve_pass(callee)
+                let args as List[ptr[Node]] = node_params(node)
+                let arg_count as i64 = args.length()
+                var a_idx as i64 = 0 to i64
+                while a_idx < arg_count:
+                    self.resolve_pass(args[a_idx])
+                    a_idx = a_idx + 1 to i64
         elif nt == NodeType.ReturnStmt:
             if node_body(node) != None to ptr[Node]:
                 self.resolve_pass(node_body(node))
@@ -880,6 +903,9 @@ struct Sema:
                 let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
                 self.resolve_pass(else_node)
         elif nt == NodeType.CastExpr or nt == NodeType.UnaryExpr:
+            let op as String = node_op(node)
+            if nt == NodeType.UnaryExpr and op.data != None to ptr[u8] and strcmp(op.data to cstr, "size" to cstr) == 0:
+                return
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
         elif nt == NodeType.ForStmt:
