@@ -36,6 +36,8 @@ TEST_FILES=(
     "src/tests/test_expr_body_and_generics.nz"
     "src/tests/test_lifetimes_and_pointers.nz"
     "src/tests/test_systems_and_type_intrinsics.nz"
+    "src/tests/test_for_loops_and_concurrency.nz"
+    "src/tests/test_context_managers_and_with.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

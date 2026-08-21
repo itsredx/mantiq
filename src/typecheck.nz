@@ -844,6 +844,9 @@ struct TypeChecker:
                         set_node_inferred_type(right, left_t)
                 let right_t as ptr[Type] = self.typecheck_node(right)
                 ret_type = left_t
+            elif strcmp(node_op(node).data to cstr, "is" to cstr) == 0:
+                let _left_t as ptr[Type] = self.typecheck_node(left)
+                ret_type = make_type(TypeKind.Boolean)
             else:
                 let left_t as ptr[Type] = self.typecheck_node(left)
                 let right_t as ptr[Type] = self.typecheck_node(right)
@@ -1014,7 +1017,24 @@ struct TypeChecker:
             ret_type = make_type(TypeKind.Void)
             
         elif nt == NodeType.ForStmt:
-            let dummy_iter as ptr[Type] = self.typecheck_node(node_left(node))
+            let iter_type as ptr[Type] = self.typecheck_node(node_left(node))
+            var elem_type as ptr[Type] = make_type(TypeKind.I64)
+            if iter_type != None to ptr[Type]:
+                let ik as TypeKind = (deref iter_type).kind
+                if ik == TypeKind.List or ik == TypeKind.RawPointer:
+                    if (deref iter_type).payload != None to ptr[Type]:
+                        elem_type = (deref iter_type).payload
+                elif ik == TypeKind.I32 or ik == TypeKind.I64 or ik == TypeKind.U64 or ik == TypeKind.USize:
+                    elem_type = make_type(TypeKind.I64)
+
+            let var_name as String = node_name(node)
+            if (deref (deref self).sema).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref (deref self).sema).fn_scopes[node to usize]
+                if (deref child_scope).symbols.has(var_name):
+                    let sym as ptr[Symbol] = (deref child_scope).symbols[var_name]
+                    (deref sym).resolved_type = elem_type
+
+            set_node_inferred_type(node, elem_type)
             let dummy_body as ptr[Type] = self.typecheck_node(node_body(node))
             ret_type = make_type(TypeKind.Void)
             
@@ -1125,7 +1145,24 @@ struct TypeChecker:
                     ret_type = make_type(TypeKind.Any)
         elif nt == NodeType.WithStmt:
             let expr_t as ptr[Type] = self.typecheck_node(node_left(node))
+            var bound_type as ptr[Type] = expr_t
+            if bound_type == None to ptr[Type]:
+                bound_type = make_type(TypeKind.Void)
+            let var_name as String = node_name(node)
+            let sema_ptr as ptr[Sema] = (deref self).sema
+            var prev_scope as ptr[Scope] = None to ptr[Scope]
+            if (deref sema_ptr).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
+                if var_name.len > 0 to usize and (deref child_scope).symbols.has(var_name):
+                    let sym as ptr[Symbol] = (deref child_scope).symbols[var_name]
+                    (deref sym).resolved_type = bound_type
+                prev_scope = (deref sema_ptr).current_scope
+                (deref sema_ptr).current_scope = child_scope
+
+            set_node_inferred_type(node, bound_type)
             let body_t as ptr[Type] = self.typecheck_node(node_body(node))
+            if prev_scope != None to ptr[Scope]:
+                (deref sema_ptr).current_scope = prev_scope
             ret_type = body_t
 
         elif nt == NodeType.IfStmt:

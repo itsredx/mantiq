@@ -1,0 +1,62 @@
+// ── For Loops & Concurrency Test ──────────────────────────────────────
+from std.mem import make, free
+
+const CPU_CORES = 4
+static var g_thread_work_count = 0
+
+fn thread_work(id as i64):
+    g_thread_work_count += 1
+
+fn main() as i32:
+    // 1. Basic for-in range loop and compound addition
+    var sum as i64 = 0
+    for i in 0..10:
+        sum += i
+    // sum of 0..9 = 45
+    if sum != 45:
+        return 1
+
+    // 2. Vectorized SIMD loop with array mutation and float compound multiplication
+    let n as usize = 1024 to usize
+    let data as ptr[f64] = make[f64](n) to ptr[f64]
+    
+    for i in 0..1024:
+        data[i] = 1.5
+
+    for@vec i in 0..1024:
+        // SIMD vectorized loop
+        data[i] *= 2.0
+
+    var v_idx as i64 = 0
+    while v_idx < 1024:
+        if data[v_idx] != 3.0:
+            free(data to ptr)
+            return 2
+        v_idx += 1
+
+    free(data to ptr)
+
+    // 3. Parallel multi-threaded loop modifier
+    for@par i in 0..CPU_CORES:
+        // Multi-threaded parallel loop
+        thread_work(i)
+
+    if g_thread_work_count != 4:
+        return 3
+
+    // 4. Arithmetic compound assignments on scalar variables
+    var a as i64 = 100
+    a -= 25
+    if a != 75:
+        return 4
+    a *= 2
+    if a != 150:
+        return 5
+    a /= 3
+    if a != 50:
+        return 6
+    a %= 7
+    if a != 1:
+        return 7
+
+    return 0

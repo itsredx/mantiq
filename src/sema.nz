@@ -704,8 +704,21 @@ struct Sema:
         elif nt == NodeType.ForStmt:
             if node_left(node) != None to ptr[Node]:
                 self.declare_pass(node_left(node))
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
+            (deref self).current_scope = child_scope
+            (deref self).fn_scopes[node to usize] = child_scope
+
+            let var_name as String = node_name(node)
+            if var_name.len > 0 to usize:
+                let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
+                (deref child_scope).symbols[var_name] = sym
+
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
+
+            let self_ref_f as ptr[Sema] = self
+            (deref self_ref_f).current_scope = parent_scope
         elif nt == NodeType.WithStmt:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
@@ -829,7 +842,7 @@ struct Sema:
             if (n_len == 5 to usize and strncmp(n_cstr, "break" to cstr, 5 to usize) == 0) or (n_len == 8 to usize and strncmp(n_cstr, "continue" to cstr, 8 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "None" to cstr, 4 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "True" to cstr, 4 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "False" to cstr, 5 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "Empty" to cstr, 5 to usize) == 0):
                 return
             // Allow primitive types used in type intrinsics/casts
-            if (n_len == 3 to usize and (strncmp(n_cstr, "i32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "ptr" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i128" to cstr, 4 to usize) == 0)) or (n_len == 2 to usize and (strncmp(n_cstr, "i8" to cstr, 2 to usize) == 0 or strncmp(n_cstr, "u8" to cstr, 2 to usize) == 0)) or (n_len == 4 to usize and (strncmp(n_cstr, "bool" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "cstr" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "void" to cstr, 4 to usize) == 0)) or (n_len == 5 to usize and (strncmp(n_cstr, "usize" to cstr, 5 to usize) == 0 or strncmp(n_cstr, "isize" to cstr, 5 to usize) == 0)):
+            if (n_len == 3 to usize and (strncmp(n_cstr, "i32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "ptr" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "Any" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i128" to cstr, 4 to usize) == 0)) or (n_len == 2 to usize and (strncmp(n_cstr, "i8" to cstr, 2 to usize) == 0 or strncmp(n_cstr, "u8" to cstr, 2 to usize) == 0)) or (n_len == 4 to usize and (strncmp(n_cstr, "bool" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "cstr" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "void" to cstr, 4 to usize) == 0)) or (n_len == 5 to usize and (strncmp(n_cstr, "usize" to cstr, 5 to usize) == 0 or strncmp(n_cstr, "isize" to cstr, 5 to usize) == 0)):
                 return
             let resolved as ptr[Symbol] = self.lookup_symbol(name)
             if resolved == None to ptr[Symbol]:
@@ -863,6 +876,9 @@ struct Sema:
             elif strcmp(op, "=" to cstr) == 0:
                 // Skip resolving LHS of assignment (struct field name in named args / struct literals)
                 self.resolve_pass(node_right(node))
+            elif strcmp(op, "is" to cstr) == 0:
+                // RHS of 'is' is a type, not a variable
+                self.resolve_pass(node_left(node))
             else:
                 self.resolve_pass(node_left(node))
                 self.resolve_pass(node_right(node))
@@ -911,8 +927,14 @@ struct Sema:
         elif nt == NodeType.ForStmt:
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
-            if node_body(node) != None to ptr[Node]:
-                self.resolve_pass(node_body(node))
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            if (deref self).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
+                (deref self).current_scope = child_scope
+                if node_body(node) != None to ptr[Node]:
+                    self.resolve_pass(node_body(node))
+                let self_ref_f2 as ptr[Sema] = self
+                (deref self_ref_f2).current_scope = parent_scope
         elif nt == NodeType.MemberExpr:
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))

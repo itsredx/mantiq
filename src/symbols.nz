@@ -155,6 +155,7 @@ struct ForStmtData:
     public var left as ptr[Node]
     public var body as ptr[Node]
     public var is_async as bool
+    public var is_vectorized as bool
 
 struct MemberExprData:
     public var left as ptr[Node]
@@ -1053,6 +1054,25 @@ fn set_node_is_async(n as ptr[Node], is_async as bool):
     elif k == NodeType.ForStmt:
         let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
         (deref d).is_async = is_async
+
+// is_vectorized accessor (ForStmt):
+fn node_is_vectorized(n as ptr[Node]) as bool:
+    var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        r = (deref d).is_vectorized
+    return r
+
+fn set_node_is_vectorized(n as ptr[Node], is_vectorized as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ForStmt:
+        let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
+        (deref d).is_vectorized = is_vectorized
 
 // is_extern accessor (FunDecl):
 fn node_is_extern(n as ptr[Node]) as bool:
