@@ -42,6 +42,9 @@ TEST_FILES=(
     "src/tests/test_param_block.nz"
     "src/tests/test_extended_types.nz"
     "src/tests/test_import_tags_and_link.nz"
+    "src/tests/test_quantum_dce.nz"
+    "src/tests/test_macro_expansion.nz"
+    "src/tests/test_nll_borrowck.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

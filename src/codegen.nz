@@ -476,6 +476,10 @@ fn type_to_llvm(t as ptr[Type]) as String:
         return String.make("{ i8, ptr }" to cstr)
     if k == TypeKind.Result:
         return String.make("{ i8, ptr, ptr }" to cstr)
+    if k == TypeKind.QBit:
+        return String.make("i32" to cstr)
+    if k == TypeKind.QReg:
+        return String.make("{ ptr, i64, i64 }" to cstr)
     if k == TypeKind.Any:
         return String.make("{ ptr, ptr }" to cstr)
     if k == TypeKind.Struct:
@@ -1007,7 +1011,8 @@ struct LLVMCodegen:
         self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
         self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
-        self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32 }")
+        self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
+        self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
         self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
@@ -1176,6 +1181,14 @@ struct LLVMCodegen:
         self.register_field_idx("TypeChecker" to cstr, "inferred_return_type" to cstr, 2 to i32)
         self.register_field_idx("TypeChecker" to cstr, "current_struct_type" to cstr, 3 to i32)
 
+        self.register_field_idx("BorrowRecord" to cstr, "borrower_name" to cstr, 0 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "source_name" to cstr, 1 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "lifetime" to cstr, 2 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "is_mut" to cstr, 3 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "borrow_span" to cstr, 4 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "last_use_row" to cstr, 5 to i32)
+        self.register_field_idx("BorrowRecord" to cstr, "is_active" to cstr, 6 to i32)
+
         self.register_field_idx("BorrowChecker" to cstr, "errors" to cstr, 0 to i32)
         self.register_field_idx("BorrowChecker" to cstr, "current_file" to cstr, 1 to i32)
         self.register_field_idx("BorrowChecker" to cstr, "symbol_states" to cstr, 2 to i32)
@@ -1183,6 +1196,11 @@ struct LLVMCodegen:
         self.register_field_idx("BorrowChecker" to cstr, "scopes" to cstr, 4 to i32)
         self.register_field_idx("BorrowChecker" to cstr, "sema" to cstr, 5 to i32)
         self.register_field_idx("BorrowChecker" to cstr, "scope_depth" to cstr, 6 to i32)
+        self.register_field_idx("BorrowChecker" to cstr, "active_borrows" to cstr, 7 to i32)
+        self.register_field_idx("BorrowChecker" to cstr, "var_decl_depth" to cstr, 8 to i32)
+        self.register_field_idx("BorrowChecker" to cstr, "var_source_map" to cstr, 9 to i32)
+        self.register_field_idx("BorrowChecker" to cstr, "var_last_use" to cstr, 10 to i32)
+        self.register_field_idx("BorrowChecker" to cstr, "current_row" to cstr, 11 to i32)
 
         self.register_field_idx("VarInfo" to cstr, "state" to cstr, 0 to i32)
         self.register_field_idx("VarInfo" to cstr, "var_type" to cstr, 1 to i32)
@@ -1311,6 +1329,13 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i8 @__mantiq_dict_remove(ptr, ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_dict_clear(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_dict_keys(ptr, ptr, i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_qbit(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_h(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_measure(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_quantum_cnot(i32, i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_x(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_y(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_z(i32)\n")
         append_cstr(ref (deref self).type_out, "%MantiqDict = type { ptr, ptr, ptr, ptr, i32, i32, i32, i32 }\n")
         self.emit_builtin_struct_types()
         self.emit_node(root)
@@ -2348,6 +2373,19 @@ struct LLVMCodegen:
             return self.emit_try(node)
         elif nt == NodeType.ClosureExpr: // ClosureExpr
             return self.emit_closure_expr(node)
+        elif nt == NodeType.BlockStmt:
+            let decls as List[ptr[Node]] = node_declarations(node)
+            let count as i64 = decls.length()
+            if count == 0 to i64:
+                return "void" to ptr[u8]
+            var i as i64 = 0 to i64
+            while i < count - 1 to i64:
+                self.emit_node(decls[i])
+                i = i + 1 to i64
+            let last_stmt as ptr[Node] = decls[count - 1 to i64]
+            if node_kind(last_stmt) == NodeType.ReturnStmt:
+                return self.emit_expr(node_body(last_stmt))
+            return self.emit_expr(last_stmt)
         elif nt == NodeType.BooleanLiteral: // BooleanLiteral
             if node_val(node) > 0.5:
                 return "1" to ptr[u8]
@@ -2521,6 +2559,31 @@ struct LLVMCodegen:
                     elif strcmp(f_cstr, "sema" to cstr) == 0:
                         field_idx = 5 to i32
                     elif strcmp(f_cstr, "scope_depth" to cstr) == 0:
+                        field_idx = 6 to i32
+                    elif strcmp(f_cstr, "active_borrows" to cstr) == 0:
+                        field_idx = 7 to i32
+                    elif strcmp(f_cstr, "var_decl_depth" to cstr) == 0:
+                        field_idx = 8 to i32
+                    elif strcmp(f_cstr, "var_source_map" to cstr) == 0:
+                        field_idx = 9 to i32
+                    elif strcmp(f_cstr, "var_last_use" to cstr) == 0:
+                        field_idx = 10 to i32
+                    elif strcmp(f_cstr, "current_row" to cstr) == 0:
+                        field_idx = 11 to i32
+                elif strcmp(s_cstr, "BorrowRecord" to cstr) == 0:
+                    if strcmp(f_cstr, "borrower_name" to cstr) == 0:
+                        field_idx = 0 to i32
+                    elif strcmp(f_cstr, "source_name" to cstr) == 0:
+                        field_idx = 1 to i32
+                    elif strcmp(f_cstr, "lifetime" to cstr) == 0:
+                        field_idx = 2 to i32
+                    elif strcmp(f_cstr, "is_mut" to cstr) == 0:
+                        field_idx = 3 to i32
+                    elif strcmp(f_cstr, "borrow_span" to cstr) == 0:
+                        field_idx = 4 to i32
+                    elif strcmp(f_cstr, "last_use_row" to cstr) == 0:
+                        field_idx = 5 to i32
+                    elif strcmp(f_cstr, "is_active" to cstr) == 0:
                         field_idx = 6 to i32
                 elif strcmp(s_cstr, "VarInfo" to cstr) == 0:
                     if strcmp(f_cstr, "state" to cstr) == 0:
@@ -4341,6 +4404,93 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, dr_val to cstr)
                         append_cstr(ref (deref self).main_out, ")\n")
                     return "null" to ptr[u8]
+                if strcmp(c_name.data to cstr, "qbit" to cstr) == 0:
+                    var q_init as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_init = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_qbit(i32 ")
+                    append_cstr(ref (deref self).main_out, q_init to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
+                if strcmp(c_name.data to cstr, "H" to cstr) == 0:
+                    var q_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_arg = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_h(i32 ")
+                    append_cstr(ref (deref self).main_out, q_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
+                if strcmp(c_name.data to cstr, "measure" to cstr) == 0:
+                    var q_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_arg = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_measure(i32 ")
+                    append_cstr(ref (deref self).main_out, q_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
+                if strcmp(c_name.data to cstr, "CNOT" to cstr) == 0:
+                    var c_arg as ptr[u8] = "0" to ptr[u8]
+                    var t_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let c_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        c_arg = self.emit_expr(c_node)
+                    if args.length() > 1 to i64:
+                        let t_node as ptr[Node] = get_node_decl(ref args, 1 to i64)
+                        t_arg = self.emit_expr(t_node)
+                    append_cstr(ref (deref self).main_out, "  call void @mantiq_quantum_cnot(i32 ")
+                    append_cstr(ref (deref self).main_out, c_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 ")
+                    append_cstr(ref (deref self).main_out, t_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return "null" to ptr[u8]
+                if strcmp(c_name.data to cstr, "X" to cstr) == 0:
+                    var q_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_arg = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_x(i32 ")
+                    append_cstr(ref (deref self).main_out, q_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
+                if strcmp(c_name.data to cstr, "Y" to cstr) == 0:
+                    var q_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_arg = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_y(i32 ")
+                    append_cstr(ref (deref self).main_out, q_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
+                if strcmp(c_name.data to cstr, "Z" to cstr) == 0:
+                    var q_arg as ptr[u8] = "0" to ptr[u8]
+                    if args.length() > 0 to i64:
+                        let q_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                        q_arg = self.emit_expr(q_node)
+                    let reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_quantum_z(i32 ")
+                    append_cstr(ref (deref self).main_out, q_arg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return reg
                 if strcmp(c_name.data to cstr, "print" to cstr) == 0:
                     var pr_i as i64 = 0 to i64
                     while pr_i < args.length():
@@ -4845,7 +4995,7 @@ struct LLVMCodegen:
                 let f_nm as String = node_name(arg_node)
                 if f_nm.data != None:
                     let fc as cstr = f_nm.data to cstr
-                    if strcmp(fc, "error_count" to cstr) == 0 or strcmp(fc, "warning_count" to cstr) == 0 or strcmp(fc, "panic_count" to cstr) == 0 or strcmp(fc, "kind" to cstr) == 0 or strcmp(fc, "scope_depth" to cstr) == 0:
+                    if strcmp(fc, "error_count" to cstr) == 0 or strcmp(fc, "warning_count" to cstr) == 0 or strcmp(fc, "panic_count" to cstr) == 0 or strcmp(fc, "kind" to cstr) == 0 or strcmp(fc, "scope_depth" to cstr) == 0 or strcmp(fc, "start_byte" to cstr) == 0 or strcmp(fc, "start_row" to cstr) == 0 or strcmp(fc, "start_col" to cstr) == 0 or strcmp(fc, "end_byte" to cstr) == 0 or strcmp(fc, "end_row" to cstr) == 0 or strcmp(fc, "end_col" to cstr) == 0 or strcmp(fc, "row" to cstr) == 0 or strcmp(fc, "col" to cstr) == 0 or strcmp(fc, "line" to cstr) == 0:
                         arg_type = String.make("i32" to cstr)
                     elif strcmp(fc, "use_color" to cstr) == 0 or strcmp(fc, "is_ref" to cstr) == 0 or strcmp(fc, "is_mut" to cstr) == 0:
                         arg_type = String.make("i1" to cstr)
@@ -6443,7 +6593,7 @@ struct LLVMCodegen:
 
     public fn emit_with(self as ptr[LLVMCodegen], node as ptr[Node]):
         extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
-        extern fn snprintf(str as ptr[u8], size as usize, format as cstr, val as i32) as i32
+        extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
         extern fn free(p as ptr)
         let res_expr as ptr[Node] = node_left(node)
         let body as ptr[Node] = node_body(node)
