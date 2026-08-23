@@ -5,7 +5,7 @@ from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
 import symbols
-from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target
+from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_imported_symbols
 import types
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type
 import sema
@@ -45,6 +45,27 @@ struct TypeChecker:
         (deref self).current_function_return = Empty
         (deref self).inferred_return_type = None to ptr[Type]
         (deref self).current_struct_type = None to ptr[Type]
+
+    public fn is_subclass_of(self as ptr[TypeChecker], sub_cls as String, base_cls as String) as bool:
+        if sub_cls.len == 0 to usize or base_cls.len == 0 to usize:
+            return False
+        if strcmp(sub_cls.data to cstr, base_cls.data to cstr) == 0:
+            return True
+        var cur as String = sub_cls
+        while cur.len > 0 to usize:
+            let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(cur)
+            if sym == None to ptr[Symbol] or (deref sym).decl_node == None to ptr[Node]:
+                return False
+            let d_node as ptr[Node] = (deref sym).decl_node
+            if node_kind(d_node) != NodeType.ClassDecl:
+                return False
+            let parent as String = node_target(d_node)
+            if parent.len == 0 to usize:
+                return False
+            if strcmp(parent.data to cstr, base_cls.data to cstr) == 0:
+                return True
+            cur = parent
+        return False
 
     public fn resolve_base_type_annotation(self as ptr[TypeChecker], annot as ptr[TypeAnnotation]) as ptr[Type]:
         let name_data as ptr[u8] = (deref annot).name.data
@@ -1277,51 +1298,93 @@ struct TypeChecker:
                         struct_name = String(data = base_alloc, len = br_pos_i, capacity = br_pos_i + 1 to usize)
                     let struct_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(struct_name)
                     if struct_sym != None to ptr[Symbol]:
-                        if (deref struct_sym).decl_node != None to ptr[Node]:
-                            let decl as ptr[Node] = (deref struct_sym).decl_node
-                            if node_body(decl) != None to ptr[Node]:
-                                let body as ptr[Node] = node_body(decl)
-                                let prop_name as String = node_name(node)
-                                if node_kind(body) == NodeType.BlockStmt:
-                                    let body_decls as List[ptr[Node]] = node_declarations(body)
-                                    let d_count as i64 = body_decls.length()
-                                    var d_i as i64 = 0 to i64
-                                    while d_i < d_count:
-                                        let field_decl as ptr[Node] = body_decls[d_i]
-                                        if node_kind(field_decl) == NodeType.VarDecl and strcmp(node_name(field_decl).data to cstr, prop_name.data to cstr) == 0:
-                                            if node_inferred_type(field_decl) != None to ptr[Type]:
-                                                ret_type = node_inferred_type(field_decl)
-                                            else:
-                                                let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(field_decl)
-                                                if type_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-                                                    if (deref type_annots).length() > 0 to i64:
-                                                        let f_opt_val as Option[ptr[TypeAnnotation]] = (deref type_annots)[0 to i64]
-                                                        let f_opt as ptr[u8] = (ref f_opt_val) to ptr[u8]
-                                                        if option_has_value(f_opt):
-                                                            let val_p as ptr[u8] = option_value(f_opt)
-                                                            let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
-                                                            if annot_val != None to ptr[TypeAnnotation]:
-                                                                ret_type = self.resolve_type_annotation(annot_val)
-                                                                set_node_inferred_type(field_decl, ret_type)
-                                            break
-                                        d_i = d_i + 1 to i64
-                                    if ret_type == None to ptr[Type] or (deref ret_type).kind == TypeKind.Void:
-                                        var m_i as i64 = 0 to i64
-                                        while m_i < d_count:
-                                            let m_decl as ptr[Node] = body_decls[m_i]
-                                            if node_kind(m_decl) == NodeType.FunDecl and strcmp(node_name(m_decl).data to cstr, prop_name.data to cstr) == 0:
-                                                let m_type as ptr[Type] = make_type(TypeKind.Function)
-                                                let m_ret_annot as ptr[TypeAnnotation] = node_return_type_annot(m_decl)
-                                                if m_ret_annot != None to ptr[TypeAnnotation]:
-                                                    if (deref m_ret_annot).name.len > 0 to usize:
-                                                        (deref m_type).return_type = self.resolve_type_annotation(m_ret_annot)
+                        var cur_lookup_name as String = struct_name
+                        var found_member as bool = False
+                        while cur_lookup_name.len > 0 to usize and not found_member:
+                            let sym_lookup as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(cur_lookup_name)
+                            if sym_lookup != None to ptr[Symbol] and (deref sym_lookup).decl_node != None to ptr[Node]:
+                                let decl as ptr[Node] = (deref sym_lookup).decl_node
+                                if node_body(decl) != None to ptr[Node]:
+                                    let body as ptr[Node] = node_body(decl)
+                                    let prop_name as String = node_name(node)
+                                    if node_kind(body) == NodeType.BlockStmt:
+                                        let body_decls as List[ptr[Node]] = node_declarations(body)
+                                        let d_count as i64 = body_decls.length()
+                                        var d_i as i64 = 0 to i64
+                                        while d_i < d_count:
+                                            let field_decl as ptr[Node] = body_decls[d_i]
+                                            if node_kind(field_decl) == NodeType.VarDecl and strcmp(node_name(field_decl).data to cstr, prop_name.data to cstr) == 0:
+                                                found_member = True
+                                                if node_inferred_type(field_decl) != None to ptr[Type]:
+                                                    ret_type = node_inferred_type(field_decl)
+                                                else:
+                                                    let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(field_decl)
+                                                    if type_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                                                        if (deref type_annots).length() > 0 to i64:
+                                                            let f_opt_val as Option[ptr[TypeAnnotation]] = (deref type_annots)[0 to i64]
+                                                            let f_opt as ptr[u8] = (ref f_opt_val) to ptr[u8]
+                                                            if option_has_value(f_opt):
+                                                                let val_p as ptr[u8] = option_value(f_opt)
+                                                                let annot_val as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
+                                                                if annot_val != None to ptr[TypeAnnotation]:
+                                                                    ret_type = self.resolve_type_annotation(annot_val)
+                                                                    set_node_inferred_type(field_decl, ret_type)
+                                                
+                                                // Access modifier validation
+                                                let acc as String = node_access_modifier(field_decl)
+                                                var caller_struct_name as String = String.make("" to cstr)
+                                                if (deref self).current_struct_type != None to ptr[Type]:
+                                                    caller_struct_name = (deref (deref self).current_struct_type).name
+                                                if strcmp(acc.data to cstr, "private" to cstr) == 0:
+                                                    if strcmp(caller_struct_name.data to cstr, cur_lookup_name.data to cstr) != 0:
+                                                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0320" to cstr, String.make("cannot access private member of class" to cstr), node)
+                                                        if d != None to ptr[Diagnostic]:
+                                                            d.set_explanation(String.make("Private members can only be accessed from within the class that defines them." to cstr))
+                                                elif strcmp(acc.data to cstr, "protected" to cstr) == 0:
+                                                    if strcmp(caller_struct_name.data to cstr, cur_lookup_name.data to cstr) != 0 and not self.is_subclass_of(caller_struct_name, cur_lookup_name):
+                                                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0319" to cstr, String.make("cannot access protected member of class" to cstr), node)
+                                                        if d != None to ptr[Diagnostic]:
+                                                            d.set_explanation(String.make("Protected members can only be accessed from within the defining class or its subclasses." to cstr))
+                                                break
+                                            d_i = d_i + 1 to i64
+
+                                        if not found_member:
+                                            var m_i as i64 = 0 to i64
+                                            while m_i < d_count:
+                                                let m_decl as ptr[Node] = body_decls[m_i]
+                                                if node_kind(m_decl) == NodeType.FunDecl and strcmp(node_name(m_decl).data to cstr, prop_name.data to cstr) == 0:
+                                                    found_member = True
+                                                    let m_type as ptr[Type] = make_type(TypeKind.Function)
+                                                    let m_ret_annot as ptr[TypeAnnotation] = node_return_type_annot(m_decl)
+                                                    if m_ret_annot != None to ptr[TypeAnnotation]:
+                                                        if (deref m_ret_annot).name.len > 0 to usize:
+                                                            (deref m_type).return_type = self.resolve_type_annotation(m_ret_annot)
+                                                        else:
+                                                            (deref m_type).return_type = make_type(TypeKind.Void)
                                                     else:
                                                         (deref m_type).return_type = make_type(TypeKind.Void)
-                                                else:
-                                                    (deref m_type).return_type = make_type(TypeKind.Void)
-                                                ret_type = m_type
-                                                break
-                                            m_i = m_i + 1 to i64
+                                                    ret_type = m_type
+
+                                                    // Access modifier validation
+                                                    let acc as String = node_access_modifier(m_decl)
+                                                    var caller_struct_name as String = String.make("" to cstr)
+                                                    if (deref self).current_struct_type != None to ptr[Type]:
+                                                        caller_struct_name = (deref (deref self).current_struct_type).name
+                                                    if strcmp(acc.data to cstr, "private" to cstr) == 0:
+                                                        if strcmp(caller_struct_name.data to cstr, cur_lookup_name.data to cstr) != 0:
+                                                            let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0320" to cstr, String.make("cannot access private member of class" to cstr), node)
+                                                            if d != None to ptr[Diagnostic]:
+                                                                d.set_explanation(String.make("Private members can only be accessed from within the class that defines them." to cstr))
+                                                    elif strcmp(acc.data to cstr, "protected" to cstr) == 0:
+                                                        if strcmp(caller_struct_name.data to cstr, cur_lookup_name.data to cstr) != 0 and not self.is_subclass_of(caller_struct_name, cur_lookup_name):
+                                                            let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0319" to cstr, String.make("cannot access protected member of class" to cstr), node)
+                                                            if d != None to ptr[Diagnostic]:
+                                                                d.set_explanation(String.make("Protected members can only be accessed from within the defining class or its subclasses." to cstr))
+                                                    break
+                                                m_i = m_i + 1 to i64
+                                cur_lookup_name = node_target(decl)
+                            else:
+                                cur_lookup_name = String.make("" to cstr)
                     if ret_type == None to ptr[Type] or (deref ret_type).kind == TypeKind.Void:
                         ret_type = make_type(TypeKind.Any)
                 else:
@@ -1577,7 +1640,19 @@ struct TypeChecker:
 
         elif nt == NodeType.ClassDecl:
             let class_name as String = node_name(node)
+            let base_name as String = node_target(node)
             ret_type = make_class_type(class_name)
+
+            // 1. Check if base class is marked @final
+            if base_name.len > 0 to usize:
+                let base_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(base_name)
+                if base_sym != None to ptr[Symbol] and (deref base_sym).decl_node != None to ptr[Node]:
+                    let base_decl as ptr[Node] = (deref base_sym).decl_node
+                    if node_is_final(base_decl):
+                        let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0317" to cstr, String.make("cannot inherit from final class" to cstr), node)
+                        if d != None to ptr[Diagnostic]:
+                            d.set_explanation(String.make("A class marked with @final cannot be subclassed." to cstr))
+
             if node_body(node) != None to ptr[Node]:
                 let sema_cd as ptr[Sema] = (deref self).sema
                 let saved_scope_cd as ptr[Scope] = (deref sema_cd).current_scope
@@ -1592,6 +1667,80 @@ struct TypeChecker:
                 let saved_struct_t as ptr[Type] = (deref self).current_struct_type
                 (deref self).current_struct_type = ret_type
                 let dummy_cd as ptr[Type] = self.typecheck_node(node_body(node))
+
+                // 2. Validate @override and @final on methods of this class
+                let c_body as ptr[Node] = node_body(node)
+                if c_body != None to ptr[Node] and node_kind(c_body) == NodeType.BlockStmt:
+                    let methods_list as List[ptr[Node]] = node_declarations(c_body)
+                    let m_count as i64 = methods_list.length()
+                    var mi as i64 = 0 to i64
+                    while mi < m_count:
+                        let m_item as ptr[Node] = methods_list[mi]
+                        if node_kind(m_item) == NodeType.FunDecl:
+                            let m_name as String = node_name(m_item)
+                            let is_ov as bool = node_is_override(m_item)
+                            
+                            // Check if a method with m_name exists in base class or interfaces
+                            var found_in_base as bool = False
+                            var base_m_final as bool = False
+                            
+                            if base_name.len > 0 to usize:
+                                var cur_b as String = base_name
+                                while cur_b.len > 0 to usize and not found_in_base:
+                                    let b_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(cur_b)
+                                    if b_sym != None to ptr[Symbol] and (deref b_sym).decl_node != None to ptr[Node]:
+                                        let b_decl as ptr[Node] = (deref b_sym).decl_node
+                                        let b_body as ptr[Node] = node_body(b_decl)
+                                        if b_body != None to ptr[Node] and node_kind(b_body) == NodeType.BlockStmt:
+                                            let b_decls as List[ptr[Node]] = node_declarations(b_body)
+                                            let bd_count as i64 = b_decls.length()
+                                            var bdi as i64 = 0 to i64
+                                            while bdi < bd_count:
+                                                let bm as ptr[Node] = b_decls[bdi]
+                                                if node_kind(bm) == NodeType.FunDecl and strcmp(node_name(bm).data to cstr, m_name.data to cstr) == 0:
+                                                    found_in_base = True
+                                                    if node_is_final(bm):
+                                                        base_m_final = True
+                                                    break
+                                                bdi = bdi + 1 to i64
+                                        cur_b = node_target(b_decl)
+                                    else:
+                                        cur_b = String.make("" to cstr)
+
+                            // Also check implemented interfaces
+                            let iface_list as List[String] = node_imported_symbols(node)
+                            let iface_count as i64 = iface_list.length()
+                            var if_i as i64 = 0 to i64
+                            while if_i < iface_count and not found_in_base:
+                                let if_name as String = iface_list[if_i]
+                                let if_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(if_name)
+                                if if_sym != None to ptr[Symbol] and (deref if_sym).decl_node != None to ptr[Node]:
+                                    let if_decl as ptr[Node] = (deref if_sym).decl_node
+                                    let if_body as ptr[Node] = node_body(if_decl)
+                                    if if_body != None to ptr[Node] and node_kind(if_body) == NodeType.BlockStmt:
+                                        let if_decls as List[ptr[Node]] = node_declarations(if_body)
+                                        let if_d_cnt as i64 = if_decls.length()
+                                        var if_di as i64 = 0 to i64
+                                        while if_di < if_d_cnt:
+                                            let if_m as ptr[Node] = if_decls[if_di]
+                                            if node_kind(if_m) == NodeType.FunDecl and strcmp(node_name(if_m).data to cstr, m_name.data to cstr) == 0:
+                                                found_in_base = True
+                                                break
+                                            if_di = if_di + 1 to i64
+                                if_i = if_i + 1 to i64
+
+                            if is_ov and not found_in_base:
+                                let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0316" to cstr, String.make("method marked @override does not override any base class or interface method" to cstr), m_item)
+                                if d != None to ptr[Diagnostic]:
+                                    d.set_explanation(String.make("Ensure the method name matches a method in the base class or implemented interfaces." to cstr))
+                            
+                            if found_in_base and base_m_final:
+                                let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0318" to cstr, String.make("cannot override final method of base class" to cstr), m_item)
+                                if d != None to ptr[Diagnostic]:
+                                    d.set_explanation(String.make("A method marked with @final cannot be overridden in subclasses." to cstr))
+
+                        mi = mi + 1 to i64
+
                 (deref self).current_struct_type = saved_struct_t
                 (deref sema_cd).current_scope = saved_scope_cd
 

@@ -1021,10 +1021,10 @@ struct LLVMCodegen:
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
-        self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr }")
-        self.register_builtin_struct("VarDeclData", "{ { ptr, i64, i64 }, ptr, i8, ptr }")
+        self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr, i8, i8, { ptr, i64, i64 } }")
+        self.register_builtin_struct("VarDeclData", "{ { ptr, i64, i64 }, ptr, i8, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr } }")
-        self.register_builtin_struct("ClassDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr }")
+        self.register_builtin_struct("ClassDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, { ptr, i64, i64 } }")
         self.register_builtin_struct("InterfaceDeclData", "{ { ptr, i64, i64 }, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("BinaryExprData", "{ { ptr, i64, i64 }, ptr, ptr }")
         self.register_builtin_struct("IdentifierData", "{ { ptr, i64, i64 } }")
@@ -1052,7 +1052,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("BooleanLiteralData", "{ double }")
         self.register_builtin_struct("AwaitExprData", "{ ptr }")
         self.register_builtin_struct("ClosureExprData", "{ { ptr, i64, i64 }, ptr, ptr }")
-        self.register_builtin_struct("StructDeclData", "{ { ptr, i64, i64 }, ptr }")
+        self.register_builtin_struct("StructDeclData", "{ { ptr, i64, i64 }, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("EnumDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("UnionDeclData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("FieldDeclData", "{ { ptr, i64, i64 }, ptr }")
@@ -1088,10 +1088,14 @@ struct LLVMCodegen:
         self.register_field_idx("FunDeclData" to cstr, "is_variadic" to cstr, 5 to i32)
         self.register_field_idx("FunDeclData" to cstr, "return_type_annot" to cstr, 6 to i32)
         self.register_field_idx("FunDeclData" to cstr, "type_annots" to cstr, 7 to i32)
+        self.register_field_idx("FunDeclData" to cstr, "is_override" to cstr, 8 to i32)
+        self.register_field_idx("FunDeclData" to cstr, "is_final" to cstr, 9 to i32)
+        self.register_field_idx("FunDeclData" to cstr, "access_modifier" to cstr, 10 to i32)
         self.register_field_idx("VarDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("VarDeclData" to cstr, "left" to cstr, 1 to i32)
         self.register_field_idx("VarDeclData" to cstr, "is_mut" to cstr, 2 to i32)
         self.register_field_idx("VarDeclData" to cstr, "type_annots" to cstr, 3 to i32)
+        self.register_field_idx("VarDeclData" to cstr, "access_modifier" to cstr, 4 to i32)
         self.register_field_idx("IfStmtData" to cstr, "cond" to cstr, 0 to i32)
         self.register_field_idx("IfStmtData" to cstr, "then_branch" to cstr, 1 to i32)
         self.register_field_idx("IfStmtData" to cstr, "else_branch" to cstr, 2 to i32)
@@ -1099,6 +1103,8 @@ struct LLVMCodegen:
         self.register_field_idx("ClassDeclData" to cstr, "target" to cstr, 1 to i32)
         self.register_field_idx("ClassDeclData" to cstr, "imported_symbols" to cstr, 2 to i32)
         self.register_field_idx("ClassDeclData" to cstr, "body" to cstr, 3 to i32)
+        self.register_field_idx("ClassDeclData" to cstr, "is_final" to cstr, 4 to i32)
+        self.register_field_idx("ClassDeclData" to cstr, "access_modifier" to cstr, 5 to i32)
         self.register_field_idx("InterfaceDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("InterfaceDeclData" to cstr, "body" to cstr, 1 to i32)
         self.register_field_idx("InterfaceDeclData" to cstr, "imported_symbols" to cstr, 2 to i32)
@@ -1161,6 +1167,7 @@ struct LLVMCodegen:
         self.register_field_idx("ClosureExprData" to cstr, "type_annots" to cstr, 2 to i32)
         self.register_field_idx("StructDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("StructDeclData" to cstr, "body" to cstr, 1 to i32)
+        self.register_field_idx("StructDeclData" to cstr, "access_modifier" to cstr, 2 to i32)
         self.register_field_idx("EnumDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("EnumDeclData" to cstr, "declarations" to cstr, 1 to i32)
         self.register_field_idx("UnionDeclData" to cstr, "name" to cstr, 0 to i32)
@@ -2788,6 +2795,12 @@ struct LLVMCodegen:
                         field_idx = 6 to i32
                     elif strcmp(f_cstr, "type_annots" to cstr) == 0:
                         field_idx = 7 to i32
+                    elif strcmp(f_cstr, "is_override" to cstr) == 0:
+                        field_idx = 8 to i32
+                    elif strcmp(f_cstr, "is_final" to cstr) == 0:
+                        field_idx = 9 to i32
+                    elif strcmp(f_cstr, "access_modifier" to cstr) == 0:
+                        field_idx = 10 to i32
                 elif strcmp(s_cstr, "VarDeclData" to cstr) == 0:
                     if strcmp(f_cstr, "name" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2797,6 +2810,21 @@ struct LLVMCodegen:
                         field_idx = 2 to i32
                     elif strcmp(f_cstr, "type_annots" to cstr) == 0:
                         field_idx = 3 to i32
+                    elif strcmp(f_cstr, "access_modifier" to cstr) == 0:
+                        field_idx = 4 to i32
+                elif strcmp(s_cstr, "ClassDeclData" to cstr) == 0:
+                    if strcmp(f_cstr, "name" to cstr) == 0:
+                        field_idx = 0 to i32
+                    elif strcmp(f_cstr, "target" to cstr) == 0:
+                        field_idx = 1 to i32
+                    elif strcmp(f_cstr, "imported_symbols" to cstr) == 0:
+                        field_idx = 2 to i32
+                    elif strcmp(f_cstr, "body" to cstr) == 0:
+                        field_idx = 3 to i32
+                    elif strcmp(f_cstr, "is_final" to cstr) == 0:
+                        field_idx = 4 to i32
+                    elif strcmp(f_cstr, "access_modifier" to cstr) == 0:
+                        field_idx = 5 to i32
                 elif strcmp(s_cstr, "BinaryExprData" to cstr) == 0:
                     if strcmp(f_cstr, "op" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2994,6 +3022,8 @@ struct LLVMCodegen:
                         field_idx = 0 to i32
                     elif strcmp(f_cstr, "body" to cstr) == 0:
                         field_idx = 1 to i32
+                    elif strcmp(f_cstr, "access_modifier" to cstr) == 0:
+                        field_idx = 2 to i32
                 elif strcmp(s_cstr, "UnionDeclData" to cstr) == 0:
                     if strcmp(f_cstr, "name" to cstr) == 0:
                         field_idx = 0 to i32

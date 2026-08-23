@@ -46,6 +46,7 @@ TEST_FILES=(
     "src/tests/test_macro_expansion.nz"
     "src/tests/test_nll_borrowck.nz"
     "src/tests/test_interfaces_and_classes.mq"
+    "src/tests/test_oop_override_final_access.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

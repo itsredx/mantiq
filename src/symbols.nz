@@ -100,12 +100,16 @@ struct FunDeclData:
     public var is_variadic as bool
     public var return_type_annot as ptr[TypeAnnotation]
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+    public var is_override as bool
+    public var is_final as bool
+    public var access_modifier as String
 
 struct VarDeclData:
     public var name as String
     public var left as ptr[Node]
     public var is_mut as bool
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+    public var access_modifier as String
 
 struct IfStmtData:
     public var cond as ptr[Node]
@@ -117,6 +121,8 @@ struct ClassDeclData:
     public var target as String
     public var imported_symbols as List[String]
     public var body as ptr[Node]
+    public var is_final as bool
+    public var access_modifier as String
 
 struct InterfaceDeclData:
     public var name as String
@@ -235,6 +241,7 @@ struct ClosureExprData:
 struct StructDeclData:
     public var name as String
     public var body as ptr[Node]
+    public var access_modifier as String
 
 struct EnumDeclData:
     public var name as String
@@ -1411,6 +1418,90 @@ fn set_node_import_kind(n as ptr[Node], kind as ImportKind):
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).kind = kind
+
+// is_override accessor (FunDecl):
+fn node_is_override(n as ptr[Node]) as bool:
+    var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_override
+    return r
+
+fn set_node_is_override(n as ptr[Node], is_override as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_override = is_override
+
+// is_final accessor (FunDecl, ClassDecl):
+fn node_is_final(n as ptr[Node]) as bool:
+    var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_final
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        r = (deref d).is_final
+    return r
+
+fn set_node_is_final(n as ptr[Node], is_final as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_final = is_final
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).is_final = is_final
+
+// access_modifier accessor (FunDecl, VarDecl, ClassDecl, StructDecl):
+fn node_access_modifier(n as ptr[Node]) as String:
+    var r as String = String.make("public" to cstr)
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        if (deref d).access_modifier.len > 0 to usize:
+            r = (deref d).access_modifier
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        if (deref d).access_modifier.len > 0 to usize:
+            r = (deref d).access_modifier
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        if (deref d).access_modifier.len > 0 to usize:
+            r = (deref d).access_modifier
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        if (deref d).access_modifier.len > 0 to usize:
+            r = (deref d).access_modifier
+    return r
+
+fn set_node_access_modifier(n as ptr[Node], access_modifier as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).access_modifier = access_modifier
+    elif k == NodeType.VarDecl:
+        let d as ptr[VarDeclData] = (deref n).data to ptr[VarDeclData]
+        (deref d).access_modifier = access_modifier
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).access_modifier = access_modifier
+    elif k == NodeType.StructDecl:
+        let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
+        (deref d).access_modifier = access_modifier
+
 
 // ── SymbolKind ─────────────────────────────────────────────────────────
 enum SymbolKind:

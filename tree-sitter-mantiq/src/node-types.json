@@ -3221,6 +3221,10 @@
     "named": false
   },
   {
+    "type": "protected",
+    "named": false
+  },
+  {
     "type": "public",
     "named": false
   },

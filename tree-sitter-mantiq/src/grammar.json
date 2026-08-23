@@ -448,6 +448,10 @@
         {
           "type": "STRING",
           "value": "private"
+        },
+        {
+          "type": "STRING",
+          "value": "protected"
         }
       ]
     },

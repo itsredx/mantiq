@@ -4,12 +4,13 @@ from std.string import String
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
 from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn strtod(str as cstr, endptr as ptr) as f64
 extern fn printf(format as cstr, ...) as i32
 extern fn fflush(f as ptr) as i32
@@ -887,6 +888,7 @@ struct Lowerer:
         var left as ptr[Node] = None to ptr[Node]
         var found_equal as bool = False
         var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+        var access_mod as String = String.make("public" to cstr)
         
         let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
@@ -900,7 +902,11 @@ struct Lowerer:
             let child_kind as cstr = ts_node_type_ptr(ref child)
             if ts_node_is_named_ptr(ref child):
                 let child_kind_str as cstr = ts_node_type_ptr(ref child)
-                if strcmp(child_kind_str, "typed_var" to cstr) == 0:
+                if strcmp(child_kind_str, "access_modifier" to cstr) == 0:
+                    let a_str as ptr[String] = self.slice_string_from_node(ref child)
+                    access_mod = deref a_str
+                    drop(a_str to ptr)
+                elif strcmp(child_kind_str, "typed_var" to cstr) == 0:
                     let tv_count as u32 = ts_node_child_count_ptr(ref child)
                     var j as u32 = 0 to u32
                     while j < tv_count:
@@ -943,6 +949,7 @@ struct Lowerer:
         (deref data).left = left
         (deref data).is_mut = False
         (deref data).type_annots = annots_list_ptr
+        (deref data).access_modifier = access_mod
         (deref n).data = data to ptr[u8]
         return n
 
@@ -1449,6 +1456,10 @@ struct Lowerer:
                 if src_buf[prev_b - 6] == 101 to u8 and src_buf[prev_b - 5] == 120 to u8 and src_buf[prev_b - 4] == 116 to u8 and src_buf[prev_b - 3] == 101 to u8 and src_buf[prev_b - 2] == 114 to u8 and src_buf[prev_b - 1] == 110 to u8:
                     is_extern_fn = True
 
+        var is_override as bool = False
+        var is_final_fn as bool = False
+        var access_mod as String = String.make("public" to cstr)
+
         var nf_node as TSNode = deref ts_node
         let kind as cstr = ts_node_type_ptr(ts_node)
         if strcmp(kind, "fun_decl" to cstr) == 0 or strcmp(kind, "function_definition" to cstr) == 0 or strcmp(kind, "named_function" to cstr) == 0:
@@ -1462,12 +1473,24 @@ struct Lowerer:
                     nf_node = child
                 elif strcmp(c_type, "extern" to cstr) == 0:
                     is_extern_fn = True
+                elif strcmp(c_type, "decorator" to cstr) == 0:
+                    let d_str as ptr[String] = self.slice_string_from_node(ref child)
+                    if strstr((deref d_str).data to cstr, "override" to cstr) != None to cstr:
+                        is_override = True
+                    if strstr((deref d_str).data to cstr, "final" to cstr) != None to cstr:
+                        is_final_fn = True
+                    drop(d_str to ptr)
                 elif strcmp(c_type, "fun_modifier" to cstr) == 0:
-                    let m_start as usize = ts_node_start_byte_ptr(ref child) to usize
-                    let m_end as usize = ts_node_end_byte_ptr(ref child) to usize
-                    if m_end - m_start == 6 and src_buf != None to ptr[u8]:
-                        if src_buf[m_start] == 101 to u8 and src_buf[m_start + 1 to usize] == 120 to u8 and src_buf[m_start + 2 to usize] == 116 to u8 and src_buf[m_start + 3 to usize] == 101 to u8 and src_buf[m_start + 4 to usize] == 114 to u8 and src_buf[m_start + 5 to usize] == 110 to u8:
-                            is_extern_fn = True
+                    let m_str as ptr[String] = self.slice_string_from_node(ref child)
+                    if strcmp((deref m_str).data to cstr, "final" to cstr) == 0:
+                        is_final_fn = True
+                    elif strcmp((deref m_str).data to cstr, "extern" to cstr) == 0:
+                        is_extern_fn = True
+                    drop(m_str to ptr)
+                elif strcmp(c_type, "access_modifier" to cstr) == 0:
+                    let a_str as ptr[String] = self.slice_string_from_node(ref child)
+                    access_mod = deref a_str
+                    drop(a_str to ptr)
                 else:
                     let c_start as usize = ts_node_start_byte_ptr(ref child) to usize
                     let c_end as usize = ts_node_end_byte_ptr(ref child) to usize
@@ -1654,6 +1677,9 @@ struct Lowerer:
         (deref data).is_extern = is_extern_fn
         (deref data).is_variadic = is_variadic_fn
         (deref data).return_type_annot = ret_type_annot
+        (deref data).is_override = is_override
+        (deref data).is_final = is_final_fn
+        (deref data).access_modifier = access_mod
         (deref n).data = data to ptr[u8]
         return n
 
@@ -2141,6 +2167,8 @@ struct Lowerer:
         let span as Span = self.get_span(ts_node)
         var name as String = String.make("" to cstr)
         var base_name as String = String.make("" to cstr)
+        var is_final_class as bool = False
+        var access_mod as String = String.make("public" to cstr)
         let ifaces as List[String] = List[String]()
         let body_stmts as List[ptr[Node]] = List[ptr[Node]]()
 
@@ -2151,7 +2179,16 @@ struct Lowerer:
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
-                if strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
+                if strcmp(c_kind, "decorator" to cstr) == 0:
+                    let d_str as ptr[String] = self.slice_string_from_node(ref child)
+                    if strstr((deref d_str).data to cstr, "final" to cstr) != None to cstr:
+                        is_final_class = True
+                    drop(d_str to ptr)
+                elif strcmp(c_kind, "access_modifier" to cstr) == 0:
+                    let a_str as ptr[String] = self.slice_string_from_node(ref child)
+                    access_mod = deref a_str
+                    drop(a_str to ptr)
+                elif strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
                     let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
                     let text as String = deref slice_ptr
                     drop(slice_ptr to ptr)
@@ -2188,6 +2225,8 @@ struct Lowerer:
         (deref data).target = base_name
         (deref data).imported_symbols = ifaces
         (deref data).body = body_node
+        (deref data).is_final = is_final_class
+        (deref data).access_modifier = access_mod
         (deref n).data = data to ptr[u8]
         return n
 
@@ -2242,6 +2281,7 @@ struct Lowerer:
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
         let span as Span = self.get_span(ts_node)
         var name as String = String.make("" to cstr)
+        var access_mod as String = String.make("public" to cstr)
         let body_stmts as List[ptr[Node]] = List[ptr[Node]]()
 
         let count as u32 = ts_node_child_count_ptr(ts_node)
@@ -2251,7 +2291,11 @@ struct Lowerer:
             ts_node_child_ptr(ts_node, i, ref child)
             if ts_node_is_named_ptr(ref child):
                 let c_kind as cstr = ts_node_type_ptr(ref child)
-                if strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
+                if strcmp(c_kind, "access_modifier" to cstr) == 0:
+                    let a_str as ptr[String] = self.slice_string_from_node(ref child)
+                    access_mod = deref a_str
+                    drop(a_str to ptr)
+                elif strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
                     if name.len == 0 to usize:
                         let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
                         name = deref slice_ptr
@@ -2282,6 +2326,7 @@ struct Lowerer:
         let data as ptr[StructDeclData] = make[StructDeclData](1 to usize) to ptr[StructDeclData]
         (deref data).name = name
         (deref data).body = body_node
+        (deref data).access_modifier = access_mod
         (deref n).data = data to ptr[u8]
         return n
 
