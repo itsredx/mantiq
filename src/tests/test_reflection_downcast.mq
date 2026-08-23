@@ -1,0 +1,143 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+import symbols
+from symbols import Node, NodeType, Span, Symbol, LanguageMode, node_kind, node_name, node_declarations, node_op, node_left, node_right, node_inferred_type
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+import error
+from error import DiagnosticEngine, Diagnostic
+import types
+from types import Type, TypeKind
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Test Assertions ──────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1)
+
+// ── Runtime Reflection Downcast Tests ────────────────────────────────────
+interface Resizable:
+    fn resize(self, factor as f64)
+
+class Shape:
+    public var id as i32
+
+    public fn init_shape(self, i as i32):
+        (deref self).id = i
+
+class Circle(Shape, Resizable):
+    public var radius as f64
+
+    public fn init_circle(self, i as i32, r as f64):
+        (deref self).id = i
+        (deref self).radius = r
+
+    public fn resize(self, factor as f64):
+        (deref self).radius = (deref self).radius * factor
+
+class Square(Shape):
+    public var side as f64
+
+    public fn init_square(self, i as i32, s as f64):
+        (deref self).id = i
+        (deref self).side = s
+
+fn try_resize(item as Any) as i32:
+    match item:
+        case c is Circle:
+            return (deref c).id * 10
+        case sq is Square:
+            return (deref sq).id * 20
+        case n is i32:
+            return n * 2
+        case _:
+            return -1
+
+fn check_guard(item as Any) as i32:
+    match item:
+        case c is Circle if (deref c).radius > 50.0:
+            return 100
+        case c is Circle:
+            return 50
+        case _:
+            return 0
+
+// ── AST & Semantic Lowering Tests ────────────────────────────────────────
+fn test_lowering_and_sema():
+    let src as cstr = "fn test_fn(x as Any) as i32:\n    match x:\n        case s is Resizable:\n            return 1\n        case c is Circle if (deref c).radius > 50.0:\n            return 2\n        case _:\n            return 0\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test.mq" to cstr)
+    let root as ptr[Node] = (deref lr).lower_source()
+    assert_true(root != None to ptr[Node], "root AST lowered" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "sema clean" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "typecheck clean" to cstr)
+
+    let _ as i32 = printf("  PASS: Reflection lowering, sema, and typecheck\n" to cstr)
+
+// ── Execution Verification ───────────────────────────────────────────────
+fn test_runtime_downcast():
+    var c as Circle = Circle()
+    c.init_circle(1 to i32, 10.0)
+
+    var sq as Square = Square()
+    sq.init_square(2 to i32, 5.0)
+
+    // Test 1: Circle downcasted
+    let r1 as i32 = try_resize(c)
+    assert_true(r1 == 10 to i32, "try_resize(circle) matched Circle class" to cstr)
+
+    // Test 2: Square downcasted
+    let r2 as i32 = try_resize(sq)
+    assert_true(r2 == 40 to i32, "try_resize(square) matched Square class" to cstr)
+
+    // Test 3: Primitive i32 downcasted
+    let r3 as i32 = try_resize(21 to i32)
+    assert_true(r3 == 42 to i32, "try_resize(21) matched i32 primitive" to cstr)
+
+    // Test 4: Default wildcard case
+    let r4 as i32 = try_resize(True)
+    assert_true(r4 == -1 to i32, "try_resize(True) matched default wildcard" to cstr)
+
+    // Test 4: Guarded match
+    var c_small as Circle = Circle()
+    c_small.init_circle(3 to i32, 15.0)
+    let g1 as i32 = check_guard(c_small)
+    assert_true(g1 == 50 to i32, "check_guard(c_small) returned 50" to cstr)
+
+    var c_large as Circle = Circle()
+    c_large.init_circle(4 to i32, 75.0)
+    let g2 as i32 = check_guard(c_large)
+    assert_true(g2 == 100 to i32, "check_guard(c_large) returned 100" to cstr)
+
+    let _ as i32 = printf("  PASS: Runtime Reflection and Downcast Execution\n" to cstr)
+
+fn main() as i32:
+    let _ as i32 = printf("=== Running Reflection / Match Downcast Tests ===\n" to cstr)
+    test_lowering_and_sema()
+    test_runtime_downcast()
+    let _ as i32 = printf("All Reflection / Match Downcast tests PASSED!\n" to cstr)
+    return 0 to i32

@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
@@ -1321,6 +1321,7 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("free" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_free" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_malloc" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_isa" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_list_append" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_dict_get" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_dict_get_or_insert" to cstr), True)
@@ -1329,6 +1330,7 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_dict_keys" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_hash_string" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_hash_bytes" to cstr), True)
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_isa(ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_malloc(i64)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_print_i32(i32)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_print_bool(i32)\n")
@@ -1673,8 +1675,8 @@ struct LLVMCodegen:
                                     param_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
                                     param_type = String.make("i64" to cstr)
-                                elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
-                                    param_type = String.make("i8" to cstr)
+                                elif strcmp(pa_name, "Any" to cstr) == 0:
+                                    param_type = String.make("{ ptr, ptr }" to cstr)
                                 elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
                                     param_type = String.make("{ ptr, i64, i64 }" to cstr)
             if param_type.len == 0 to usize:
@@ -1734,13 +1736,22 @@ struct LLVMCodegen:
                                     p_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
                                     p_type = String.make("i64" to cstr)
-                                elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0:
-                                    p_type = String.make("i8" to cstr)
+                                elif strcmp(pa_name, "Any" to cstr) == 0:
+                                    p_type = String.make("{ ptr, ptr }" to cstr)
                                 elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
                                     p_type = String.make("{ ptr, i64, i64 }" to cstr)
             if p_type.len == 0 to usize:
                 p_type = String.make("i64" to cstr)
             set_dict_str(ref (deref self).var_types, p_name, p_type)
+            let p_key as StringBuilder = StringBuilder.make()
+            append_str(ref p_key, name)
+            append_cstr(ref p_key, "#" to cstr)
+            let p_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+            let _ as i32 = sprintf(p_buf, "%lld" to cstr, p_idx)
+            append_cstr(ref p_key, p_buf to cstr)
+            free(p_buf to ptr)
+            set_dict_str(ref (deref self).type_aliases, p_key.to_string(), p_type)
+            p_key.deinit()
             let is_bv_p as bool = is_struct_byval(p_type)
             append_cstr(ref (deref self).main_out, "  %")
             append_str(ref (deref self).main_out, p_name)
@@ -1825,8 +1836,8 @@ struct LLVMCodegen:
                                     var_type = String.make("double" to cstr)
                                 elif strcmp(pa_name, "f32" to cstr) == 0:
                                     var_type = String.make("float" to cstr)
-                                elif strcmp(pa_name, "ptr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
-                                    var_type = String.make("ptr" to cstr)
+                                elif strcmp(pa_name, "Any" to cstr) == 0:
+                                    var_type = String.make("{ ptr, ptr }" to cstr)
                                 elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
                                     var_type = String.make("{ ptr, i64, i64 }" to cstr)
                                 else:
@@ -1971,6 +1982,8 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, val_reg to cstr)
                     append_cstr(ref (deref self).main_out, "\n")
                     final_reg = ld_st
+            elif strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 and strcmp(val_type.data to cstr, "{ ptr, ptr }" to cstr) != 0:
+                final_reg = self.emit_box_to_any(val_reg, val_type, init_node)
             elif (deref var_type.data) == 123 to u8 and (deref val_reg) == 37 to u8 and strcmp(var_type.data to cstr, val_type.data to cstr) != 0:
                 var is_struct_ctor2 as bool = False
                 if node_kind(init_node) == NodeType.CallExpr:
@@ -2083,10 +2096,10 @@ struct LLVMCodegen:
                 append_str(ref (deref self).main_out, id_nm_str)
                 append_cstr(ref (deref self).main_out, "()\n")
                 return reg
-            if strcmp(var_type.data to cstr, "void" to cstr) == 0 or strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or var_type.len == 0 to usize:
+            if strcmp(var_type.data to cstr, "void" to cstr) == 0 or var_type.len == 0 to usize:
                 if (deref self).var_types.has(id_nm_str):
                     let vt as String = (deref self).var_types[id_nm_str]
-                    if strcmp(vt.data to cstr, "void" to cstr) != 0 and strcmp(vt.data to cstr, "{ ptr, ptr }" to cstr) != 0 and vt.len > 0 to usize:
+                    if strcmp(vt.data to cstr, "void" to cstr) != 0 and vt.len > 0 to usize:
                         var_type = vt
                     elif (deref self).var_slots.has(id_nm_str):
                         var_type = String.make("ptr" to cstr)
@@ -4135,9 +4148,9 @@ struct LLVMCodegen:
             return "null" to ptr[u8]
         let args as List[ptr[Node]] = node_params(node)
         let callee_name_ptr as ptr[String] = node_name_ptr(callee)
+        let callee_t as ptr[Type] = node_inferred_type(callee)
         var ret_type as String = type_to_llvm(node_inferred_type(node))
         if ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0:
-            let callee_t as ptr[Type] = node_inferred_type(callee)
             if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
                 ret_type = type_to_llvm((deref callee_t).return_type)
         if strcmp(ret_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(ret_type.data to cstr, "ptr" to cstr) == 0:
@@ -4833,7 +4846,7 @@ struct LLVMCodegen:
                             append_cstr(ref (deref self).main_out, vt_reg to cstr)
                             append_cstr(ref (deref self).main_out, " = insertvalue %")
                             append_str(ref (deref self).main_out, c_name)
-                            append_cstr(ref (deref self).main_out, " undef, ptr @__vtable_")
+                            append_cstr(ref (deref self).main_out, " undef, ptr @__rtti_")
                             append_str(ref (deref self).main_out, c_name)
                             append_cstr(ref (deref self).main_out, ", 0\n")
                             cur_v = vt_reg
@@ -5308,7 +5321,23 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, rec_ptr to cstr)
                     append_cstr(ref (deref self).main_out, ", 0\n")
                     arg_val = d_arg
-                    arg_type = String.make("ptr" to cstr)
+            var expected_p_type as String = String.make("" to cstr)
+            if callee_name_ptr != None to ptr[String] and (deref callee_name_ptr).data != None:
+                let p_lookup as StringBuilder = StringBuilder.make()
+                append_str(ref p_lookup, deref callee_name_ptr)
+                append_cstr(ref p_lookup, "#" to cstr)
+                let p_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                let _ as i32 = sprintf(p_buf, "%lld" to cstr, a_idx)
+                append_cstr(ref p_lookup, p_buf to cstr)
+                free(p_buf to ptr)
+                let p_key_s as String = p_lookup.to_string()
+                p_lookup.deinit()
+                if (deref self).type_aliases.has(p_key_s):
+                    expected_p_type = (deref self).type_aliases[p_key_s]
+
+            if strcmp(expected_p_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 and strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) != 0:
+                arg_val = self.emit_box_to_any(arg_val, arg_type, arg_node)
+                arg_type = String.make("{ ptr, ptr }" to cstr)
 
             if is_struct_byval(arg_type):
                 let t_spill as ptr[u8] = self.fresh_temp()
@@ -5354,7 +5383,7 @@ struct LLVMCodegen:
             if obj_node != None to ptr[Node]:
                 let obj_t as ptr[Type] = node_inferred_type(obj_node)
                 if obj_t != None to ptr[Type]:
-                    if (deref obj_t).kind == TypeKind.Struct or (deref obj_t).kind == TypeKind.Enum or (deref obj_t).kind == TypeKind.Union:
+                    if (deref obj_t).kind == TypeKind.Struct or (deref obj_t).kind == TypeKind.Class or (deref obj_t).kind == TypeKind.Interface or (deref obj_t).kind == TypeKind.Enum or (deref obj_t).kind == TypeKind.Union:
                         s_nm = (deref obj_t).name
                     elif (deref obj_t).kind == TypeKind.String:
                         s_nm = String.make("String" to cstr)
@@ -5364,7 +5393,7 @@ struct LLVMCodegen:
                         s_nm = String.make("Dict" to cstr)
                     elif (deref obj_t).kind == TypeKind.RawPointer and (deref obj_t).payload != None to ptr[Type]:
                         let pl as ptr[Type] = (deref obj_t).payload
-                        if (deref pl).kind == TypeKind.Struct or (deref pl).kind == TypeKind.Enum or (deref pl).kind == TypeKind.Union:
+                        if (deref pl).kind == TypeKind.Struct or (deref pl).kind == TypeKind.Class or (deref pl).kind == TypeKind.Interface or (deref pl).kind == TypeKind.Enum or (deref pl).kind == TypeKind.Union:
                             s_nm = (deref pl).name
                         elif (deref pl).kind == TypeKind.String:
                             s_nm = String.make("String" to cstr)
@@ -6368,6 +6397,109 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, cmp2 to cstr)
                     append_cstr(ref (deref self).main_out, "\n")
                     matched_cond = combined
+                elif pat_k == NodeType.BinaryExpr and strcmp(node_op(inner_pat).data to cstr, "is" to cstr) == 0:
+                    let is_var as ptr[Node] = node_left(inner_pat)
+                    let is_t_node as ptr[Node] = node_right(inner_pat)
+                    var target_t_name as String = String.make("" to cstr)
+                    if is_t_node != None to ptr[Node]:
+                        target_t_name = node_name(is_t_node)
+                    let target_type_id as i32 = self.compute_type_id(target_t_name)
+
+                    var rtti_ptr_reg as ptr[u8] = "null" to ptr[u8]
+                    var data_ptr_reg as ptr[u8] = subject_reg
+                    if strcmp(subject_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                        let rtti_tmp as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, rtti_tmp to cstr)
+                        append_cstr(ref (deref self).main_out, " = extractvalue { ptr, ptr } ")
+                        append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ", 1\n")
+                        rtti_ptr_reg = rtti_tmp
+
+                        let data_tmp as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, data_tmp to cstr)
+                        append_cstr(ref (deref self).main_out, " = extractvalue { ptr, ptr } ")
+                        append_cstr(ref (deref self).main_out, subject_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ", 0\n")
+                        data_ptr_reg = data_tmp
+                    else:
+                        let rtti_tmp as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, rtti_tmp to cstr)
+                        append_cstr(ref (deref self).main_out, " = load ptr, ptr ")
+                        append_cstr(ref (deref self).main_out, subj_slot to cstr)
+                        append_cstr(ref (deref self).main_out, "\n")
+                        rtti_ptr_reg = rtti_tmp
+
+                    let isa_call as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, isa_call to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_isa(ptr ")
+                    append_cstr(ref (deref self).main_out, rtti_ptr_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 ")
+                    let t_id_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                    let _spt as i32 = sprintf(t_id_buf, "%d" to cstr, target_type_id)
+                    append_cstr(ref (deref self).main_out, t_id_buf to cstr)
+                    free(t_id_buf to ptr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+
+                    let cmp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cmp to cstr)
+                    append_cstr(ref (deref self).main_out, " = icmp ne i32 ")
+                    append_cstr(ref (deref self).main_out, isa_call to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    matched_cond = cmp
+
+                    if is_var != None to ptr[Node] and node_kind(is_var) == NodeType.Identifier:
+                        let pat_name as String = node_name(is_var)
+                        if strcmp(pat_name.data to cstr, "_" to cstr) != 0:
+                            var var_target_type as String = type_to_llvm(node_inferred_type(is_var))
+                            if var_target_type.len == 0 to usize or strcmp(var_target_type.data to cstr, "void" to cstr) == 0:
+                                var_target_type = String.make("ptr" to cstr)
+
+                            var count as i32 = 0 to i32
+                            if (deref self).var_counts.has(pat_name):
+                                count = (deref self).var_counts[pat_name]
+                            set_dict_i32(ref (deref self).var_counts, pat_name, count + 1 to i32)
+                            var slot_name as String = pat_name
+                            if count > 0 to i32:
+                                let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                                let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, pat_name.data to cstr, count)
+                                slot_name = String.make(slot_buf to cstr)
+                            set_dict_str(ref (deref self).var_slots, pat_name, slot_name)
+                            set_dict_str(ref (deref self).var_types, pat_name, var_target_type)
+
+                            append_cstr(ref (deref self).main_out, "  %")
+                            append_str(ref (deref self).main_out, slot_name)
+                            append_cstr(ref (deref self).main_out, " = alloca ")
+                            append_str(ref (deref self).main_out, var_target_type)
+                            append_cstr(ref (deref self).main_out, "\n")
+
+                            if strcmp(var_target_type.data to cstr, "ptr" to cstr) == 0 or (var_target_type.len > 0 to usize and deref (var_target_type.data) == 37 to u8):
+                                append_cstr(ref (deref self).main_out, "  store ptr ")
+                                append_cstr(ref (deref self).main_out, data_ptr_reg to cstr)
+                                append_cstr(ref (deref self).main_out, ", ptr %")
+                                append_str(ref (deref self).main_out, slot_name)
+                                append_cstr(ref (deref self).main_out, "\n")
+                            else:
+                                let unboxed_val as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, unboxed_val to cstr)
+                                append_cstr(ref (deref self).main_out, " = load ")
+                                append_str(ref (deref self).main_out, var_target_type)
+                                append_cstr(ref (deref self).main_out, ", ptr ")
+                                append_cstr(ref (deref self).main_out, data_ptr_reg to cstr)
+                                append_cstr(ref (deref self).main_out, "\n")
+
+                                append_cstr(ref (deref self).main_out, "  store ")
+                                append_str(ref (deref self).main_out, var_target_type)
+                                append_cstr(ref (deref self).main_out, " ")
+                                append_cstr(ref (deref self).main_out, unboxed_val to cstr)
+                                append_cstr(ref (deref self).main_out, ", ptr %")
+                                append_str(ref (deref self).main_out, slot_name)
+                                append_cstr(ref (deref self).main_out, "\n")
                 else:
                     let pat_reg as ptr[u8] = self.emit_expr(inner_pat)
                     var pat_type as String = type_to_llvm(node_inferred_type(inner_pat))
@@ -8538,6 +8670,103 @@ struct LLVMCodegen:
 
         self.emit_struct_methods(node)
 
+    public fn compute_type_id(self as ptr[LLVMCodegen], type_name as String) as i32:
+        if type_name.data == None to ptr[u8] or type_name.len == 0 to usize:
+            return 0 to i32
+        var h as i64 = 5381 to i64
+        var i as usize = 0 to usize
+        while i < type_name.len:
+            let b as u8 = deref ((type_name.data to usize + i) to ptr[u8])
+            let b_val as i64 = b to i64
+            h = ((h * (33 to i64)) + b_val) % (2147483647 to i64)
+            i = i + 1 to usize
+        let res as i32 = (h % (2147483647 to i64)) to i32
+        if res == 0 to i32:
+            return 1 to i32
+        return res
+
+    public fn emit_box_to_any(self as ptr[LLVMCodegen], val_reg as ptr[u8], val_type as String, val_node as ptr[Node]) as ptr[u8]:
+        var type_name as String = String.make("i32" to cstr)
+        if val_node != None to ptr[Node]:
+            let inf_t as ptr[Type] = node_inferred_type(val_node)
+            if inf_t != None to ptr[Type]:
+                if (deref inf_t).kind == TypeKind.Class or (deref inf_t).kind == TypeKind.Struct or (deref inf_t).kind == TypeKind.Interface:
+                    type_name = (deref inf_t).name
+                elif (deref inf_t).kind == TypeKind.RawPointer and (deref inf_t).payload != None to ptr[Type]:
+                    let pl as ptr[Type] = (deref inf_t).payload
+                    if (deref pl).kind == TypeKind.Class or (deref pl).kind == TypeKind.Struct or (deref pl).kind == TypeKind.Interface:
+                        type_name = (deref pl).name
+                elif (deref inf_t).kind == TypeKind.I32:
+                    type_name = String.make("i32" to cstr)
+                elif (deref inf_t).kind == TypeKind.I64:
+                    type_name = String.make("i64" to cstr)
+                elif (deref inf_t).kind == TypeKind.F32:
+                    type_name = String.make("f32" to cstr)
+                elif (deref inf_t).kind == TypeKind.F64:
+                    type_name = String.make("f64" to cstr)
+                elif (deref inf_t).kind == TypeKind.Boolean:
+                    type_name = String.make("bool" to cstr)
+                elif (deref inf_t).kind == TypeKind.String:
+                    type_name = String.make("String" to cstr)
+
+        self.ensure_rtti_for_type(type_name)
+
+        var data_ptr as ptr[u8] = val_reg
+        if strcmp(val_type.data to cstr, "ptr" to cstr) != 0:
+            let box_ptr as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, box_ptr to cstr)
+            append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+            append_cstr(ref (deref self).main_out, "  store ")
+            append_str(ref (deref self).main_out, val_type)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, val_reg to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+            append_cstr(ref (deref self).main_out, box_ptr to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+            data_ptr = box_ptr
+
+        let fat1 as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fat1 to cstr)
+        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, ptr } undef, ptr ")
+        append_cstr(ref (deref self).main_out, data_ptr to cstr)
+        append_cstr(ref (deref self).main_out, ", 0\n")
+
+        let fat2 as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fat2 to cstr)
+        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, ptr } ")
+        append_cstr(ref (deref self).main_out, fat1 to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr @__rtti_")
+        append_str(ref (deref self).main_out, type_name)
+        append_cstr(ref (deref self).main_out, ", 1\n")
+
+        return fat2
+
+    public fn ensure_rtti_for_type(self as ptr[LLVMCodegen], type_name as String):
+        if type_name.data == None to ptr[u8] or type_name.len == 0 to usize:
+            return
+        let marker as StringBuilder = StringBuilder.make()
+        append_cstr(ref marker, "__rtti_emitted_" to cstr)
+        append_str(ref marker, type_name)
+        let marker_s as String = marker.to_string()
+        marker.deinit()
+        if (deref self).defined_types.has(marker_s):
+            return
+        set_dict_bool(ref (deref self).defined_types, marker_s, True)
+
+        let t_id as i32 = self.compute_type_id(type_name)
+        let rstr_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+        let _sr as i32 = sprintf(rstr_buf, "@.str.rtti_%s = private unnamed_addr constant [%zu x i8] c\"%s\\00\"\n" to cstr, type_name.data to cstr, type_name.len + 1 to usize, type_name.data to cstr)
+        append_cstr(ref (deref self).type_out, rstr_buf to cstr)
+        free(rstr_buf to ptr)
+
+        let rdesc_buf as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+        let _rd as i32 = sprintf(rdesc_buf, "@__rtti_%s = constant { i32, ptr, i32, i32, ptr } { i32 %d, ptr @.str.rtti_%s, i32 0, i32 0, ptr null }\n" to cstr, type_name.data to cstr, t_id, type_name.data to cstr)
+        append_cstr(ref (deref self).type_out, rdesc_buf to cstr)
+        free(rdesc_buf to ptr)
+
     public fn emit_class_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)
         let target_base as String = node_target(node)
@@ -8555,6 +8784,59 @@ struct LLVMCodegen:
             append_str(ref is_cls_k, name)
             set_dict_i32(ref (deref self).struct_field_indices, is_cls_k.to_string(), 1 to i32)
             is_cls_k.deinit()
+
+            // Emit RTTI descriptor for class
+            let class_id as i32 = self.compute_type_id(name)
+            var parent_id as i32 = 0 to i32
+            if target_base.data != None to ptr[u8] and target_base.len > 0 to usize:
+                parent_id = self.compute_type_id(target_base)
+
+            let ifaces as List[String] = node_imported_symbols(node)
+            let iface_cnt as i64 = ifaces.length()
+            var iface_arr_ref as ptr[u8] = "null" to ptr[u8]
+
+            if iface_cnt > 0 to i64:
+                let if_arr_k as StringBuilder = StringBuilder.make()
+                append_cstr(ref if_arr_k, "@__ifaces_" to cstr)
+                append_str(ref if_arr_k, name)
+                let if_arr_s as String = if_arr_k.to_string()
+                if_arr_k.deinit()
+
+                let if_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                let _s1 as i32 = sprintf(if_buf, "%s = constant [%lld x i32] [" to cstr, if_arr_s.data to cstr, iface_cnt)
+                append_cstr(ref (deref self).type_out, if_buf to cstr)
+                free(if_buf to ptr)
+
+                var if_i as i64 = 0 to i64
+                while if_i < iface_cnt:
+                    let if_nm as String = ifaces[if_i]
+                    let if_id as i32 = self.compute_type_id(if_nm)
+                    if if_i > 0 to i64:
+                        append_cstr(ref (deref self).type_out, ", " to cstr)
+                    let id_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                    let _s2 as i32 = sprintf(id_buf, "i32 %d" to cstr, if_id)
+                    append_cstr(ref (deref self).type_out, id_buf to cstr)
+                    free(id_buf to ptr)
+                    if_i = if_i + 1 to i64
+                append_cstr(ref (deref self).type_out, "]\n")
+                iface_arr_ref = if_arr_s.data to ptr[u8]
+
+            let rstr_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            let _sr as i32 = sprintf(rstr_buf, "@.str.rtti_%s = private unnamed_addr constant [%zu x i8] c\"%s\\00\"\n" to cstr, name.data to cstr, name.len + 1 to usize, name.data to cstr)
+            append_cstr(ref (deref self).type_out, rstr_buf to cstr)
+            free(rstr_buf to ptr)
+
+            let rdesc_buf as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+            let _rd as i32 = sprintf(rdesc_buf, "@__rtti_%s = constant { i32, ptr, i32, i32, ptr } { i32 %d, ptr @.str.rtti_%s, i32 %d, i32 %lld, ptr %s }\n" to cstr, name.data to cstr, class_id, name.data to cstr, parent_id, iface_cnt, iface_arr_ref to cstr)
+            append_cstr(ref (deref self).type_out, rdesc_buf to cstr)
+            free(rdesc_buf to ptr)
+
+            let marker as StringBuilder = StringBuilder.make()
+            append_cstr(ref marker, "__rtti_emitted_" to cstr)
+            append_str(ref marker, name)
+            set_dict_bool(ref (deref self).defined_types, marker.to_string(), True)
+            marker.deinit()
+
             self.emit_class_fields(node, name)
 
         self.emit_class_methods(node, name)

@@ -933,6 +933,13 @@ struct Sema:
                         if strcmp(pat_name.data to cstr, "_" to cstr) != 0:
                             let sym as ptr[Symbol] = make_symbol(pat_name, SymbolKind.Variable, pat_node)
                             (deref child_scope).symbols[pat_name] = sym
+                    elif node_kind(pat_node) == NodeType.BinaryExpr and strcmp(node_op(pat_node).data to cstr, "is" to cstr) == 0:
+                        let is_var as ptr[Node] = node_left(pat_node)
+                        if is_var != None to ptr[Node] and node_kind(is_var) == NodeType.Identifier:
+                            let var_name as String = node_name(is_var)
+                            if strcmp(var_name.data to cstr, "_" to cstr) != 0:
+                                let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, is_var)
+                                (deref child_scope).symbols[var_name] = sym
                     elif node_kind(pat_node) == NodeType.CallExpr:
                         let pat_args as List[ptr[Node]] = node_params(pat_node)
                         let pa_count as i64 = pat_args.length()
@@ -1199,9 +1206,13 @@ struct Sema:
                     if pat_wrapper != None to ptr[Node]:
                         if node_kind(pat_wrapper) == NodeType.BinaryExpr and strcmp(node_op(pat_wrapper).data to cstr, "if" to cstr) == 0:
                             let inner_pat as ptr[Node] = node_left(pat_wrapper)
-                            if node_kind(inner_pat) != NodeType.Identifier:
+                            if node_kind(inner_pat) == NodeType.BinaryExpr and strcmp(node_op(inner_pat).data to cstr, "is" to cstr) == 0:
+                                // Is pattern: do not resolve left identifier (it's declared variable)
+                            elif node_kind(inner_pat) != NodeType.Identifier:
                                 self.resolve_pass(inner_pat)
                             self.resolve_pass(node_right(pat_wrapper))
+                        elif node_kind(pat_wrapper) == NodeType.BinaryExpr and strcmp(node_op(pat_wrapper).data to cstr, "is" to cstr) == 0:
+                            // Is pattern: do not resolve left identifier (it's declared variable)
                         elif node_kind(pat_wrapper) != NodeType.Identifier:
                             self.resolve_pass(pat_wrapper)
 

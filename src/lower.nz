@@ -180,7 +180,7 @@ struct Lowerer:
         let kind as cstr = ts_node_type_ptr(ts_node)
         if strcmp(kind, "program" to cstr) == 0:
             return self.lower_program(ts_node)
-        elif strcmp(kind, "identifier" to cstr) == 0:
+        elif strcmp(kind, "identifier" to cstr) == 0 or strcmp(kind, "type_identifier" to cstr) == 0 or strcmp(kind, "primitive_type" to cstr) == 0:
             return self.lower_identifier(ts_node)
         elif strcmp(kind, "number" to cstr) == 0:
             return self.lower_number(ts_node)
@@ -447,6 +447,9 @@ struct Lowerer:
                 if strcmp(c_type, "comment" to cstr) != 0 and strcmp(c_type, "kw_match" to cstr) != 0 and strcmp(c_type, "match" to cstr) != 0:
                     if strcmp(c_type, "match_case" to cstr) == 0:
                         var pattern as ptr[Node] = None to ptr[Node]
+                        var is_var_node as ptr[Node] = None to ptr[Node]
+                        var is_type_node as ptr[Node] = None to ptr[Node]
+                        var saw_is as bool = False
                         var guard as ptr[Node] = None to ptr[Node]
                         var body as ptr[Node] = None to ptr[Node]
                         var saw_if as bool = False
@@ -459,6 +462,10 @@ struct Lowerer:
                             let cc_type as cstr = ts_node_type_ptr(ref cc)
                             if strcmp(cc_type, "if" to cstr) == 0:
                                 saw_if = True
+                            elif strcmp(cc_type, "kw_is" to cstr) == 0 or strcmp(cc_type, "is" to cstr) == 0:
+                                saw_is = True
+                                is_var_node = pattern
+                                pattern = None to ptr[Node]
                             elif ts_node_is_named_ptr(ref cc):
                                 if strcmp(cc_type, "comment" to cstr) != 0 and strcmp(cc_type, "kw_case" to cstr) != 0 and strcmp(cc_type, "case" to cstr) != 0:
                                     if strcmp(cc_type, "block_body" to cstr) == 0 or strcmp(cc_type, "block" to cstr) == 0:
@@ -467,6 +474,15 @@ struct Lowerer:
                                         body = self.lower_node(ref cc)
                                     elif saw_if:
                                         guard = self.lower_node(ref cc)
+                                    elif saw_is and is_var_node != None to ptr[Node] and is_type_node == None to ptr[Node]:
+                                        is_type_node = self.lower_node(ref cc)
+                                        let is_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
+                                        let is_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                                        (deref is_data).op = String.make("is" to cstr)
+                                        (deref is_data).left = is_var_node
+                                        (deref is_data).right = is_type_node
+                                        (deref is_node).data = is_data to ptr[u8]
+                                        pattern = is_node
                                     elif pattern == None to ptr[Node]:
                                         pattern = self.lower_node(ref cc)
                                     elif guard == None to ptr[Node]:

@@ -1543,6 +1543,49 @@ struct TypeChecker:
                                         (deref p_sym).resolved_type = field_t
                                     set_node_inferred_type(p_node, field_t)
                                 pa_i = pa_i + 1 to i64
+                        elif node_kind(inner_pat) == NodeType.BinaryExpr and strcmp(node_op(inner_pat).data to cstr, "is" to cstr) == 0:
+                            let is_var as ptr[Node] = node_left(inner_pat)
+                            let is_t_node as ptr[Node] = node_right(inner_pat)
+                            var resolved_target_t as ptr[Type] = make_type(TypeKind.Any)
+                            if is_t_node != None to ptr[Node]:
+                                let t_name as String = node_name(is_t_node)
+                                let t_cstr as cstr = t_name.data to cstr
+                                if strcmp(t_cstr, "i32" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.I32)
+                                elif strcmp(t_cstr, "i64" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.I64)
+                                elif strcmp(t_cstr, "f32" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.F32)
+                                elif strcmp(t_cstr, "f64" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.F64)
+                                elif strcmp(t_cstr, "bool" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.Boolean)
+                                elif strcmp(t_cstr, "String" to cstr) == 0 or strcmp(t_cstr, "str" to cstr) == 0:
+                                    resolved_target_t = make_type(TypeKind.String)
+                                else:
+                                    let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(t_name)
+                                    if sym != None to ptr[Symbol]:
+                                        if (deref sym).kind == SymbolKind.Class:
+                                            resolved_target_t = make_ptr_type(make_class_type(t_name))
+                                        elif (deref sym).kind == SymbolKind.Interface:
+                                            resolved_target_t = make_ptr_type(make_interface_type(t_name))
+                                        elif (deref sym).kind == SymbolKind.Struct:
+                                            resolved_target_t = make_ptr_type(make_struct_type(t_name))
+                                        elif (deref sym).resolved_type != None to ptr[Type]:
+                                            resolved_target_t = (deref sym).resolved_type
+                                        else:
+                                            resolved_target_t = make_ptr_type(make_class_type(t_name))
+                                    else:
+                                        resolved_target_t = make_ptr_type(make_class_type(t_name))
+
+                            if is_var != None to ptr[Node] and node_kind(is_var) == NodeType.Identifier:
+                                let v_name as String = node_name(is_var)
+                                if strcmp(v_name.data to cstr, "_" to cstr) != 0:
+                                    let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(v_name)
+                                    if sym != None to ptr[Symbol]:
+                                        (deref sym).resolved_type = resolved_target_t
+                                    set_node_inferred_type(is_var, resolved_target_t)
+                            set_node_inferred_type(inner_pat, resolved_target_t)
                         else:
                             let _dummy_p as ptr[Type] = self.typecheck_node(inner_pat)
 

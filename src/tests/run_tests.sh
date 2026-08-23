@@ -14,6 +14,8 @@ echo "Compiler: ${NIZAM}"
 echo "Lib dir:  ${ROOT_DIR}"
 echo ""
 
+cd "${ROOT_DIR}"
+
 TEST_FILES=(
     "src/tests/test_types.nz"
     "src/tests/test_abi.nz"
@@ -47,6 +49,7 @@ TEST_FILES=(
     "src/tests/test_nll_borrowck.nz"
     "src/tests/test_interfaces_and_classes.mq"
     "src/tests/test_oop_override_final_access.mq"
+    "src/tests/test_reflection_downcast.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}
