@@ -54,6 +54,7 @@ enum NodeType:
     UnaryExpr
     CastExpr
     BlockStmt
+    ParamBlockStmt
     WithStmt
     MatchStmt
     TryStmt
@@ -171,6 +172,14 @@ struct CastExprData:
 
 struct BlockStmtData:
     public var declarations as List[ptr[Node]]
+    public var auto_drops as List[String]
+
+struct ParamBlockStmtData:
+    public var params as List[ptr[Node]]
+    public var body as ptr[Node]
+    public var return_names as List[String]
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+    public var return_type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
     public var auto_drops as List[String]
 
 struct WithStmtData:
@@ -296,6 +305,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[CastExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.BlockStmt:
         (deref n).data = make[BlockStmtData](1 to usize) to ptr[u8]
+    elif nk == NodeType.ParamBlockStmt:
+        (deref n).data = make[ParamBlockStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.WithStmt:
         (deref n).data = make[WithStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.MatchStmt:
@@ -685,6 +696,9 @@ fn node_body(n as ptr[Node]) as ptr[Node]:
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         r = (deref d).body
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        r = (deref d).body
     return r
 
 fn set_node_body(n as ptr[Node], body as ptr[Node]):
@@ -720,6 +734,9 @@ fn set_node_body(n as ptr[Node], body as ptr[Node]):
         (deref d).body = body
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).body = body
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         (deref d).body = body
 
 // declarations accessor (6 node types have it):
@@ -816,6 +833,9 @@ fn node_params(n as ptr[Node]) as List[ptr[Node]]:
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         r = (deref d).params
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        r = (deref d).params
     return r
 
 fn node_params_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
@@ -837,6 +857,9 @@ fn node_params_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         return ref (deref d).params
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        return ref (deref d).params
     return None to ptr[List[ptr[Node]]]
 
 fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
@@ -857,6 +880,9 @@ fn set_node_params(n as ptr[Node], params as List[ptr[Node]]):
         (deref d).params = params
     elif k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).params = params
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         (deref d).params = params
 
 // op accessor (3 node types have it):
@@ -1163,6 +1189,9 @@ fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]] :
     elif k == NodeType.CallExpr:
         let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
         r = (deref d).type_annots
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        r = (deref d).type_annots
     return r
 
 fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
@@ -1184,8 +1213,11 @@ fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeA
     elif k == NodeType.CallExpr:
         let d as ptr[CallExprData] = (deref n).data to ptr[CallExprData]
         (deref d).type_annots = type_annots
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        (deref d).type_annots = type_annots
 
-// auto_drops accessor (ReturnStmt, BlockStmt):
+// auto_drops accessor (ReturnStmt, BlockStmt, ParamBlockStmt):
 fn node_auto_drops(n as ptr[Node]) as List[String]:
     var r as List[String] = List[String]()
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
@@ -1196,6 +1228,9 @@ fn node_auto_drops(n as ptr[Node]) as List[String]:
         r = (deref d).auto_drops
     elif k == NodeType.BlockStmt:
         let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
+        r = (deref d).auto_drops
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         r = (deref d).auto_drops
     return r
 
@@ -1209,6 +1244,51 @@ fn set_node_auto_drops(n as ptr[Node], drops as List[String]):
     elif k == NodeType.BlockStmt:
         let d as ptr[BlockStmtData] = (deref n).data to ptr[BlockStmtData]
         (deref d).auto_drops = drops
+    elif k == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        (deref d).auto_drops = drops
+
+// return_names accessor (ParamBlockStmt):
+fn node_return_names(n as ptr[Node]) as List[String]:
+    var r as List[String] = List[String]()
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        r = (deref d).return_names
+    return r
+
+fn node_return_names_ptr(n as ptr[Node]) as ptr[List[String]]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return None to ptr[List[String]]
+    if (deref n).kind == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        return ref (deref d).return_names
+    return None to ptr[List[String]]
+
+fn set_node_return_names(n as ptr[Node], names as List[String]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        (deref d).return_names = names
+
+// return_type_annots accessor (ParamBlockStmt):
+fn node_return_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]]:
+    var r as ptr[List[Option[ptr[TypeAnnotation]]]] = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        r = (deref d).return_type_annots
+    return r
+
+fn set_node_return_type_annots(n as ptr[Node], annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.ParamBlockStmt:
+        let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        (deref d).return_type_annots = annots
 
 // target accessor (ImportDecl):
 fn node_target(n as ptr[Node]) as String:

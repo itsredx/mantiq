@@ -39,6 +39,9 @@ TEST_FILES=(
     "src/tests/test_for_loops_and_concurrency.nz"
     "src/tests/test_context_managers_and_with.nz"
     "src/tests/test_try_catch_raise_result.nz"
+    "src/tests/test_param_block.nz"
+    "src/tests/test_extended_types.nz"
+    "src/tests/test_import_tags_and_link.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

@@ -273,11 +273,24 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let t6 as i64 = perf_begin(perf, "link")
     let lib_dir as cstr = compiler_lib_dir()
     let cmd_buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
+    
+    let extra_flags as StringBuilder = StringBuilder.make()
+    let lt_count as i64 = (deref sema).link_targets.length()
+    var lti as i64 = 0 to i64
+    while lti < lt_count:
+        let lt_name as String = (deref sema).link_targets[lti]
+        if strcmp(lt_name.data to cstr, "m" to cstr) != 0:
+            extra_flags.append(" -l" to cstr)
+            extra_flags.append(lt_name.data to cstr)
+        lti = lti + 1 to i64
+    let extra_flags_str as String = extra_flags.to_string()
+    let extra_flags_c as cstr = extra_flags_str.data to cstr
+
     var _sp as i32 = 0
     if lib_dir == None to cstr:
-        _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s 2>&1" to cstr, ll_path, out_file, ll_path, out_file, ll_path, out_file)
+        _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
     else:
-        _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file)
+        _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
     let res as i32 = system(cmd_buf to cstr)
     perf_end(perf, "link", t6)
 

@@ -1,0 +1,48 @@
+// ── Import Tags & Link Directives Test Suite ────────────────────────────────
+import[c] "stdio.h"
+import[c] "math.h"
+import[path] "src/tests/path_helper.nz"
+import[vendor] grep
+link[c] "m"
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+extern fn sqrt(x as f64) as f64
+extern fn cos(x as f64) as f64
+
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        printf("Assertion failed: %s\n" to cstr, msg)
+        exit(1)
+
+fn test_vendor_import():
+    printf("[TEST] Testing import[vendor]...\n" to cstr)
+    let cnt as i32 = grep_count("test_query" to cstr)
+    printf("  grep_count result: %d\n" to cstr, cnt)
+    assert_true(cnt == 7, "grep_count returned expected count from vendor module" to cstr)
+    printf("  [PASS] import[vendor] verified.\n" to cstr)
+
+fn test_path_import():
+    printf("[TEST] Testing import[path]...\n" to cstr)
+    let res as i32 = helper_mul(6, 7)
+    printf("  helper_mul(6, 7) = %d\n" to cstr, res)
+    assert_true(res == 42, "helper_mul returned 42 from path module" to cstr)
+    printf("  [PASS] import[path] verified.\n" to cstr)
+
+fn test_c_import_and_link():
+    printf("[TEST] Testing import[c] and link[c] directives...\n" to cstr)
+    let sq as f64 = sqrt(144.0)
+    printf("  sqrt(144.0) = %f\n" to cstr, sq)
+    assert_true(sq > 11.99 and sq < 12.01, "sqrt(144.0) == 12.0 via libm linkage" to cstr)
+
+    let c_val as f64 = cos(0.0)
+    printf("  cos(0.0) = %f\n" to cstr, c_val)
+    assert_true(c_val > 0.99 and c_val < 1.01, "cos(0.0) == 1.0 via libm linkage" to cstr)
+    printf("  [PASS] link[c] and import[c] verified.\n" to cstr)
+
+fn main():
+    printf("=== Starting Import Tags & Link Directives Test Suite ===\n" to cstr)
+    test_vendor_import()
+    test_path_import()
+    test_c_import_and_link()
+    printf("=== All Import Tags & Link Directives Tests Passed! ===\n" to cstr)

@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
             return String.make("i64" to cstr)
         elif strcmp(f_cstr, "enabled" to cstr) == 0:
             return String.make("i8" to cstr)
-    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0:
+    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0 or strcmp(f_cstr, "active_block_exit" to cstr) == 0:
         return String.make("{ ptr, i64, i64 }" to cstr)
     elif strcmp(f_cstr, "kind" to cstr) == 0 or strcmp(f_cstr, "mode" to cstr) == 0 or strcmp(f_cstr, "severity" to cstr) == 0 or strcmp(f_cstr, "error_count" to cstr) == 0 or strcmp(f_cstr, "warning_count" to cstr) == 0 or strcmp(f_cstr, "panic_count" to cstr) == 0 or strcmp(f_cstr, "temp_counter" to cstr) == 0 or strcmp(f_cstr, "label_counter" to cstr) == 0 or strcmp(f_cstr, "string_counter" to cstr) == 0 or strcmp(f_cstr, "closure_counter" to cstr) == 0 or strcmp(f_cstr, "endianness" to cstr) == 0 or strcmp(f_cstr, "scope_depth" to cstr) == 0:
         return String.make("i32" to cstr)
@@ -173,7 +173,7 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
         return String.make("i32" to cstr)
     elif strcmp(f_cstr, "x" to cstr) == 0 or strcmp(f_cstr, "y" to cstr) == 0 or strcmp(f_cstr, "z" to cstr) == 0 or strcmp(f_cstr, "w" to cstr) == 0 or strcmp(f_cstr, "next_hygiene_id" to cstr) == 0 or strcmp(f_cstr, "len" to cstr) == 0 or strcmp(f_cstr, "cap" to cstr) == 0 or strcmp(f_cstr, "capacity" to cstr) == 0 or strcmp(f_cstr, "length" to cstr) == 0 or strcmp(f_cstr, "count" to cstr) == 0 or strcmp(f_cstr, "size" to cstr) == 0 or strcmp(f_cstr, "index" to cstr) == 0 or strcmp(f_cstr, "pointer_size" to cstr) == 0 or strcmp(f_cstr, "wall_start" to cstr) == 0 or strcmp(f_cstr, "rss_start" to cstr) == 0 or strcmp(f_cstr, "rss_end" to cstr) == 0 or strcmp(f_cstr, "time_ns" to cstr) == 0:
         return String.make("i64" to cstr)
-    elif strcmp(f_cstr, "left" to cstr) == 0 or strcmp(f_cstr, "right" to cstr) == 0 or strcmp(f_cstr, "body" to cstr) == 0 or strcmp(f_cstr, "cond" to cstr) == 0 or strcmp(f_cstr, "then_branch" to cstr) == 0 or strcmp(f_cstr, "inferred_type" to cstr) == 0 or strcmp(f_cstr, "data" to cstr) == 0 or strcmp(f_cstr, "buffer" to cstr) == 0 or strcmp(f_cstr, "return_type_annot" to cstr) == 0 or strcmp(f_cstr, "type_annots" to cstr) == 0 or strcmp(f_cstr, "payload" to cstr) == 0 or strcmp(f_cstr, "return_type" to cstr) == 0 or strcmp(f_cstr, "sema" to cstr) == 0 or strcmp(f_cstr, "current_scope" to cstr) == 0 or strcmp(f_cstr, "global_scope" to cstr) == 0 or strcmp(f_cstr, "current_function_return" to cstr) == 0 or strcmp(f_cstr, "inferred_return_type" to cstr) == 0 or strcmp(f_cstr, "decl_node" to cstr) == 0 or strcmp(f_cstr, "root_ast" to cstr) == 0 or strcmp(f_cstr, "parent" to cstr) == 0 or strcmp(f_cstr, "closure_node" to cstr) == 0 or strcmp(f_cstr, "resolved_type" to cstr) == 0 or strcmp(f_cstr, "current_struct_type" to cstr) == 0 or strcmp(f_cstr, "val_ptr" to cstr) == 0:
+    elif strcmp(f_cstr, "left" to cstr) == 0 or strcmp(f_cstr, "right" to cstr) == 0 or strcmp(f_cstr, "body" to cstr) == 0 or strcmp(f_cstr, "cond" to cstr) == 0 or strcmp(f_cstr, "then_branch" to cstr) == 0 or strcmp(f_cstr, "inferred_type" to cstr) == 0 or strcmp(f_cstr, "data" to cstr) == 0 or strcmp(f_cstr, "buffer" to cstr) == 0 or strcmp(f_cstr, "return_type_annot" to cstr) == 0 or strcmp(f_cstr, "type_annots" to cstr) == 0 or strcmp(f_cstr, "payload" to cstr) == 0 or strcmp(f_cstr, "return_type" to cstr) == 0 or strcmp(f_cstr, "sema" to cstr) == 0 or strcmp(f_cstr, "current_scope" to cstr) == 0 or strcmp(f_cstr, "global_scope" to cstr) == 0 or strcmp(f_cstr, "current_function_return" to cstr) == 0 or strcmp(f_cstr, "inferred_return_type" to cstr) == 0 or strcmp(f_cstr, "decl_node" to cstr) == 0 or strcmp(f_cstr, "root_ast" to cstr) == 0 or strcmp(f_cstr, "parent" to cstr) == 0 or strcmp(f_cstr, "closure_node" to cstr) == 0 or strcmp(f_cstr, "resolved_type" to cstr) == 0 or strcmp(f_cstr, "current_struct_type" to cstr) == 0 or strcmp(f_cstr, "val_ptr" to cstr) == 0 or strcmp(f_cstr, "active_param_block" to cstr) == 0:
         return String.make("ptr" to cstr)
     return String.make("{ ptr, i64, i64 }" to cstr)
 
@@ -289,36 +289,38 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "18" to ptr[u8]
         elif strcmp(v_cstr, "BlockStmt" to cstr) == 0:
             return "19" to ptr[u8]
-        elif strcmp(v_cstr, "WithStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "ParamBlockStmt" to cstr) == 0:
             return "20" to ptr[u8]
-        elif strcmp(v_cstr, "MatchStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "WithStmt" to cstr) == 0:
             return "21" to ptr[u8]
-        elif strcmp(v_cstr, "TryStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "MatchStmt" to cstr) == 0:
             return "22" to ptr[u8]
-        elif strcmp(v_cstr, "ThrowStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "TryStmt" to cstr) == 0:
             return "23" to ptr[u8]
-        elif strcmp(v_cstr, "ListLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "ThrowStmt" to cstr) == 0:
             return "24" to ptr[u8]
-        elif strcmp(v_cstr, "DictLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "ListLiteral" to cstr) == 0:
             return "25" to ptr[u8]
-        elif strcmp(v_cstr, "IndexExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "DictLiteral" to cstr) == 0:
             return "26" to ptr[u8]
-        elif strcmp(v_cstr, "SpreadExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "IndexExpr" to cstr) == 0:
             return "27" to ptr[u8]
-        elif strcmp(v_cstr, "BooleanLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "SpreadExpr" to cstr) == 0:
             return "28" to ptr[u8]
-        elif strcmp(v_cstr, "AwaitExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "BooleanLiteral" to cstr) == 0:
             return "29" to ptr[u8]
-        elif strcmp(v_cstr, "ClosureExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "AwaitExpr" to cstr) == 0:
             return "30" to ptr[u8]
-        elif strcmp(v_cstr, "StructDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "ClosureExpr" to cstr) == 0:
             return "31" to ptr[u8]
-        elif strcmp(v_cstr, "EnumDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "StructDecl" to cstr) == 0:
             return "32" to ptr[u8]
-        elif strcmp(v_cstr, "UnionDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "EnumDecl" to cstr) == 0:
             return "33" to ptr[u8]
-        elif strcmp(v_cstr, "FieldDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "UnionDecl" to cstr) == 0:
             return "34" to ptr[u8]
+        elif strcmp(v_cstr, "FieldDecl" to cstr) == 0:
+            return "35" to ptr[u8]
     elif strcmp(e_cstr, "TypeKind" to cstr) == 0:
         if strcmp(v_cstr, "I8" to cstr) == 0:
             return "0" to ptr[u8]
@@ -330,90 +332,102 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "3" to ptr[u8]
         elif strcmp(v_cstr, "I128" to cstr) == 0:
             return "4" to ptr[u8]
-        elif strcmp(v_cstr, "ISize" to cstr) == 0:
+        elif strcmp(v_cstr, "I256" to cstr) == 0:
             return "5" to ptr[u8]
-        elif strcmp(v_cstr, "U8" to cstr) == 0:
+        elif strcmp(v_cstr, "I512" to cstr) == 0:
             return "6" to ptr[u8]
-        elif strcmp(v_cstr, "U16" to cstr) == 0:
+        elif strcmp(v_cstr, "I1024" to cstr) == 0:
             return "7" to ptr[u8]
-        elif strcmp(v_cstr, "U32" to cstr) == 0:
+        elif strcmp(v_cstr, "ISize" to cstr) == 0:
             return "8" to ptr[u8]
-        elif strcmp(v_cstr, "U64" to cstr) == 0:
+        elif strcmp(v_cstr, "U8" to cstr) == 0:
             return "9" to ptr[u8]
-        elif strcmp(v_cstr, "U128" to cstr) == 0:
+        elif strcmp(v_cstr, "U16" to cstr) == 0:
             return "10" to ptr[u8]
-        elif strcmp(v_cstr, "USize" to cstr) == 0:
+        elif strcmp(v_cstr, "U32" to cstr) == 0:
             return "11" to ptr[u8]
-        elif strcmp(v_cstr, "F16" to cstr) == 0:
+        elif strcmp(v_cstr, "U64" to cstr) == 0:
             return "12" to ptr[u8]
-        elif strcmp(v_cstr, "BFloat16" to cstr) == 0:
+        elif strcmp(v_cstr, "U128" to cstr) == 0:
             return "13" to ptr[u8]
-        elif strcmp(v_cstr, "F32" to cstr) == 0:
+        elif strcmp(v_cstr, "U256" to cstr) == 0:
             return "14" to ptr[u8]
-        elif strcmp(v_cstr, "F64" to cstr) == 0:
+        elif strcmp(v_cstr, "U512" to cstr) == 0:
             return "15" to ptr[u8]
-        elif strcmp(v_cstr, "F128" to cstr) == 0:
+        elif strcmp(v_cstr, "U1024" to cstr) == 0:
             return "16" to ptr[u8]
-        elif strcmp(v_cstr, "Boolean" to cstr) == 0:
+        elif strcmp(v_cstr, "USize" to cstr) == 0:
             return "17" to ptr[u8]
-        elif strcmp(v_cstr, "Char" to cstr) == 0:
+        elif strcmp(v_cstr, "F16" to cstr) == 0:
             return "18" to ptr[u8]
-        elif strcmp(v_cstr, "String" to cstr) == 0:
+        elif strcmp(v_cstr, "BFloat16" to cstr) == 0:
             return "19" to ptr[u8]
-        elif strcmp(v_cstr, "CStr" to cstr) == 0:
+        elif strcmp(v_cstr, "F32" to cstr) == 0:
             return "20" to ptr[u8]
-        elif strcmp(v_cstr, "AsciiStr" to cstr) == 0:
+        elif strcmp(v_cstr, "F64" to cstr) == 0:
             return "21" to ptr[u8]
-        elif strcmp(v_cstr, "Utf8Str" to cstr) == 0:
+        elif strcmp(v_cstr, "F128" to cstr) == 0:
             return "22" to ptr[u8]
-        elif strcmp(v_cstr, "WebStr" to cstr) == 0:
+        elif strcmp(v_cstr, "Boolean" to cstr) == 0:
             return "23" to ptr[u8]
-        elif strcmp(v_cstr, "RangeStr" to cstr) == 0:
+        elif strcmp(v_cstr, "Char" to cstr) == 0:
             return "24" to ptr[u8]
-        elif strcmp(v_cstr, "Slice" to cstr) == 0:
+        elif strcmp(v_cstr, "String" to cstr) == 0:
             return "25" to ptr[u8]
-        elif strcmp(v_cstr, "List" to cstr) == 0:
+        elif strcmp(v_cstr, "CStr" to cstr) == 0:
             return "26" to ptr[u8]
-        elif strcmp(v_cstr, "Tuple" to cstr) == 0:
+        elif strcmp(v_cstr, "AsciiStr" to cstr) == 0:
             return "27" to ptr[u8]
-        elif strcmp(v_cstr, "Dict" to cstr) == 0:
+        elif strcmp(v_cstr, "Utf8Str" to cstr) == 0:
             return "28" to ptr[u8]
-        elif strcmp(v_cstr, "Result" to cstr) == 0:
+        elif strcmp(v_cstr, "WebStr" to cstr) == 0:
             return "29" to ptr[u8]
-        elif strcmp(v_cstr, "Option" to cstr) == 0:
+        elif strcmp(v_cstr, "RangeStr" to cstr) == 0:
             return "30" to ptr[u8]
-        elif strcmp(v_cstr, "Task" to cstr) == 0:
+        elif strcmp(v_cstr, "Slice" to cstr) == 0:
             return "31" to ptr[u8]
-        elif strcmp(v_cstr, "QBit" to cstr) == 0:
+        elif strcmp(v_cstr, "List" to cstr) == 0:
             return "32" to ptr[u8]
-        elif strcmp(v_cstr, "QReg" to cstr) == 0:
+        elif strcmp(v_cstr, "Tuple" to cstr) == 0:
             return "33" to ptr[u8]
-        elif strcmp(v_cstr, "Closure" to cstr) == 0:
+        elif strcmp(v_cstr, "Dict" to cstr) == 0:
             return "34" to ptr[u8]
-        elif strcmp(v_cstr, "Class" to cstr) == 0:
+        elif strcmp(v_cstr, "Result" to cstr) == 0:
             return "35" to ptr[u8]
-        elif strcmp(v_cstr, "Interface" to cstr) == 0:
+        elif strcmp(v_cstr, "Option" to cstr) == 0:
             return "36" to ptr[u8]
-        elif strcmp(v_cstr, "Error" to cstr) == 0:
+        elif strcmp(v_cstr, "Task" to cstr) == 0:
             return "37" to ptr[u8]
-        elif strcmp(v_cstr, "Struct" to cstr) == 0:
+        elif strcmp(v_cstr, "QBit" to cstr) == 0:
             return "38" to ptr[u8]
-        elif strcmp(v_cstr, "Enum" to cstr) == 0:
+        elif strcmp(v_cstr, "QReg" to cstr) == 0:
             return "39" to ptr[u8]
-        elif strcmp(v_cstr, "Union" to cstr) == 0:
+        elif strcmp(v_cstr, "Closure" to cstr) == 0:
             return "40" to ptr[u8]
-        elif strcmp(v_cstr, "Module" to cstr) == 0:
+        elif strcmp(v_cstr, "Class" to cstr) == 0:
             return "41" to ptr[u8]
-        elif strcmp(v_cstr, "Function" to cstr) == 0:
+        elif strcmp(v_cstr, "Interface" to cstr) == 0:
             return "42" to ptr[u8]
-        elif strcmp(v_cstr, "RawPointer" to cstr) == 0:
+        elif strcmp(v_cstr, "Error" to cstr) == 0:
             return "43" to ptr[u8]
-        elif strcmp(v_cstr, "Unknown" to cstr) == 0:
+        elif strcmp(v_cstr, "Struct" to cstr) == 0:
             return "44" to ptr[u8]
-        elif strcmp(v_cstr, "Any" to cstr) == 0:
+        elif strcmp(v_cstr, "Enum" to cstr) == 0:
             return "45" to ptr[u8]
-        elif strcmp(v_cstr, "Void" to cstr) == 0:
+        elif strcmp(v_cstr, "Union" to cstr) == 0:
             return "46" to ptr[u8]
+        elif strcmp(v_cstr, "Module" to cstr) == 0:
+            return "47" to ptr[u8]
+        elif strcmp(v_cstr, "Function" to cstr) == 0:
+            return "48" to ptr[u8]
+        elif strcmp(v_cstr, "RawPointer" to cstr) == 0:
+            return "49" to ptr[u8]
+        elif strcmp(v_cstr, "Unknown" to cstr) == 0:
+            return "50" to ptr[u8]
+        elif strcmp(v_cstr, "Any" to cstr) == 0:
+            return "51" to ptr[u8]
+        elif strcmp(v_cstr, "Void" to cstr) == 0:
+            return "52" to ptr[u8]
     return "0" to ptr[u8]
 
 fn type_to_llvm(t as ptr[Type]) as String:
@@ -432,6 +446,12 @@ fn type_to_llvm(t as ptr[Type]) as String:
         return String.make("i64" to cstr)
     if k == TypeKind.I128 or k == TypeKind.U128:
         return String.make("i128" to cstr)
+    if k == TypeKind.I256 or k == TypeKind.U256:
+        return String.make("i256" to cstr)
+    if k == TypeKind.I512 or k == TypeKind.U512:
+        return String.make("i512" to cstr)
+    if k == TypeKind.I1024 or k == TypeKind.U1024:
+        return String.make("i1024" to cstr)
     if k == TypeKind.F16:
         return String.make("half" to cstr)
     if k == TypeKind.BFloat16:
@@ -523,12 +543,20 @@ fn type_size(t as ptr[Type]) as i64:
     let k as TypeKind = (deref t).kind
     if k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Boolean or k == TypeKind.Char:
         return 1 to i64
-    if k == TypeKind.I16 or k == TypeKind.U16:
+    if k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16:
         return 2 to i64
     if k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32:
         return 4 to i64
     if k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.F64 or k == TypeKind.RawPointer or k == TypeKind.CStr:
         return 8 to i64
+    if k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
+        return 16 to i64
+    if k == TypeKind.I256 or k == TypeKind.U256:
+        return 32 to i64
+    if k == TypeKind.I512 or k == TypeKind.U512:
+        return 64 to i64
+    if k == TypeKind.I1024 or k == TypeKind.U1024:
+        return 128 to i64
     if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict:
         return 24 to i64
     if k == TypeKind.Option:
@@ -552,6 +580,42 @@ fn type_size(t as ptr[Type]) as i64:
         elif strcmp(sn, "PerfState" to cstr) == 0:
             return 64 to i64
     return 256 to i64
+
+fn llvm_int_bits(t as String) as i32:
+    if t.data == None to ptr[u8] or t.len == 0 to usize:
+        return 0 to i32
+    let c as cstr = t.data to cstr
+    if strcmp(c, "i1024" to cstr) == 0 or strcmp(c, "u1024" to cstr) == 0:
+        return 1024 to i32
+    if strcmp(c, "i512" to cstr) == 0 or strcmp(c, "u512" to cstr) == 0:
+        return 512 to i32
+    if strcmp(c, "i256" to cstr) == 0 or strcmp(c, "u256" to cstr) == 0:
+        return 256 to i32
+    if strcmp(c, "i128" to cstr) == 0 or strcmp(c, "u128" to cstr) == 0:
+        return 128 to i32
+    if strcmp(c, "i64" to cstr) == 0 or strcmp(c, "u64" to cstr) == 0 or strcmp(c, "isize" to cstr) == 0 or strcmp(c, "usize" to cstr) == 0:
+        return 64 to i32
+    if strcmp(c, "i32" to cstr) == 0 or strcmp(c, "u32" to cstr) == 0:
+        return 32 to i32
+    if strcmp(c, "i16" to cstr) == 0 or strcmp(c, "u16" to cstr) == 0:
+        return 16 to i32
+    if strcmp(c, "i8" to cstr) == 0 or strcmp(c, "u8" to cstr) == 0 or strcmp(c, "i1" to cstr) == 0 or strcmp(c, "byte" to cstr) == 0:
+        return 8 to i32
+    return 0 to i32
+
+fn llvm_float_rank(t as String) as i32:
+    if t.data == None to ptr[u8] or t.len == 0 to usize:
+        return 0 to i32
+    let c as cstr = t.data to cstr
+    if strcmp(c, "fp128" to cstr) == 0 or strcmp(c, "f128" to cstr) == 0:
+        return 4 to i32
+    if strcmp(c, "double" to cstr) == 0 or strcmp(c, "f64" to cstr) == 0:
+        return 3 to i32
+    if strcmp(c, "float" to cstr) == 0 or strcmp(c, "f32" to cstr) == 0:
+        return 2 to i32
+    if strcmp(c, "half" to cstr) == 0 or strcmp(c, "f16" to cstr) == 0 or strcmp(c, "bfloat" to cstr) == 0 or strcmp(c, "bf16" to cstr) == 0:
+        return 1 to i32
+    return 0 to i32
 
 fn is_struct_byval(t as String) as bool:
     if t.data == None to ptr[u8] or t.len == 0 to usize:
@@ -653,6 +717,8 @@ struct LLVMCodegen:
     public var type_aliases as Dict[String, String]
     public var global_vars as Dict[String, bool]
     public var global_types as Dict[String, String]
+    public var active_param_block as ptr[Node]
+    public var active_block_exit as String
 
     public fn init_cg(self as ptr[LLVMCodegen]):
         (deref self).type_out = StringBuilder.make()
@@ -681,6 +747,8 @@ struct LLVMCodegen:
         (deref self).type_aliases = Dict[String, String]()
         (deref self).global_vars = Dict[String, bool]()
         (deref self).global_types = Dict[String, String]()
+        (deref self).active_param_block = None to ptr[Node]
+        (deref self).active_block_exit = String.make("" to cstr)
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make(32 to usize) to ptr[u8]
@@ -733,11 +801,19 @@ struct LLVMCodegen:
         let c as cstr = self.trimmed(t)
         if c == None to cstr:
             return 8 to i64
+        if strcmp(c, "i1024" to cstr) == 0 or strcmp(c, "u1024" to cstr) == 0:
+            return 16 to i64
+        if strcmp(c, "i512" to cstr) == 0 or strcmp(c, "u512" to cstr) == 0:
+            return 16 to i64
+        if strcmp(c, "i256" to cstr) == 0 or strcmp(c, "u256" to cstr) == 0:
+            return 16 to i64
+        if strcmp(c, "i128" to cstr) == 0 or strcmp(c, "u128" to cstr) == 0 or strcmp(c, "fp128" to cstr) == 0 or strcmp(c, "f128" to cstr) == 0:
+            return 16 to i64
         if strcmp(c, "ptr" to cstr) == 0 or strcmp(c, "i64" to cstr) == 0 or strcmp(c, "u64" to cstr) == 0 or strcmp(c, "f64" to cstr) == 0 or strcmp(c, "double" to cstr) == 0 or strcmp(c, "isize" to cstr) == 0 or strcmp(c, "usize" to cstr) == 0 or strcmp(c, "cstr" to cstr) == 0:
             return 8 to i64
-        if strcmp(c, "i32" to cstr) == 0 or strcmp(c, "u32" to cstr) == 0 or strcmp(c, "f32" to cstr) == 0:
+        if strcmp(c, "i32" to cstr) == 0 or strcmp(c, "u32" to cstr) == 0 or strcmp(c, "f32" to cstr) == 0 or strcmp(c, "float" to cstr) == 0:
             return 4 to i64
-        if strcmp(c, "i16" to cstr) == 0 or strcmp(c, "u16" to cstr) == 0:
+        if strcmp(c, "i16" to cstr) == 0 or strcmp(c, "u16" to cstr) == 0 or strcmp(c, "f16" to cstr) == 0 or strcmp(c, "half" to cstr) == 0 or strcmp(c, "bf16" to cstr) == 0 or strcmp(c, "bfloat" to cstr) == 0:
             return 2 to i64
         if strcmp(c, "i8" to cstr) == 0 or strcmp(c, "u8" to cstr) == 0 or strcmp(c, "i1" to cstr) == 0 or strcmp(c, "byte" to cstr) == 0:
             return 1 to i64
@@ -747,11 +823,19 @@ struct LLVMCodegen:
         let c as cstr = self.trimmed(t)
         if c == None to cstr:
             return 256 to i64
+        if strcmp(c, "i1024" to cstr) == 0 or strcmp(c, "u1024" to cstr) == 0:
+            return 128 to i64
+        if strcmp(c, "i512" to cstr) == 0 or strcmp(c, "u512" to cstr) == 0:
+            return 64 to i64
+        if strcmp(c, "i256" to cstr) == 0 or strcmp(c, "u256" to cstr) == 0:
+            return 32 to i64
+        if strcmp(c, "i128" to cstr) == 0 or strcmp(c, "u128" to cstr) == 0 or strcmp(c, "fp128" to cstr) == 0 or strcmp(c, "f128" to cstr) == 0:
+            return 16 to i64
         if strcmp(c, "ptr" to cstr) == 0 or strcmp(c, "i64" to cstr) == 0 or strcmp(c, "u64" to cstr) == 0 or strcmp(c, "f64" to cstr) == 0 or strcmp(c, "double" to cstr) == 0 or strcmp(c, "isize" to cstr) == 0 or strcmp(c, "usize" to cstr) == 0 or strcmp(c, "cstr" to cstr) == 0:
             return 8 to i64
-        if strcmp(c, "i32" to cstr) == 0 or strcmp(c, "u32" to cstr) == 0 or strcmp(c, "f32" to cstr) == 0:
+        if strcmp(c, "i32" to cstr) == 0 or strcmp(c, "u32" to cstr) == 0 or strcmp(c, "f32" to cstr) == 0 or strcmp(c, "float" to cstr) == 0:
             return 4 to i64
-        if strcmp(c, "i16" to cstr) == 0 or strcmp(c, "u16" to cstr) == 0:
+        if strcmp(c, "i16" to cstr) == 0 or strcmp(c, "u16" to cstr) == 0 or strcmp(c, "f16" to cstr) == 0 or strcmp(c, "half" to cstr) == 0 or strcmp(c, "bf16" to cstr) == 0 or strcmp(c, "bfloat" to cstr) == 0:
             return 2 to i64
         if strcmp(c, "i8" to cstr) == 0 or strcmp(c, "u8" to cstr) == 0 or strcmp(c, "i1" to cstr) == 0 or strcmp(c, "byte" to cstr) == 0:
             return 1 to i64
@@ -921,10 +1005,10 @@ struct LLVMCodegen:
 
     public fn emit_builtin_struct_types(self as ptr[LLVMCodegen]):
         self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
-        self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr }")
+        self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32 }")
-        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+        self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
         self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
         self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
@@ -946,6 +1030,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("UnaryExprData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("CastExprData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("BlockStmtData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
+        self.register_builtin_struct("ParamBlockStmtData", "{ { ptr, i64, i64 }, ptr, { ptr, i64, i64 }, ptr, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("WithStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("MatchStmtData", "{ ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("TryStmtData", "{ ptr, { ptr, i64, i64 }, ptr }")
@@ -1033,6 +1118,12 @@ struct LLVMCodegen:
         self.register_field_idx("CastExprData" to cstr, "left" to cstr, 1 to i32)
         self.register_field_idx("BlockStmtData" to cstr, "declarations" to cstr, 0 to i32)
         self.register_field_idx("BlockStmtData" to cstr, "auto_drops" to cstr, 1 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "params" to cstr, 0 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "body" to cstr, 1 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "return_names" to cstr, 2 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "type_annots" to cstr, 3 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "return_type_annots" to cstr, 4 to i32)
+        self.register_field_idx("ParamBlockStmtData" to cstr, "auto_drops" to cstr, 5 to i32)
         self.register_field_idx("WithStmtData" to cstr, "left" to cstr, 0 to i32)
         self.register_field_idx("WithStmtData" to cstr, "name" to cstr, 1 to i32)
         self.register_field_idx("WithStmtData" to cstr, "body" to cstr, 2 to i32)
@@ -1078,6 +1169,7 @@ struct LLVMCodegen:
         self.register_field_idx("Sema" to cstr, "mode" to cstr, 7 to i32)
         self.register_field_idx("Sema" to cstr, "root_ast" to cstr, 8 to i32)
         self.register_field_idx("Sema" to cstr, "engine" to cstr, 9 to i32)
+        self.register_field_idx("Sema" to cstr, "link_targets" to cstr, 10 to i32)
 
         self.register_field_idx("TypeChecker" to cstr, "sema" to cstr, 0 to i32)
         self.register_field_idx("TypeChecker" to cstr, "current_function_return" to cstr, 1 to i32)
@@ -1296,6 +1388,8 @@ struct LLVMCodegen:
             self.emit_throw(node)
         elif nt == NodeType.BlockStmt:
             self.emit_block(node)
+        elif nt == NodeType.ParamBlockStmt:
+            self.emit_param_block(node)
         elif nt == NodeType.BinaryExpr: // BinaryExpr / Assignment as statement
             self.emit_binary_stmt(node)
         elif nt == NodeType.MemberExpr: // MemberExpr as statement
@@ -1860,9 +1954,9 @@ struct LLVMCodegen:
             var is_float as bool = node_is_float(node)
             if inf_t != None to ptr[Type]:
                 let tk as TypeKind = (deref inf_t).kind
-                if tk == TypeKind.F32 or tk == TypeKind.F64:
+                if tk == TypeKind.F16 or tk == TypeKind.BFloat16 or tk == TypeKind.F32 or tk == TypeKind.F64 or tk == TypeKind.F128:
                     is_float = True
-            if not is_float and ((deref self).current_return_type.len > 0 to usize and (strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "float" to cstr) == 0)):
+            if not is_float and ((deref self).current_return_type.len > 0 to usize and (strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "float" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "half" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "bfloat" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "fp128" to cstr) == 0)):
                 is_float = True
             let s_raw as String = node_str_val(node)
             if not is_float and s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
@@ -1872,9 +1966,9 @@ struct LLVMCodegen:
             let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
             if is_float:
                 var is_f32 as i32 = 1
-                if inf_t != None to ptr[Type] and (deref inf_t).kind == TypeKind.F64:
+                if inf_t != None to ptr[Type] and ((deref inf_t).kind == TypeKind.F64 or (deref inf_t).kind == TypeKind.F128):
                     is_f32 = 0
-                elif strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0:
+                elif strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "fp128" to cstr) == 0:
                     is_f32 = 0
                 extern fn format_llvm_float(val as f64, is_f32 as i32, out_buf as ptr[u8])
                 format_llvm_float(val, is_f32, buf)
@@ -2400,6 +2494,10 @@ struct LLVMCodegen:
                         field_idx = 7 to i32
                     elif strcmp(f_cstr, "root_ast" to cstr) == 0:
                         field_idx = 8 to i32
+                    elif strcmp(f_cstr, "engine" to cstr) == 0:
+                        field_idx = 9 to i32
+                    elif strcmp(f_cstr, "link_targets" to cstr) == 0:
+                        field_idx = 10 to i32
                 elif strcmp(s_cstr, "TypeChecker" to cstr) == 0:
                     if strcmp(f_cstr, "sema" to cstr) == 0:
                         field_idx = 0 to i32
@@ -2668,6 +2766,10 @@ struct LLVMCodegen:
                         field_idx = 24 to i32
                     elif strcmp(f_cstr, "global_types" to cstr) == 0:
                         field_idx = 25 to i32
+                    elif strcmp(f_cstr, "active_param_block" to cstr) == 0:
+                        field_idx = 26 to i32
+                    elif strcmp(f_cstr, "active_block_exit" to cstr) == 0:
+                        field_idx = 27 to i32
                 elif strcmp(s_cstr, "Scope" to cstr) == 0:
                     if strcmp(f_cstr, "parent" to cstr) == 0:
                         field_idx = 0 to i32
@@ -3060,7 +3162,7 @@ struct LLVMCodegen:
             if node_kind(right) == NodeType.IndexExpr:
                 right_type = self.index_value_llvm(right)
 
-            let is_fop as bool = strcmp(target_type.data to cstr, "double" to cstr) == 0 or strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0
+            let is_fop as bool = strcmp(target_type.data to cstr, "double" to cstr) == 0 or strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0 or strcmp(target_type.data to cstr, "fp128" to cstr) == 0
             if is_fop:
                 if node_kind(right) == NodeType.NumberLiteral and (deref right_reg) != 37 to u8:
                     right_reg = self.float_const_reg(right)
@@ -3149,8 +3251,12 @@ struct LLVMCodegen:
         let f_val as f64 = node_val(node)
         let inf_t as ptr[Type] = node_inferred_type(node)
         var is_f32 as i32 = 1
-        if inf_t != None to ptr[Type] and (deref inf_t).kind == TypeKind.F64:
-            is_f32 = 0
+        if inf_t != None to ptr[Type]:
+            let k as TypeKind = (deref inf_t).kind
+            if k == TypeKind.F64 or k == TypeKind.F128:
+                is_f32 = 0
+            elif k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.F32:
+                is_f32 = 1
         extern fn format_llvm_float(val as f64, is_f32 as i32, out_buf as ptr[u8])
         format_llvm_float(f_val, is_f32, f_buf)
         return f_buf
@@ -3431,6 +3537,24 @@ struct LLVMCodegen:
                     left_t_str = String.make("i16" to cstr)
                 elif strcmp(c_n, "i32" to cstr) == 0 or strcmp(c_n, "u32" to cstr) == 0 or strcmp(c_n, "char" to cstr) == 0:
                     left_t_str = String.make("i32" to cstr)
+                elif strcmp(c_n, "i128" to cstr) == 0 or strcmp(c_n, "u128" to cstr) == 0:
+                    left_t_str = String.make("i128" to cstr)
+                elif strcmp(c_n, "i256" to cstr) == 0 or strcmp(c_n, "u256" to cstr) == 0:
+                    left_t_str = String.make("i256" to cstr)
+                elif strcmp(c_n, "i512" to cstr) == 0 or strcmp(c_n, "u512" to cstr) == 0:
+                    left_t_str = String.make("i512" to cstr)
+                elif strcmp(c_n, "i1024" to cstr) == 0 or strcmp(c_n, "u1024" to cstr) == 0:
+                    left_t_str = String.make("i1024" to cstr)
+                elif strcmp(c_n, "f16" to cstr) == 0 or strcmp(c_n, "half" to cstr) == 0:
+                    left_t_str = String.make("half" to cstr)
+                elif strcmp(c_n, "bf16" to cstr) == 0 or strcmp(c_n, "bfloat" to cstr) == 0 or strcmp(c_n, "BFloat16" to cstr) == 0:
+                    left_t_str = String.make("bfloat" to cstr)
+                elif strcmp(c_n, "f32" to cstr) == 0 or strcmp(c_n, "float" to cstr) == 0:
+                    left_t_str = String.make("float" to cstr)
+                elif strcmp(c_n, "f64" to cstr) == 0 or strcmp(c_n, "double" to cstr) == 0:
+                    left_t_str = String.make("double" to cstr)
+                elif strcmp(c_n, "f128" to cstr) == 0 or strcmp(c_n, "fp128" to cstr) == 0:
+                    left_t_str = String.make("fp128" to cstr)
                 else:
                     left_t_str = String.make("i64" to cstr)
         elif node_kind(left) == NodeType.IndexExpr:
@@ -3498,6 +3622,24 @@ struct LLVMCodegen:
                     right_t_str = String.make("i16" to cstr)
                 elif strcmp(c_n, "i32" to cstr) == 0 or strcmp(c_n, "u32" to cstr) == 0 or strcmp(c_n, "char" to cstr) == 0:
                     right_t_str = String.make("i32" to cstr)
+                elif strcmp(c_n, "i128" to cstr) == 0 or strcmp(c_n, "u128" to cstr) == 0:
+                    right_t_str = String.make("i128" to cstr)
+                elif strcmp(c_n, "i256" to cstr) == 0 or strcmp(c_n, "u256" to cstr) == 0:
+                    right_t_str = String.make("i256" to cstr)
+                elif strcmp(c_n, "i512" to cstr) == 0 or strcmp(c_n, "u512" to cstr) == 0:
+                    right_t_str = String.make("i512" to cstr)
+                elif strcmp(c_n, "i1024" to cstr) == 0 or strcmp(c_n, "u1024" to cstr) == 0:
+                    right_t_str = String.make("i1024" to cstr)
+                elif strcmp(c_n, "f16" to cstr) == 0 or strcmp(c_n, "half" to cstr) == 0:
+                    right_t_str = String.make("half" to cstr)
+                elif strcmp(c_n, "bf16" to cstr) == 0 or strcmp(c_n, "bfloat" to cstr) == 0 or strcmp(c_n, "BFloat16" to cstr) == 0:
+                    right_t_str = String.make("bfloat" to cstr)
+                elif strcmp(c_n, "f32" to cstr) == 0 or strcmp(c_n, "float" to cstr) == 0:
+                    right_t_str = String.make("float" to cstr)
+                elif strcmp(c_n, "f64" to cstr) == 0 or strcmp(c_n, "double" to cstr) == 0:
+                    right_t_str = String.make("double" to cstr)
+                elif strcmp(c_n, "f128" to cstr) == 0 or strcmp(c_n, "fp128" to cstr) == 0:
+                    right_t_str = String.make("fp128" to cstr)
                 else:
                     right_t_str = String.make("i64" to cstr)
         elif node_kind(right) == NodeType.IndexExpr:
@@ -3533,32 +3675,45 @@ struct LLVMCodegen:
                 let ro as cstr = right_op.data to cstr
                 if strcmp(ro, "==" to cstr) == 0 or strcmp(ro, "!=" to cstr) == 0 or strcmp(ro, "<" to cstr) == 0 or strcmp(ro, ">" to cstr) == 0 or strcmp(ro, "<=" to cstr) == 0 or strcmp(ro, ">=" to cstr) == 0:
                     right_is_cmp = True
-        let is_arith as bool = strcmp(op.data to cstr, "+" to cstr) == 0 or strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "*" to cstr) == 0 or strcmp(op.data to cstr, "/" to cstr) == 0 or strcmp(op.data to cstr, "or" to cstr) == 0 or strcmp(op.data to cstr, "and" to cstr) == 0
+        let is_arith as bool = strcmp(op.data to cstr, "+" to cstr) == 0 or strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "*" to cstr) == 0 or strcmp(op.data to cstr, "/" to cstr) == 0 or strcmp(op.data to cstr, "%" to cstr) == 0 or strcmp(op.data to cstr, "or" to cstr) == 0 or strcmp(op.data to cstr, "and" to cstr) == 0
         var operand_type as String = left_t_str
         if is_arith:
             if left_is_cmp or right_is_cmp or strcmp(left_t_str.data to cstr, "i1" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i1" to cstr) == 0:
                 operand_type = String.make("i1" to cstr)
-            elif strcmp(right_t_str.data to cstr, "i64" to cstr) == 0 and strcmp(left_t_str.data to cstr, "i64" to cstr) != 0:
-                operand_type = String.make("i64" to cstr)
             else:
-                operand_type = left_t_str
+                let left_bits as i32 = llvm_int_bits(left_t_str)
+                let right_bits as i32 = llvm_int_bits(right_t_str)
+                let left_f_rank as i32 = llvm_float_rank(left_t_str)
+                let right_f_rank as i32 = llvm_float_rank(right_t_str)
+                if left_f_rank > 0 to i32 or right_f_rank > 0 to i32:
+                    if left_f_rank >= right_f_rank:
+                        operand_type = left_t_str
+                    else:
+                        operand_type = right_t_str
+                elif left_bits > 0 to i32 or right_bits > 0 to i32:
+                    if left_bits >= right_bits:
+                        operand_type = left_t_str
+                    else:
+                        operand_type = right_t_str
+                else:
+                    operand_type = left_t_str
         elif left_is_ptr or right_is_ptr:
             operand_type = String.make("ptr" to cstr)
         elif is_cmp:
-            if strcmp(left_t_str.data to cstr, "double" to cstr) == 0 or strcmp(right_t_str.data to cstr, "double" to cstr) == 0:
-                operand_type = String.make("double" to cstr)
-            elif strcmp(left_t_str.data to cstr, "float" to cstr) == 0 or strcmp(right_t_str.data to cstr, "float" to cstr) == 0:
-                operand_type = String.make("float" to cstr)
-            elif strcmp(left_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i64" to cstr) == 0:
-                operand_type = String.make("i64" to cstr)
-            elif strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0:
-                operand_type = String.make("i32" to cstr)
-            elif strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0:
-                operand_type = String.make("i16" to cstr)
-            elif strcmp(left_t_str.data to cstr, "i8" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
-                operand_type = String.make("i8" to cstr)
-            elif strcmp(left_t_str.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(right_t_str.data to cstr, "{ ptr, ptr }" to cstr) == 0:
-                operand_type = String.make("i8" to cstr)
+            let left_bits as i32 = llvm_int_bits(left_t_str)
+            let right_bits as i32 = llvm_int_bits(right_t_str)
+            let left_f_rank as i32 = llvm_float_rank(left_t_str)
+            let right_f_rank as i32 = llvm_float_rank(right_t_str)
+            if left_f_rank > 0 to i32 or right_f_rank > 0 to i32:
+                if left_f_rank >= right_f_rank:
+                    operand_type = left_t_str
+                else:
+                    operand_type = right_t_str
+            elif left_bits > 0 to i32 or right_bits > 0 to i32:
+                if left_bits >= right_bits:
+                    operand_type = left_t_str
+                else:
+                    operand_type = right_t_str
             else:
                 operand_type = left_t_str
 
@@ -3587,7 +3742,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, right_reg to cstr)
                 append_cstr(ref (deref self).main_out, " to ptr\n")
                 real_right = p_temp
-        elif is_arith:
+        elif is_arith or is_cmp:
             if left_is_ptr and (deref left_reg) == 37 to u8:
                 let i_temp as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -3605,46 +3760,42 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, " to i64\n")
                 real_right = i_temp
             if not left_is_ptr and strcmp(left_t_str.data to cstr, operand_type.data to cstr) != 0:
-                if strcmp(operand_type.data to cstr, "i64" to cstr) == 0 or strcmp(operand_type.data to cstr, "i32" to cstr) == 0 or strcmp(operand_type.data to cstr, "i16" to cstr) == 0 or strcmp(operand_type.data to cstr, "i8" to cstr) == 0:
-                    if strcmp(left_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i8" to cstr) == 0:
-                        var l_sext as bool = False
-                        if strcmp(operand_type.data to cstr, "i64" to cstr) == 0:
-                            if strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i8" to cstr) == 0:
-                                l_sext = True
-                        elif strcmp(operand_type.data to cstr, "i32" to cstr) == 0:
-                            if strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i8" to cstr) == 0:
-                                l_sext = True
-                        elif strcmp(operand_type.data to cstr, "i16" to cstr) == 0:
-                            if strcmp(left_t_str.data to cstr, "i8" to cstr) == 0:
-                                l_sext = True
-                        let cv_l as ptr[u8] = self.fresh_temp()
-                        append_cstr(ref (deref self).main_out, "  ")
-                        append_cstr(ref (deref self).main_out, cv_l to cstr)
-                        if l_sext:
-                            append_cstr(ref (deref self).main_out, " = sext ")
-                        else:
-                            append_cstr(ref (deref self).main_out, " = trunc ")
-                        append_str(ref (deref self).main_out, left_t_str)
-                        append_cstr(ref (deref self).main_out, " ")
-                        append_cstr(ref (deref self).main_out, left_reg to cstr)
-                        append_cstr(ref (deref self).main_out, " to ")
-                        append_str(ref (deref self).main_out, operand_type)
-                        append_cstr(ref (deref self).main_out, "\n")
-                        real_left = cv_l
-                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(left_t_str.data to cstr, "double" to cstr) == 0 or strcmp(left_t_str.data to cstr, "float" to cstr) == 0):
+                let left_bits as i32 = llvm_int_bits(left_t_str)
+                let op_bits as i32 = llvm_int_bits(operand_type)
+                let left_f_rank as i32 = llvm_float_rank(left_t_str)
+                let op_f_rank as i32 = llvm_float_rank(operand_type)
+
+                if op_bits > 0 to i32 and left_bits > 0 to i32:
                     let cv_l as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cv_l to cstr)
-                    if strcmp(operand_type.data to cstr, "double" to cstr) == 0:
-                        append_cstr(ref (deref self).main_out, " = fpext float ")
+                    if left_bits < op_bits:
+                        append_cstr(ref (deref self).main_out, " = sext ")
                     else:
-                        append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                        append_cstr(ref (deref self).main_out, " = trunc ")
+                    append_str(ref (deref self).main_out, left_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
                     append_cstr(ref (deref self).main_out, left_reg to cstr)
                     append_cstr(ref (deref self).main_out, " to ")
                     append_str(ref (deref self).main_out, operand_type)
                     append_cstr(ref (deref self).main_out, "\n")
                     real_left = cv_l
-                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(left_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(left_t_str.data to cstr, "i8" to cstr) == 0):
+                elif op_f_rank > 0 to i32 and left_f_rank > 0 to i32:
+                    let cv_l as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_l to cstr)
+                    if left_f_rank < op_f_rank:
+                        append_cstr(ref (deref self).main_out, " = fpext ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = fptrunc ")
+                    append_str(ref (deref self).main_out, left_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, left_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_left = cv_l
+                elif op_f_rank > 0 to i32 and left_bits > 0 to i32:
                     let cv_l as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cv_l to cstr)
@@ -3657,46 +3808,42 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, "\n")
                     real_left = cv_l
             if not right_is_ptr and strcmp(right_t_str.data to cstr, operand_type.data to cstr) != 0:
-                if strcmp(operand_type.data to cstr, "i64" to cstr) == 0 or strcmp(operand_type.data to cstr, "i32" to cstr) == 0 or strcmp(operand_type.data to cstr, "i16" to cstr) == 0 or strcmp(operand_type.data to cstr, "i8" to cstr) == 0:
-                    if strcmp(right_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
-                        var r_sext as bool = False
-                        if strcmp(operand_type.data to cstr, "i64" to cstr) == 0:
-                            if strcmp(right_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
-                                r_sext = True
-                        elif strcmp(operand_type.data to cstr, "i32" to cstr) == 0:
-                            if strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
-                                r_sext = True
-                        elif strcmp(operand_type.data to cstr, "i16" to cstr) == 0:
-                            if strcmp(right_t_str.data to cstr, "i8" to cstr) == 0:
-                                r_sext = True
-                        let cv_r as ptr[u8] = self.fresh_temp()
-                        append_cstr(ref (deref self).main_out, "  ")
-                        append_cstr(ref (deref self).main_out, cv_r to cstr)
-                        if r_sext:
-                            append_cstr(ref (deref self).main_out, " = sext ")
-                        else:
-                            append_cstr(ref (deref self).main_out, " = trunc ")
-                        append_str(ref (deref self).main_out, right_t_str)
-                        append_cstr(ref (deref self).main_out, " ")
-                        append_cstr(ref (deref self).main_out, right_reg to cstr)
-                        append_cstr(ref (deref self).main_out, " to ")
-                        append_str(ref (deref self).main_out, operand_type)
-                        append_cstr(ref (deref self).main_out, "\n")
-                        real_right = cv_r
-                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(right_t_str.data to cstr, "double" to cstr) == 0 or strcmp(right_t_str.data to cstr, "float" to cstr) == 0):
+                let right_bits as i32 = llvm_int_bits(right_t_str)
+                let op_bits as i32 = llvm_int_bits(operand_type)
+                let right_f_rank as i32 = llvm_float_rank(right_t_str)
+                let op_f_rank as i32 = llvm_float_rank(operand_type)
+
+                if op_bits > 0 to i32 and right_bits > 0 to i32:
                     let cv_r as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cv_r to cstr)
-                    if strcmp(operand_type.data to cstr, "double" to cstr) == 0:
-                        append_cstr(ref (deref self).main_out, " = fpext float ")
+                    if right_bits < op_bits:
+                        append_cstr(ref (deref self).main_out, " = sext ")
                     else:
-                        append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                        append_cstr(ref (deref self).main_out, " = trunc ")
+                    append_str(ref (deref self).main_out, right_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
                     append_cstr(ref (deref self).main_out, right_reg to cstr)
                     append_cstr(ref (deref self).main_out, " to ")
                     append_str(ref (deref self).main_out, operand_type)
                     append_cstr(ref (deref self).main_out, "\n")
                     real_right = cv_r
-                elif (strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0) and (strcmp(right_t_str.data to cstr, "i64" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i32" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i16" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i8" to cstr) == 0):
+                elif op_f_rank > 0 to i32 and right_f_rank > 0 to i32:
+                    let cv_r as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cv_r to cstr)
+                    if right_f_rank < op_f_rank:
+                        append_cstr(ref (deref self).main_out, " = fpext ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = fptrunc ")
+                    append_str(ref (deref self).main_out, right_t_str)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, right_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, operand_type)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    real_right = cv_r
+                elif op_f_rank > 0 to i32 and right_bits > 0 to i32:
                     let cv_r as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cv_r to cstr)
@@ -3709,7 +3856,7 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, "\n")
                     real_right = cv_r
 
-        let is_fop as bool = strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0 or strcmp(operand_type.data to cstr, "half" to cstr) == 0 or strcmp(operand_type.data to cstr, "bfloat" to cstr) == 0
+        let is_fop as bool = strcmp(operand_type.data to cstr, "double" to cstr) == 0 or strcmp(operand_type.data to cstr, "float" to cstr) == 0 or strcmp(operand_type.data to cstr, "half" to cstr) == 0 or strcmp(operand_type.data to cstr, "bfloat" to cstr) == 0 or strcmp(operand_type.data to cstr, "fp128" to cstr) == 0
         if is_fop:
             if node_kind(actual_right) == NodeType.NumberLiteral and (deref real_right) != 37 to u8:
                 real_right = self.float_const_reg(actual_right)
@@ -5380,6 +5527,88 @@ struct LLVMCodegen:
         if drops.length() > 0 to i64:
             self.emit_auto_drops(drops)
 
+        if (deref self).active_param_block != None to ptr[Node]:
+            let apb as ptr[Node] = (deref self).active_param_block
+            let ret_names as List[String] = node_return_names(apb)
+            let val as ptr[Node] = node_body(node)
+            if val != None to ptr[Node]:
+                if node_kind(val) == NodeType.ListLiteral:
+                    let ret_exprs as List[ptr[Node]] = node_declarations(val)
+                    let expr_count as i64 = ret_exprs.length()
+                    var ei as i64 = 0 to i64
+                    while ei < expr_count:
+                        if ei < ret_names.length():
+                            let r_name_str as String = ret_names[ei]
+                            if r_name_str.data != None to ptr[u8] and r_name_str.len > 0 to usize:
+                                let r_cstr as cstr = r_name_str.data to cstr
+                                let r_name as String = String.make(r_cstr)
+                                var r_slot as String = r_name
+                                var r_type as String = String.make("i64" to cstr)
+                                if (deref self).var_slots.has(r_name):
+                                    r_slot = (deref self).var_slots[r_name]
+                                if (deref self).var_types.has(r_name):
+                                    r_type = (deref self).var_types[r_name]
+                                let r_expr as ptr[Node] = ret_exprs[ei]
+                                let val_reg as ptr[u8] = self.emit_expr(r_expr)
+
+                                var real_val as ptr[u8] = val_reg
+                                let expr_t_str as String = type_to_llvm(node_inferred_type(r_expr))
+                                if strcmp(r_type.data to cstr, "i64" to cstr) == 0 and strcmp(expr_t_str.data to cstr, "i32" to cstr) == 0:
+                                    let ext_reg as ptr[u8] = self.fresh_temp()
+                                    append_cstr(ref (deref self).main_out, "  ")
+                                    append_cstr(ref (deref self).main_out, ext_reg to cstr)
+                                    append_cstr(ref (deref self).main_out, " = sext i32 ")
+                                    append_cstr(ref (deref self).main_out, val_reg to cstr)
+                                    append_cstr(ref (deref self).main_out, " to i64\n")
+                                    real_val = ext_reg
+
+                                append_cstr(ref (deref self).main_out, "  store ")
+                                append_str(ref (deref self).main_out, r_type)
+                                append_cstr(ref (deref self).main_out, " ")
+                                append_cstr(ref (deref self).main_out, real_val to cstr)
+                                append_cstr(ref (deref self).main_out, ", ptr %")
+                                append_str(ref (deref self).main_out, r_slot)
+                                append_cstr(ref (deref self).main_out, "\n")
+                        ei = ei + 1 to i64
+                else:
+                    let val_reg as ptr[u8] = self.emit_expr(val)
+                    if ret_names.length() > 0 to i64:
+                        let r_name_str as String = ret_names[0]
+                        if r_name_str.data != None to ptr[u8] and r_name_str.len > 0 to usize:
+                            let r_cstr as cstr = r_name_str.data to cstr
+                            let r_name as String = String.make(r_cstr)
+                            var r_slot as String = r_name
+                            var r_type as String = String.make("i64" to cstr)
+                            if (deref self).var_slots.has(r_name):
+                                r_slot = (deref self).var_slots[r_name]
+                            if (deref self).var_types.has(r_name):
+                                r_type = (deref self).var_types[r_name]
+
+                            var real_val as ptr[u8] = val_reg
+                            let expr_t_str as String = type_to_llvm(node_inferred_type(val))
+                            if strcmp(r_type.data to cstr, "i64" to cstr) == 0 and strcmp(expr_t_str.data to cstr, "i32" to cstr) == 0:
+                                let ext_reg as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, ext_reg to cstr)
+                                append_cstr(ref (deref self).main_out, " = sext i32 ")
+                                append_cstr(ref (deref self).main_out, val_reg to cstr)
+                                append_cstr(ref (deref self).main_out, " to i64\n")
+                                real_val = ext_reg
+
+                            append_cstr(ref (deref self).main_out, "  store ")
+                            append_str(ref (deref self).main_out, r_type)
+                            append_cstr(ref (deref self).main_out, " ")
+                            append_cstr(ref (deref self).main_out, real_val to cstr)
+                            append_cstr(ref (deref self).main_out, ", ptr %")
+                            append_str(ref (deref self).main_out, r_slot)
+                            append_cstr(ref (deref self).main_out, "\n")
+
+            if (deref self).active_block_exit.len > 0 to usize:
+                append_cstr(ref (deref self).main_out, "  br label %")
+                append_str(ref (deref self).main_out, (deref self).active_block_exit)
+                append_cstr(ref (deref self).main_out, "\n")
+            return
+
         let val as ptr[Node] = node_body(node)
         if val != None to ptr[Node]:
             var ret_type as String = (deref self).current_return_type
@@ -6639,6 +6868,173 @@ struct LLVMCodegen:
             if drops.length() > 0 to i64:
                 self.emit_auto_drops(drops)
 
+    public fn emit_param_block(self as ptr[LLVMCodegen], node as ptr[Node]):
+        // 1. Allocate return variables in current function frame if not already allocated
+        let ret_names as List[String] = node_return_names(node)
+        let ret_count as i64 = ret_names.length()
+        let ret_annots_p as ptr[List[Option[ptr[TypeAnnotation]]]] = node_return_type_annots(node)
+        var r_i as i64 = 0 to i64
+        while r_i < ret_count:
+            let r_name_str as String = ret_names[r_i]
+            if r_name_str.data != None to ptr[u8] and r_name_str.len > 0 to usize:
+                let r_cstr as cstr = r_name_str.data to cstr
+                let r_name as String = String.make(r_cstr)
+                var r_type as String = String.make("i64" to cstr)
+                if ret_annots_p != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                    let r_annots as List[Option[ptr[TypeAnnotation]]] = deref ret_annots_p
+                    if r_i < r_annots.length():
+                        let opt as Option[ptr[TypeAnnotation]] = r_annots[r_i]
+                        let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                        if option_has_value(opt_ref):
+                            let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
+                            if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
+                                let pa_name as cstr = (deref pa).name.data to cstr
+                                if strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                    r_type = String.make("i32" to cstr)
+                                elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0:
+                                    r_type = String.make("i64" to cstr)
+                                elif strcmp(pa_name, "f64" to cstr) == 0:
+                                    r_type = String.make("double" to cstr)
+                                elif strcmp(pa_name, "f32" to cstr) == 0:
+                                    r_type = String.make("float" to cstr)
+                                elif strcmp(pa_name, "bool" to cstr) == 0 or strcmp(pa_name, "i8" to cstr) == 0 or strcmp(pa_name, "u8" to cstr) == 0:
+                                    r_type = String.make("i8" to cstr)
+                                elif strcmp(pa_name, "ptr" to cstr) == 0 or (deref pa).is_ref:
+                                    r_type = String.make("ptr" to cstr)
+                                elif strcmp(pa_name, "String" to cstr) == 0 or strcmp(pa_name, "List" to cstr) == 0 or strcmp(pa_name, "Dict" to cstr) == 0:
+                                    r_type = String.make("{ ptr, i64, i64 }" to cstr)
+                                else:
+                                    r_type = String.make(pa_name)
+                
+                var r_count as i32 = 0 to i32
+                if (deref self).var_counts.has(r_name):
+                    r_count = (deref self).var_counts[r_name]
+                set_dict_i32(ref (deref self).var_counts, r_name, r_count + 1 to i32)
+                var r_slot_name as String = r_name
+                if r_count > 0 to i32:
+                    let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                    let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, r_name.data to cstr, r_count)
+                    r_slot_name = String.make(slot_buf to cstr)
+                set_dict_str(ref (deref self).var_slots, r_name, r_slot_name)
+                set_dict_str(ref (deref self).var_types, r_name, r_type)
+
+                append_cstr(ref (deref self).main_out, "  %")
+                append_str(ref (deref self).main_out, r_slot_name)
+                append_cstr(ref (deref self).main_out, " = alloca ")
+                append_str(ref (deref self).main_out, r_type)
+                append_cstr(ref (deref self).main_out, "\n")
+            r_i = r_i + 1 to i64
+
+        // 2. Setup parameters (shadow outer variables, initialize with existing outer values if any)
+        let params as List[ptr[Node]] = node_params(node)
+        let param_count as i64 = params.length()
+        let saved_slots as Dict[String, String] = Dict[String, String]()
+        let saved_types as Dict[String, String] = Dict[String, String]()
+        let had_saved as Dict[String, bool] = Dict[String, bool]()
+
+        var p_i as i64 = 0 to i64
+        while p_i < param_count:
+            let p_node as ptr[Node] = params[p_i]
+            let p_cstr as cstr = node_name(p_node).data to cstr
+            let p_name as String = String.make(p_cstr)
+            var p_type as String = type_to_llvm(node_inferred_type(p_node))
+            if strcmp(p_type.data to cstr, "void" to cstr) == 0 or p_type.len == 0 to usize:
+                p_type = String.make("i32" to cstr)
+
+            if (deref self).var_slots.has(p_name):
+                set_dict_bool(ref had_saved, p_name, True)
+                set_dict_str(ref saved_slots, p_name, (deref self).var_slots[p_name])
+                set_dict_str(ref saved_types, p_name, (deref self).var_types[p_name])
+            else:
+                set_dict_bool(ref had_saved, p_name, False)
+
+            var p_count as i32 = 0 to i32
+            if (deref self).var_counts.has(p_name):
+                p_count = (deref self).var_counts[p_name]
+            set_dict_i32(ref (deref self).var_counts, p_name, p_count + 1 to i32)
+            var p_slot_name as String = p_name
+            if p_count > 0 to i32:
+                let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, p_name.data to cstr, p_count)
+                p_slot_name = String.make(slot_buf to cstr)
+
+            append_cstr(ref (deref self).main_out, "  %")
+            append_str(ref (deref self).main_out, p_slot_name)
+            append_cstr(ref (deref self).main_out, " = alloca ")
+            append_str(ref (deref self).main_out, p_type)
+            append_cstr(ref (deref self).main_out, "\n")
+
+            if had_saved[p_name]:
+                let old_slot as String = saved_slots[p_name]
+                let old_type as String = saved_types[p_name]
+                let load_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = load ")
+                append_str(ref (deref self).main_out, old_type)
+                append_cstr(ref (deref self).main_out, ", ptr %")
+                append_str(ref (deref self).main_out, old_slot)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, p_type)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, ", ptr %")
+                append_str(ref (deref self).main_out, p_slot_name)
+                append_cstr(ref (deref self).main_out, "\n")
+
+            set_dict_str(ref (deref self).var_slots, p_name, p_slot_name)
+            set_dict_str(ref (deref self).var_types, p_name, p_type)
+
+            p_i = p_i + 1 to i64
+
+        // 3. Set up exit label and active param block context
+        let exit_lbl as ptr[u8] = self.fresh_label()
+        let prev_pb as ptr[Node] = (deref self).active_param_block
+        let prev_exit as String = (deref self).active_block_exit
+        (deref self).active_param_block = node
+        (deref self).active_block_exit = String.make(exit_lbl to cstr)
+
+        // 4. Emit body
+        var last_is_ret as bool = False
+        let body_node as ptr[Node] = node_body(node)
+        if body_node != None to ptr[Node]:
+            let stmts as List[ptr[Node]] = node_declarations(body_node)
+            let scount as i64 = stmts.length()
+            if scount > 0 to i64:
+                let last_stmt as ptr[Node] = stmts[scount - 1]
+                if last_stmt != None to ptr[Node] and node_kind(last_stmt) == NodeType.ReturnStmt:
+                    last_is_ret = True
+            self.emit_block(body_node)
+
+        // 5. Emit branch to exit if not already returned, and place label
+        if not last_is_ret:
+            append_cstr(ref (deref self).main_out, "  br label %")
+            append_cstr(ref (deref self).main_out, exit_lbl to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, exit_lbl to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+
+        // 6. Restore active param block context & parameter slots
+        (deref self).active_param_block = prev_pb
+        (deref self).active_block_exit = prev_exit
+
+        var p_r as i64 = 0 to i64
+        while p_r < param_count:
+            let p_node as ptr[Node] = params[p_r]
+            let p_name as String = node_name(p_node)
+            if had_saved.has(p_name) and had_saved[p_name]:
+                set_dict_str(ref (deref self).var_slots, p_name, saved_slots[p_name])
+                set_dict_str(ref (deref self).var_types, p_name, saved_types[p_name])
+            p_r = p_r + 1 to i64
+
+        // 7. Emit auto-drops for the param block
+        let drops as List[String] = node_auto_drops(node)
+        if drops.length() > 0 to i64:
+            self.emit_auto_drops(drops)
+
     public fn emit_unary_expr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         let op as String = node_op(node)
         append_cstr(ref (deref self).main_out, "  ; UNARY OP: ")
@@ -6678,7 +7074,7 @@ struct LLVMCodegen:
             set_node_inferred_type(node, make_type(TypeKind.Boolean))
             return reg
         elif strcmp(op.data to cstr, "-" to cstr) == 0:
-            let is_float as bool = strcmp(t.data to cstr, "float" to cstr) == 0 or strcmp(t.data to cstr, "double" to cstr) == 0 or strcmp(t.data to cstr, "half" to cstr) == 0 or strcmp(t.data to cstr, "bfloat" to cstr) == 0
+            let is_float as bool = strcmp(t.data to cstr, "float" to cstr) == 0 or strcmp(t.data to cstr, "double" to cstr) == 0 or strcmp(t.data to cstr, "half" to cstr) == 0 or strcmp(t.data to cstr, "bfloat" to cstr) == 0 or strcmp(t.data to cstr, "fp128" to cstr) == 0
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
             if is_float:
@@ -6824,14 +7220,30 @@ struct LLVMCodegen:
             let target_cstr as cstr = target_op.data to cstr
             if strcmp(target_cstr, "usize" to cstr) == 0 or strcmp(target_cstr, "isize" to cstr) == 0 or strcmp(target_cstr, "i64" to cstr) == 0 or strcmp(target_cstr, "u64" to cstr) == 0:
                 target_type = String.make("i64" to cstr)
+            elif strcmp(target_cstr, "i1024" to cstr) == 0 or strcmp(target_cstr, "u1024" to cstr) == 0:
+                target_type = String.make("i1024" to cstr)
+            elif strcmp(target_cstr, "i512" to cstr) == 0 or strcmp(target_cstr, "u512" to cstr) == 0:
+                target_type = String.make("i512" to cstr)
+            elif strcmp(target_cstr, "i256" to cstr) == 0 or strcmp(target_cstr, "u256" to cstr) == 0:
+                target_type = String.make("i256" to cstr)
+            elif strcmp(target_cstr, "i128" to cstr) == 0 or strcmp(target_cstr, "u128" to cstr) == 0:
+                target_type = String.make("i128" to cstr)
             elif strcmp(target_cstr, "i32" to cstr) == 0 or strcmp(target_cstr, "u32" to cstr) == 0:
                 target_type = String.make("i32" to cstr)
+            elif strcmp(target_cstr, "i16" to cstr) == 0 or strcmp(target_cstr, "u16" to cstr) == 0:
+                target_type = String.make("i16" to cstr)
             elif strcmp(target_cstr, "i8" to cstr) == 0 or strcmp(target_cstr, "u8" to cstr) == 0 or strcmp(target_cstr, "bool" to cstr) == 0:
                 target_type = String.make("i8" to cstr)
-            elif strcmp(target_cstr, "f64" to cstr) == 0:
+            elif strcmp(target_cstr, "f128" to cstr) == 0 or strcmp(target_cstr, "fp128" to cstr) == 0:
+                target_type = String.make("fp128" to cstr)
+            elif strcmp(target_cstr, "f64" to cstr) == 0 or strcmp(target_cstr, "double" to cstr) == 0:
                 target_type = String.make("double" to cstr)
-            elif strcmp(target_cstr, "f32" to cstr) == 0:
+            elif strcmp(target_cstr, "f32" to cstr) == 0 or strcmp(target_cstr, "float" to cstr) == 0:
                 target_type = String.make("float" to cstr)
+            elif strcmp(target_cstr, "f16" to cstr) == 0 or strcmp(target_cstr, "half" to cstr) == 0:
+                target_type = String.make("half" to cstr)
+            elif strcmp(target_cstr, "bf16" to cstr) == 0 or strcmp(target_cstr, "bfloat" to cstr) == 0 or strcmp(target_cstr, "BFloat16" to cstr) == 0:
+                target_type = String.make("bfloat" to cstr)
             elif strcmp(target_cstr, "ptr" to cstr) == 0 or (deref (target_cstr to ptr[u8])) == 112 to u8 or (deref (target_cstr to ptr[u8])) == 91 to u8:
                 target_type = String.make("ptr" to cstr)
         if (deref target_type.data) == 37 to u8:
@@ -6864,23 +7276,41 @@ struct LLVMCodegen:
 
         let reg as ptr[u8] = self.fresh_temp()
 
-        let src_is_int as bool = (deref source_type.data) == 105 to u8
-        let tgt_is_int as bool = (deref target_type.data) == 105 to u8
+        let src_is_int as bool = (deref source_type.data) == 105 to u8 or (deref source_type.data) == 117 to u8
+        let tgt_is_int as bool = (deref target_type.data) == 105 to u8 or (deref target_type.data) == 117 to u8
         if src_is_int and tgt_is_int:
             var src_bits as i32 = 64 to i32
-            if strcmp(source_type.data to cstr, "i32" to cstr) == 0:
+            let s_c as cstr = source_type.data to cstr
+            if strcmp(s_c, "i1024" to cstr) == 0 or strcmp(s_c, "u1024" to cstr) == 0:
+                src_bits = 1024 to i32
+            elif strcmp(s_c, "i512" to cstr) == 0 or strcmp(s_c, "u512" to cstr) == 0:
+                src_bits = 512 to i32
+            elif strcmp(s_c, "i256" to cstr) == 0 or strcmp(s_c, "u256" to cstr) == 0:
+                src_bits = 256 to i32
+            elif strcmp(s_c, "i128" to cstr) == 0 or strcmp(s_c, "u128" to cstr) == 0:
+                src_bits = 128 to i32
+            elif strcmp(s_c, "i32" to cstr) == 0 or strcmp(s_c, "u32" to cstr) == 0:
                 src_bits = 32 to i32
-            elif strcmp(source_type.data to cstr, "i16" to cstr) == 0:
+            elif strcmp(s_c, "i16" to cstr) == 0 or strcmp(s_c, "u16" to cstr) == 0:
                 src_bits = 16 to i32
-            elif strcmp(source_type.data to cstr, "i8" to cstr) == 0 or strcmp(source_type.data to cstr, "i1" to cstr) == 0:
+            elif strcmp(s_c, "i8" to cstr) == 0 or strcmp(s_c, "u8" to cstr) == 0 or strcmp(s_c, "i1" to cstr) == 0:
                 src_bits = 8 to i32
 
             var tgt_bits as i32 = 64 to i32
-            if strcmp(target_type.data to cstr, "i32" to cstr) == 0:
+            let t_c as cstr = target_type.data to cstr
+            if strcmp(t_c, "i1024" to cstr) == 0 or strcmp(t_c, "u1024" to cstr) == 0:
+                tgt_bits = 1024 to i32
+            elif strcmp(t_c, "i512" to cstr) == 0 or strcmp(t_c, "u512" to cstr) == 0:
+                tgt_bits = 512 to i32
+            elif strcmp(t_c, "i256" to cstr) == 0 or strcmp(t_c, "u256" to cstr) == 0:
+                tgt_bits = 256 to i32
+            elif strcmp(t_c, "i128" to cstr) == 0 or strcmp(t_c, "u128" to cstr) == 0:
+                tgt_bits = 128 to i32
+            elif strcmp(t_c, "i32" to cstr) == 0 or strcmp(t_c, "u32" to cstr) == 0:
                 tgt_bits = 32 to i32
-            elif strcmp(target_type.data to cstr, "i16" to cstr) == 0:
+            elif strcmp(t_c, "i16" to cstr) == 0 or strcmp(t_c, "u16" to cstr) == 0:
                 tgt_bits = 16 to i32
-            elif strcmp(target_type.data to cstr, "i8" to cstr) == 0 or strcmp(target_type.data to cstr, "i1" to cstr) == 0:
+            elif strcmp(t_c, "i8" to cstr) == 0 or strcmp(t_c, "u8" to cstr) == 0 or strcmp(t_c, "i1" to cstr) == 0:
                 tgt_bits = 8 to i32
 
             if src_bits == tgt_bits:
@@ -6900,8 +7330,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, "\n")
             return reg
 
-        let src_is_float as bool = strcmp(source_type.data to cstr, "float" to cstr) == 0 or strcmp(source_type.data to cstr, "double" to cstr) == 0
-        let tgt_is_float as bool = strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "double" to cstr) == 0
+        let src_is_float as bool = strcmp(source_type.data to cstr, "float" to cstr) == 0 or strcmp(source_type.data to cstr, "double" to cstr) == 0 or strcmp(source_type.data to cstr, "half" to cstr) == 0 or strcmp(source_type.data to cstr, "bfloat" to cstr) == 0 or strcmp(source_type.data to cstr, "fp128" to cstr) == 0
+        let tgt_is_float as bool = strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "double" to cstr) == 0 or strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0 or strcmp(target_type.data to cstr, "fp128" to cstr) == 0
         if src_is_float and tgt_is_int:
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
@@ -6928,9 +7358,29 @@ struct LLVMCodegen:
         if src_is_float and tgt_is_float:
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
-            if strcmp(source_type.data to cstr, "double" to cstr) == 0 and (strcmp(target_type.data to cstr, "float" to cstr) == 0 or strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0):
-                append_cstr(ref (deref self).main_out, " = fptrunc ")
-            elif strcmp(source_type.data to cstr, "float" to cstr) == 0 and (strcmp(target_type.data to cstr, "half" to cstr) == 0 or strcmp(target_type.data to cstr, "bfloat" to cstr) == 0):
+            var src_f_rank as i32 = 0
+            let sf_c as cstr = source_type.data to cstr
+            if strcmp(sf_c, "fp128" to cstr) == 0:
+                src_f_rank = 4
+            elif strcmp(sf_c, "double" to cstr) == 0:
+                src_f_rank = 3
+            elif strcmp(sf_c, "float" to cstr) == 0:
+                src_f_rank = 2
+            elif strcmp(sf_c, "half" to cstr) == 0 or strcmp(sf_c, "bfloat" to cstr) == 0:
+                src_f_rank = 1
+
+            var tgt_f_rank as i32 = 0
+            let tf_c as cstr = target_type.data to cstr
+            if strcmp(tf_c, "fp128" to cstr) == 0:
+                tgt_f_rank = 4
+            elif strcmp(tf_c, "double" to cstr) == 0:
+                tgt_f_rank = 3
+            elif strcmp(tf_c, "float" to cstr) == 0:
+                tgt_f_rank = 2
+            elif strcmp(tf_c, "half" to cstr) == 0 or strcmp(tf_c, "bfloat" to cstr) == 0:
+                tgt_f_rank = 1
+
+            if src_f_rank > tgt_f_rank:
                 append_cstr(ref (deref self).main_out, " = fptrunc ")
             else:
                 append_cstr(ref (deref self).main_out, " = fpext ")

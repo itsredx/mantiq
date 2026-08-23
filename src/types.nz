@@ -11,12 +11,18 @@ enum TypeKind:
     I32
     I64
     I128
+    I256
+    I512
+    I1024
     ISize
     U8
     U16
     U32
     U64
     U128
+    U256
+    U512
+    U1024
     USize
     F16
     BFloat16
@@ -110,6 +116,12 @@ fn is_copy_type(t as ptr[Type]) as bool:
         return True
     if k == TypeKind.I128:
         return True
+    if k == TypeKind.I256:
+        return True
+    if k == TypeKind.I512:
+        return True
+    if k == TypeKind.I1024:
+        return True
     if k == TypeKind.ISize:
         return True
     if k == TypeKind.U8:
@@ -121,6 +133,12 @@ fn is_copy_type(t as ptr[Type]) as bool:
     if k == TypeKind.U64:
         return True
     if k == TypeKind.U128:
+        return True
+    if k == TypeKind.U256:
+        return True
+    if k == TypeKind.U512:
+        return True
+    if k == TypeKind.U1024:
         return True
     if k == TypeKind.USize:
         return True

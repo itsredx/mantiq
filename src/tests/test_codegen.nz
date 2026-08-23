@@ -32,16 +32,13 @@ fn gen_ir(source as cstr, file as cstr) as String:
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source, file)
     let root as ptr[Node] = (deref lr).lower_source()
     let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
-    let dm0 as ptr = memset(s to ptr, 0 to i32, 96 to usize)
     (deref s).init_sema(file)
     s.declare_pass(root)
     s.resolve_pass(root)
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
-    let dm1 as ptr = memset(tc to ptr, 0 to i32, 24 to usize)
     (deref tc).init_tc(s)
     tc.typecheck_node(root)
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
-    let dm2 as ptr = memset(cg to ptr, 0 to i32, 256 to usize)
     (deref cg).init_cg()
     return cg.generate(root)
 

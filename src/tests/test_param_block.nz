@@ -1,0 +1,114 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+import std.string
+from std.string import String, StringBuilder
+from std.collections import List
+import symbols
+from symbols import Node, NodeType, Span, make_node, node_kind, node_declarations, node_params, node_return_names, node_body
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import types
+from types import Type, TypeKind, make_type
+import typecheck
+from typecheck import TypeChecker
+import borrowck
+from borrowck import BorrowChecker
+import codegen
+from codegen import LLVMCodegen
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn memset(s as ptr, c as i32, n as usize) as ptr
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
+
+// ── Test Helpers ─────────────────────────────────────────────────────────
+fn gen_ir(source as cstr, file as cstr) as String:
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source, file)
+    let root as ptr[Node] = (deref lr).lower_source()
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    let dm0 as ptr = memset(s to ptr, 0 to i32, 96 to usize)
+    (deref s).init_sema(file)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    let dm1 as ptr = memset(tc to ptr, 0 to i32, 24 to usize)
+    (deref tc).init_tc(s)
+    tc.typecheck_node(root)
+    let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    let dm2 as ptr = memset(cg to ptr, 0 to i32, 256 to usize)
+    (deref cg).init_cg()
+    return cg.generate(root)
+
+// ── Test Cases ───────────────────────────────────────────────────────────
+fn test_param_block_lowering() as bool:
+    let code as cstr = "fn compute() as i64:\n    var a as i32 = 5\n    var b as i32 = 10\n    block (a as i32, b as i32) as (res_a as i64, res_b as i64):\n        return (a to i64) * 2, (b to i64) * 3\n    return res_a + res_b\n"
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(code, "test_pb.mq" to cstr)
+    let root as ptr[Node] = (deref lr).lower_source()
+    if root == None to ptr[Node]:
+        return False
+    let decls as List[ptr[Node]] = node_declarations(root)
+    if decls.length() != 1 to i64:
+        return False
+    let fn_decl as ptr[Node] = decls[0]
+    if node_kind(fn_decl) != NodeType.FunDecl:
+        return False
+    let fn_body as ptr[Node] = node_body(fn_decl)
+    let body_stmts as List[ptr[Node]] = node_declarations(fn_body)
+    if body_stmts.length() != 4 to i64:
+        return False
+    let pb_stmt as ptr[Node] = body_stmts[2]
+    if node_kind(pb_stmt) != NodeType.ParamBlockStmt:
+        return False
+    let p_list as List[ptr[Node]] = node_params(pb_stmt)
+    if p_list.length() != 2 to i64:
+        return False
+    let r_list as List[String] = node_return_names(pb_stmt)
+    if r_list.length() != 2 to i64:
+        return False
+    if strcmp(r_list[0].data to cstr, "res_a" to cstr) != 0:
+        return False
+    if strcmp(r_list[1].data to cstr, "res_b" to cstr) != 0:
+        return False
+    return True
+
+fn test_param_block_codegen() as bool:
+    let code as cstr = "fn compute() as i64:\n    var a as i32 = 5\n    var b as i32 = 10\n    block (a as i32, b as i32) as (res_a as i64, res_b as i64):\n        return (a to i64) * 2, (b to i64) * 3\n    return res_a + res_b\n"
+    let ir as String = gen_ir(code, "test_pb_cg.mq" to cstr)
+    if ir.data == None to ptr[u8]:
+        printf("IR data is NULL\n" to cstr)
+        return False
+    let ir_cstr as cstr = ir.data to cstr
+    printf("=== GENERATED IR BEGIN ===\n%s\n=== GENERATED IR END ===\n" to cstr, ir_cstr)
+    if strstr(ir_cstr, "%res_a = alloca i64" to cstr) == None:
+        printf("Missing 'res_a alloca'\n" to cstr)
+        return False
+    if strstr(ir_cstr, "%res_b = alloca i64" to cstr) == None:
+        printf("Missing 'res_b alloca'\n" to cstr)
+        return False
+    if strstr(ir_cstr, "store i64" to cstr) == None:
+        printf("Missing 'store i64'\n" to cstr)
+        return False
+    return True
+
+// ── Main Entry ───────────────────────────────────────────────────────────
+fn main():
+    printf("Running ParamBlockStmt tests...\n" to cstr)
+    let t1 as bool = test_param_block_lowering()
+    if t1:
+        printf("  [PASS] test_param_block_lowering\n" to cstr)
+    else:
+        printf("  [FAIL] test_param_block_lowering\n" to cstr)
+
+    let t2 as bool = test_param_block_codegen()
+    if t2:
+        printf("  [PASS] test_param_block_codegen\n" to cstr)
+    else:
+        printf("  [FAIL] test_param_block_codegen\n" to cstr)
+
+    if t1 and t2:
+        printf("All ParamBlockStmt tests PASSED!\n" to cstr)
+    else:
+        printf("Some ParamBlockStmt tests FAILED!\n" to cstr)

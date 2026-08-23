@@ -1,0 +1,138 @@
+// ── Test Extended Float and Integer Widths ────────────────────────────────
+import std.collections
+from std.string import String
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+fn test_extended_integers():
+    printf("[TEST] Testing Extended Integer Widths (i256, i512, i1024)...\n" to cstr)
+    
+    // i256
+    var a256 as i256 = 100 to i256
+    var b256 as i256 = 250 to i256
+    var c256 as i256 = a256 + b256
+    assert_true((c256 to i64) == 350 to i64, "i256 addition" to cstr)
+
+    c256 = b256 - a256
+    assert_true((c256 to i64) == 150 to i64, "i256 subtraction" to cstr)
+
+    c256 = a256 * (5 to i256)
+    assert_true((c256 to i64) == 500 to i64, "i256 multiplication" to cstr)
+
+    c256 = c256 / (10 to i256)
+    assert_true((c256 to i64) == 50 to i64, "i256 division" to cstr)
+
+    assert_true(b256 > a256, "i256 greater-than" to cstr)
+    assert_true(a256 < b256, "i256 less-than" to cstr)
+    assert_true(a256 == (100 to i256), "i256 equality" to cstr)
+
+    // i512
+    var a512 as i512 = 1000 to i512
+    var b512 as i512 = 2500 to i512
+    var c512 as i512 = a512 + b512
+    assert_true((c512 to i64) == 3500 to i64, "i512 addition" to cstr)
+
+    c512 = b512 - a512
+    assert_true((c512 to i64) == 1500 to i64, "i512 subtraction" to cstr)
+
+    c512 = a512 * (3 to i512)
+    assert_true((c512 to i64) == 3000 to i64, "i512 multiplication" to cstr)
+
+    assert_true(b512 >= a512, "i512 greater-or-equal" to cstr)
+    assert_true(a512 <= b512, "i512 less-or-equal" to cstr)
+
+    // i1024
+    var a1024 as i1024 = 5000 to i1024
+    var b1024 as i1024 = 15000 to i1024
+    var c1024 as i1024 = a1024 + b1024
+    assert_true((c1024 to i64) == 20000 to i64, "i1024 addition" to cstr)
+
+    c1024 = b1024 - a1024
+    assert_true((c1024 to i64) == 10000 to i64, "i1024 subtraction" to cstr)
+
+    c1024 = a1024 * (4 to i1024)
+    assert_true((c1024 to i64) == 20000 to i64, "i1024 multiplication" to cstr)
+
+    c1024 = c1024 / (20 to i1024)
+    assert_true((c1024 to i64) == 1000 to i64, "i1024 division" to cstr)
+
+    assert_true(b1024 > a1024, "i1024 greater-than" to cstr)
+    assert_true(a1024 < b1024, "i1024 less-than" to cstr)
+
+    // u256, u512, u1024
+    var u_a256 as u256 = 1234 to u256
+    var u_a512 as u512 = 5678 to u512
+    var u_a1024 as u1024 = 9999 to u1024
+    assert_true((u_a256 to u64) == 1234 to u64, "u256 cast" to cstr)
+    assert_true((u_a512 to u64) == 5678 to u64, "u512 cast" to cstr)
+    assert_true((u_a1024 to u64) == 9999 to u64, "u1024 cast" to cstr)
+
+    // Conversions / Widening & Truncating
+    var small as i32 = 42 to i32
+    var wide as i1024 = small to i1024
+    var back as i32 = wide to i32
+    assert_true(back == 42 to i32, "i32 -> i1024 -> i32 roundtrip" to cstr)
+
+    printf("  [PASS] Extended Integer Widths verified successfully.\n" to cstr)
+
+fn test_extended_floats():
+    printf("[TEST] Testing Extended Float Widths (f16, bf16, f128)...\n" to cstr)
+
+    // f16
+    var a16 as f16 = 2.0 to f16
+    var b16 as f16 = 3.0 to f16
+    var c16 as f16 = a16 + b16
+    var c16_f64 as f64 = c16 to f64
+    assert_true(c16_f64 > 4.9 and c16_f64 < 5.1, "f16 addition" to cstr)
+
+    // bf16
+    var abf as bf16 = 10.0 to bf16
+    var bbf as bf16 = 4.0 to bf16
+    var cbf as bf16 = abf - bbf
+    var cbf_f64 as f64 = cbf to f64
+    printf("  cbf_f64 = %f\n" to cstr, cbf_f64)
+    assert_true(cbf_f64 > 5.9 and cbf_f64 < 6.1, "bf16 subtraction" to cstr)
+
+    // f128
+    var a128 as f128 = 100.0 to f128
+    var b128 as f128 = 25.0 to f128
+    var c128 as f128 = a128 / b128
+    var c128_f64 as f64 = c128 to f64
+    assert_true(c128_f64 > 3.9 and c128_f64 < 4.1, "f128 division" to cstr)
+
+    var mul128 as f128 = a128 * b128
+    var mul128_f64 as f64 = mul128 to f64
+    assert_true(mul128_f64 > 2499.0 and mul128_f64 < 2501.0, "f128 multiplication" to cstr)
+
+    // Float conversions across precision ranks
+    var half_val as f16 = 7.5 to f16
+    var quad_val as f128 = half_val to f128
+    var quad_f64 as f64 = quad_val to f64
+    assert_true(quad_f64 > 7.4 and quad_f64 < 7.6, "f16 -> f128 fpext" to cstr)
+
+    var narrow_val as f16 = quad_val to f16
+    var narrow_f64 as f64 = narrow_val to f64
+    assert_true(narrow_f64 > 7.4 and narrow_f64 < 7.6, "f128 -> f16 fptrunc" to cstr)
+
+    // Float <-> Int casts
+    var int_to_quad as f128 = (12345 to i32) to f128
+    var quad_to_int as i32 = int_to_quad to i32
+    assert_true(quad_to_int == 12345 to i32, "i32 -> f128 -> i32 cast" to cstr)
+
+    var int1024_to_quad as f128 = (500 to i1024) to f128
+    var quad_to_int1024 as i1024 = int1024_to_quad to i1024
+    assert_true((quad_to_int1024 to i64) == 500 to i64, "i1024 -> f128 -> i1024 cast" to cstr)
+
+    printf("  [PASS] Extended Float Widths verified successfully.\n" to cstr)
+
+fn main():
+    printf("=== Starting Extended Types Test Suite ===\n" to cstr)
+    test_extended_integers()
+    test_extended_floats()
+    printf("=== All Extended Types Tests Passed! ===\n" to cstr)
