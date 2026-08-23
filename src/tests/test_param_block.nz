@@ -81,7 +81,7 @@ fn test_param_block_codegen() as bool:
         printf("IR data is NULL\n" to cstr)
         return False
     let ir_cstr as cstr = ir.data to cstr
-    printf("=== GENERATED IR BEGIN ===\n%s\n=== GENERATED IR END ===\n" to cstr, ir_cstr)
+    // printf("=== GENERATED IR BEGIN ===\n%s\n=== GENERATED IR END ===\n" to cstr, ir_cstr)
     if strstr(ir_cstr, "%res_a = alloca i64" to cstr) == None:
         printf("Missing 'res_a alloca'\n" to cstr)
         return False

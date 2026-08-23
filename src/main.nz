@@ -14,6 +14,8 @@ import typecheck
 from typecheck import TypeChecker
 import borrowck
 from borrowck import BorrowChecker
+import dce
+from dce import DeadCodeEliminator
 import codegen
 from codegen import LLVMCodegen
 import error
@@ -247,6 +249,13 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     if engine.has_errors():
         engine.emit_all_cached()
         return False
+
+    // ── Phase 4.5: Dead Code Elimination ──
+    let t_dce as i64 = perf_begin(perf, "dce")
+    let dce_opt as ptr[DeadCodeEliminator] = make[DeadCodeEliminator](1 to usize) to ptr[DeadCodeEliminator]
+    (deref dce_opt).init_dce()
+    dce_opt.optimize_program(root)
+    perf_end(perf, "dce", t_dce)
 
     // ── Phase 5: Code Generation ──
     let t4 as i64 = perf_begin(perf, "codegen")

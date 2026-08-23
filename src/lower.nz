@@ -48,6 +48,17 @@ fn strip_quotes(d as ptr[u8], len as usize) as String:
     drop(slice_all to ptr)
     return res_all
 
+// ── Option Layout Helpers ────────────────────────────────────────────────
+fn option_has_value(opt as ptr[OptionLayout]) as bool:
+    if opt == None to ptr[OptionLayout]:
+        return False
+    return (deref opt).has_val == 1 to u8
+
+fn option_unwrap_ptr(opt as ptr[OptionLayout]) as ptr[u8]:
+    if opt == None to ptr[OptionLayout]:
+        return None to ptr[u8]
+    return (deref opt).val_ptr
+
 // ── Macro Definition Storage ─────────────────────────────────────────────
 struct MacroDef:
     public var param_names as List[String]
@@ -265,6 +276,33 @@ struct Lowerer:
                 (deref data).val = 1 to f64
             else:
                 (deref data).val = 0 to f64
+            (deref n).data = data to ptr[u8]
+            return n
+        elif strcmp(kind, "quantum_literal" to cstr) == 0:
+            let text as ptr[String] = self.slice_string_from_node(ts_node)
+            let s_data as ptr[u8] = (deref text).data
+            var q_val as f64 = 0.0
+            if (deref text).len >= 2 to usize:
+                let c1 as u8 = deref ((s_data to usize + 1 to usize) to ptr[u8])
+                if c1 == 49 to u8: // '1' in |1>
+                    q_val = 1.0
+            drop(text to ptr)
+            let n as ptr[Node] = make_node(NodeType.CallExpr, self.get_span(ts_node))
+            let data as ptr[CallExprData] = make[CallExprData](1 to usize) to ptr[CallExprData]
+            let callee as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
+            let cdata as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            (deref cdata).name = String.make("qbit" to cstr)
+            (deref callee).data = cdata to ptr[u8]
+            (deref data).left = callee
+            let arg_n as ptr[Node] = make_node(NodeType.NumberLiteral, self.get_span(ts_node))
+            let arg_d as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
+            (deref arg_d).val = q_val
+            (deref arg_d).is_float = False
+            (deref arg_n).data = arg_d to ptr[u8]
+            var args as List[ptr[Node]] = List[ptr[Node]]()
+            args.append(arg_n)
+            (deref data).params = args
+            (deref data).type_annots = None to ptr[List[Option[ptr[TypeAnnotation]]]]
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(kind, "self_reference" to cstr) == 0:
@@ -1099,26 +1137,36 @@ struct Lowerer:
             return
         
         let nt as NodeType = node_kind(node)
-        if nt == NodeType.Program:
+        if nt == NodeType.Program or nt == NodeType.BlockStmt or nt == NodeType.WithStmt or nt == NodeType.MatchStmt or nt == NodeType.TryStmt:
             let decls as List[ptr[Node]] = node_declarations(node)
             let count as i64 = decls.length()
             var i as i64 = 0 to i64
             while i < count:
                 self.collect_macro_locals(decls[i], locals)
                 i = i + 1 to i64
-        elif nt == NodeType.BlockStmt:
-            let decls as List[ptr[Node]] = node_declarations(node)
-            let count as i64 = decls.length()
-            var i as i64 = 0 to i64
-            while i < count:
-                self.collect_macro_locals(decls[i], locals)
-                i = i + 1 to i64
-        elif nt == NodeType.VarDecl:
-            locals[node_name(node)] = True
+        elif nt == NodeType.VarDecl or nt == NodeType.FunDecl:
+            let v_name as String = node_name(node)
+            if v_name.len > 0 to usize:
+                locals[v_name] = True
+        elif nt == NodeType.ParamBlockStmt:
+            let ret_names as List[String] = node_return_names(node)
+            let r_count as i64 = ret_names.length()
+            var r_idx as i64 = 0 to i64
+            while r_idx < r_count:
+                let r_name as String = ret_names[r_idx]
+                if r_name.len > 0 to usize:
+                    locals[r_name] = True
+                r_idx = r_idx + 1 to i64
         
         self.collect_macro_locals(node_left(node), locals)
         self.collect_macro_locals(node_right(node), locals)
         self.collect_macro_locals(node_body(node), locals)
+        self.collect_macro_locals(node_cond(node), locals)
+        self.collect_macro_locals(node_then_branch(node), locals)
+        let eb_opt as Option[ptr[Node]] = node_else_branch(node)
+        let eb_ref as ptr[OptionLayout] = (ref eb_opt) to ptr[OptionLayout]
+        if option_has_value(eb_ref):
+            self.collect_macro_locals(option_unwrap_ptr(eb_ref) to ptr[Node], locals)
 
     public fn mangle_name(self as ptr[Lowerer], name as String, hygiene_id as i64, locals as Dict[String, bool]) as String:
         if hygiene_id == 0 to i64:
@@ -1126,11 +1174,74 @@ struct Lowerer:
         if locals.has(name):
             let cap as usize = name.len + 32 to usize
             let buf as ptr[u8] = make(cap) to ptr[u8]
-            extern fn snprintf(str as ptr[u8], size as usize, format as cstr, name as cstr, id as i64) as i32
+            extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
             let snprintf_len as i32 = snprintf(buf, cap, "%s_mac%d" to cstr, name.data to cstr, hygiene_id)
             let mangled_len as usize = snprintf_len to usize
             return String(data = buf, len = mangled_len, capacity = cap)
         return name
+
+    public fn clone_ast(self as ptr[Lowerer], node as ptr[Node]) as ptr[Node]:
+        if node == None to ptr[Node]:
+            return None to ptr[Node]
+        
+        let nt as NodeType = node_kind(node)
+        let span_val as Span = node_span(node)
+        
+        if nt == NodeType.Identifier:
+            let res as ptr[Node] = make_node(NodeType.Identifier, span_val)
+            let res_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            (deref res_data).name = node_name(node)
+            (deref res).data = res_data to ptr[u8]
+            return res
+        
+        let res as ptr[Node] = make_node(nt, span_val)
+        (deref res).module_name = (deref node).module_name
+        set_node_val(res, node_val(node))
+        set_node_op(res, node_op(node))
+        set_node_is_mut(res, node_is_mut(node))
+        set_node_is_async(res, node_is_async(node))
+        set_node_name(res, node_name(node))
+
+        set_node_left(res, self.clone_ast(node_left(node)))
+        set_node_right(res, self.clone_ast(node_right(node)))
+        set_node_body(res, self.clone_ast(node_body(node)))
+        set_node_cond(res, self.clone_ast(node_cond(node)))
+        set_node_then_branch(res, self.clone_ast(node_then_branch(node)))
+        
+        let orig_else as Option[ptr[Node]] = node_else_branch(node)
+        let eb_ref as ptr[OptionLayout] = (ref orig_else) to ptr[OptionLayout]
+        if option_has_value(eb_ref):
+            let eb_node as ptr[Node] = option_unwrap_ptr(eb_ref) to ptr[Node]
+            set_node_else_branch(res, Some(self.clone_ast(eb_node)))
+        else:
+            set_node_else_branch(res, orig_else)
+            
+        set_node_str_val(res, node_str_val(node))
+        set_node_type_annots(res, node_type_annots(node))
+        
+        if nt == NodeType.ParamBlockStmt:
+            set_node_return_names(res, node_return_names(node))
+            set_node_return_type_annots(res, node_return_type_annots(node))
+        
+        let orig_decls as List[ptr[Node]] = node_declarations(node)
+        let count as i64 = orig_decls.length()
+        let decls as List[ptr[Node]] = List[ptr[Node]]()
+        var i as i64 = 0 to i64
+        while i < count:
+            decls.append(self.clone_ast(orig_decls[i]))
+            i = i + 1 to i64
+        set_node_declarations(res, decls)
+
+        let orig_params as List[ptr[Node]] = node_params(node)
+        let p_count as i64 = orig_params.length()
+        let params_list as List[ptr[Node]] = List[ptr[Node]]()
+        var p_idx as i64 = 0 to i64
+        while p_idx < p_count:
+            params_list.append(self.clone_ast(orig_params[p_idx]))
+            p_idx = p_idx + 1 to i64
+        set_node_params(res, params_list)
+
+        return res
 
     public fn clone_node(self as ptr[Lowerer], node as ptr[Node], hygiene_id as i64, locals as Dict[String, bool]) as ptr[Node]:
         if node == None to ptr[Node]:
@@ -1143,7 +1254,7 @@ struct Lowerer:
             let name as String = node_name(node)
             if (deref self).macro_args.has(name):
                 let arg as ptr[Node] = (deref self).macro_args[name]
-                return self.clone_node(arg, 0 to i64, locals)
+                return self.clone_ast(arg)
             
             let res as ptr[Node] = make_node(NodeType.Identifier, span_val)
             let res_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
@@ -1160,9 +1271,8 @@ struct Lowerer:
         set_node_is_async(res, node_is_async(node))
 
         var clone_name as String = node_name(node)
-        if nt == NodeType.VarDecl:
+        if nt == NodeType.VarDecl or nt == NodeType.FunDecl:
             clone_name = self.mangle_name(node_name(node), hygiene_id, locals)
-        let _sep1 as i32 = 0
         set_node_name(res, clone_name)
 
         set_node_left(res, self.clone_node(node_left(node), hygiene_id, locals))
@@ -1170,8 +1280,21 @@ struct Lowerer:
         set_node_body(res, self.clone_node(node_body(node), hygiene_id, locals))
         set_node_cond(res, self.clone_node(node_cond(node), hygiene_id, locals))
         set_node_then_branch(res, self.clone_node(node_then_branch(node), hygiene_id, locals))
-        set_node_else_branch(res, node_else_branch(node))
+        
+        let orig_else as Option[ptr[Node]] = node_else_branch(node)
+        let eb_ref as ptr[OptionLayout] = (ref orig_else) to ptr[OptionLayout]
+        if option_has_value(eb_ref):
+            let eb_node as ptr[Node] = option_unwrap_ptr(eb_ref) to ptr[Node]
+            set_node_else_branch(res, Some(self.clone_node(eb_node, hygiene_id, locals)))
+        else:
+            set_node_else_branch(res, orig_else)
+            
         set_node_str_val(res, node_str_val(node))
+        set_node_type_annots(res, node_type_annots(node))
+        
+        if nt == NodeType.ParamBlockStmt:
+            set_node_return_names(res, node_return_names(node))
+            set_node_return_type_annots(res, node_return_type_annots(node))
         
         let orig_decls as List[ptr[Node]] = node_declarations(node)
         let count as i64 = orig_decls.length()

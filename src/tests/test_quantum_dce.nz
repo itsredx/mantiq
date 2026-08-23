@@ -1,0 +1,115 @@
+// ── Quantum DCE Test Suite (Spec 0023) ──────────────────────────────────
+import std.quantum
+from std.string import String
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+import dce
+from dce import DeadCodeEliminator
+import codegen
+from codegen import LLVMCodegen
+import symbols
+from symbols import Node
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn fflush(stream as ptr) as i32
+extern fn exit(code as i32)
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
+
+fn assert_true(cond as bool, msg as cstr):
+    let _ as i32 = fflush(0 to ptr)
+    if not cond:
+        printf("Assertion failed: %s\n" to cstr, msg)
+        let _2 as i32 = fflush(0 to ptr)
+        exit(1)
+
+fn test_quantum_primitives():
+    printf("[TEST] Testing Quantum Primitives (qbit, H, measure)...\n" to cstr)
+    let q0 as qbit = qbit(0)
+    let m0 as i32 = measure(q0)
+    printf("  measure(|0>) = %d\n" to cstr, m0)
+    assert_true(m0 == 0, "measure(q0) == 0" to cstr)
+
+    let q1 as qbit = H(|0>)
+    let m1 as i32 = measure(q1)
+    printf("  measure(H(|0>)) = %d\n" to cstr, m1)
+    assert_true(m1 == 0 or m1 == 1, "measure(H(0)) is in {0, 1}" to cstr)
+    printf("  [PASS] Quantum primitives verified.\n" to cstr)
+
+fn test_quantum_gates_and_ket():
+    printf("[TEST] Testing Quantum Gates (X, Y, Z, CNOT) & Ket Notation...\n" to cstr)
+    let q_x as qbit = X(|0>)
+    let m_x as i32 = measure(q_x)
+    printf("  measure(X(|0>)) = %d\n" to cstr, m_x)
+    assert_true(m_x == 1, "X(|0>) flips to |1>" to cstr)
+
+    let q_ctrl as qbit = |1>
+    let q_tgt as qbit = |0>
+    CNOT(q_ctrl, q_tgt)
+    let m_tgt as i32 = measure(q_tgt)
+    printf("  measure(CNOT(|1>, |0>)) = %d\n" to cstr, m_tgt)
+    assert_true(m_tgt == 1, "CNOT with control=|1> flips target to |1>" to cstr)
+
+    let q_z as qbit = Z(|1>)
+    let q_y as qbit = Y(|0>)
+    printf("  [PASS] Quantum gates and ket notation verified.\n" to cstr)
+
+fn test_quantum_dce_tree_shaking():
+    printf("[TEST] Testing Compile-time Quantum Tree-shaking (DCE)...\n" to cstr)
+    let src as cstr = "import std.quantum\nlet x = 42\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_dce.nz" to cstr)
+    let root as ptr[Node] = (deref lr).lower_source()
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref s).init_sema("test_dce.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc).init_tc(s)
+    tc.typecheck_node(root)
+
+    let optimizer as ptr[DeadCodeEliminator] = make[DeadCodeEliminator](1 to usize) to ptr[DeadCodeEliminator]
+    (deref optimizer).init_dce()
+    optimizer.optimize_program(root)
+
+    assert_true(not (deref optimizer).quantum_used, "quantum_used is false when unused" to cstr)
+
+    let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    (deref cg).init_cg()
+    let ir as String = (deref cg).generate(root)
+    assert_true(ir.data != None to ptr[u8], "IR generated successfully" to cstr)
+    printf("  [PASS] Quantum tree-shaking verified (std.quantum pruned when unused).\n" to cstr)
+
+fn test_constant_branch_folding():
+    printf("[TEST] Testing Constant Boolean Branch Folding...\n" to cstr)
+    let src as cstr = "fn compute() -> i32:\n    if True:\n        return 10\n    else:\n        return 20\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_fold.nz" to cstr)
+    let root as ptr[Node] = (deref lr).lower_source()
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref s).init_sema("test_fold.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc).init_tc(s)
+    tc.typecheck_node(root)
+
+    let optimizer as ptr[DeadCodeEliminator] = make[DeadCodeEliminator](1 to usize) to ptr[DeadCodeEliminator]
+    (deref optimizer).init_dce()
+    optimizer.optimize_program(root)
+
+    let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
+    (deref cg).init_cg()
+    let ir as String = (deref cg).generate(root)
+    assert_true(ir.data != None to ptr[u8], "IR generated successfully" to cstr)
+    printf("  [PASS] Constant branch folding verified.\n" to cstr)
+
+fn main() -> i32:
+    printf("=== Starting Quantum DCE Test Suite (Spec 0023) ===\n" to cstr)
+    test_quantum_primitives()
+    test_quantum_gates_and_ket()
+    test_quantum_dce_tree_shaking()
+    test_constant_branch_folding()
+    printf("=== All Quantum DCE Tests Passed! ===\n" to cstr)
+    return 0

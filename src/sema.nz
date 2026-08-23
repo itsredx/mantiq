@@ -117,6 +117,14 @@ struct Sema:
         (deref gs).symbols[String.make("drop")] = make_symbol(String.make("drop"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("range")] = make_symbol(String.make("range"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("print")] = make_symbol(String.make("print"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("qbit")] = make_symbol(String.make("qbit"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("qreg")] = make_symbol(String.make("qreg"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("H")] = make_symbol(String.make("H"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("measure")] = make_symbol(String.make("measure"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("CNOT")] = make_symbol(String.make("CNOT"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("X")] = make_symbol(String.make("X"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Y")] = make_symbol(String.make("Y"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Z")] = make_symbol(String.make("Z"), SymbolKind.Function, None to ptr[Node])
 
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
         self.report_error_with_code("E0101" to cstr, msg, (deref self).current_file, span)
@@ -124,7 +132,7 @@ struct Sema:
     public fn report_error_with_code(self as ptr[Sema], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
         let cap as usize = msg.len + file_path.len + 64 to usize
         let buf as ptr[u8] = make(cap) to ptr[u8]
-        extern fn snprintf(str as ptr[u8], size as usize, format as cstr, file as cstr, row as u32, col as u32, err as cstr) as i32
+        extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
         let len as i32 = snprintf(buf, cap, "%s:%d:%d: error: %s" to cstr, file_path.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
         
@@ -200,6 +208,19 @@ struct Sema:
             return
         
         if strcmp(target.data to cstr, "std.result" to cstr) == 0:
+            let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
+            (deref (deref self).current_scope).symbols[target] = mod_sym
+            
+            let count as i64 = node_imported_symbols(node).length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                let builtin_sym as ptr[Symbol] = make_symbol(s_name, SymbolKind.Function, node)
+                (deref (deref self).current_scope).symbols[s_name] = builtin_sym
+                s_idx = s_idx + 1 to i64
+            return
+        
+        if strcmp(target.data to cstr, "std.quantum" to cstr) == 0:
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
             
@@ -825,7 +846,7 @@ struct Sema:
                 // Generate a temporary name like "_with_temp_{start_byte}"
                 let cap as usize = 32 to usize
                 let buf as ptr[u8] = make(cap) to ptr[u8]
-                extern fn snprintf(str as ptr[u8], size as usize, format as cstr, val as u32) as i32
+                extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
                 let snprintf_len as i32 = snprintf(buf, cap, "_with_temp_%d" to cstr, node_span(node).start_byte)
                 var_name = String(data = buf, len = snprintf_len to usize, capacity = cap)
                 set_node_name(node, var_name)

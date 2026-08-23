@@ -176,6 +176,10 @@ fn is_copy_type(t as ptr[Type]) as bool:
         return True
     if k == TypeKind.Enum:
         return True
+    if k == TypeKind.QBit:
+        return True
+    if k == TypeKind.QReg:
+        return True
     if k == TypeKind.Struct:
         let sn as ptr[u8] = (deref t).name.data
         if sn != None to ptr[u8]:

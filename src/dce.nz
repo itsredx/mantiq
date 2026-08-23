@@ -1,0 +1,259 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List
+import symbols
+from symbols import Node, NodeType, Span, TypeAnnotation, make_node, node_kind, node_name, node_left, node_right, node_body, node_cond, node_then_branch, node_else_branch, node_val, node_declarations, node_params, node_type_annots, node_target, node_inferred_type, set_node_declarations, set_node_body, set_node_then_branch, set_node_else_branch
+
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Dead Code Eliminator ───────────────────────────────────────────────
+struct DeadCodeEliminator:
+    public var quantum_used as bool
+
+    public fn init_dce(self as ptr[DeadCodeEliminator]):
+        (deref self).quantum_used = False
+
+    public fn optimize_program(self as ptr[DeadCodeEliminator], root as ptr[Node]):
+        if root == None to ptr[Node]:
+            return
+        // Phase 1: Mark live nodes & detect quantum symbol usage
+        self.mark_node(root)
+        // Phase 2: Sweep dead nodes & prune unused quantum imports / constant dead branches
+        self.sweep_node(root)
+
+    public fn mark_node(self as ptr[DeadCodeEliminator], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        let k as NodeType = node_kind(node)
+        if k == NodeType.Program:
+            let decls as List[ptr[Node]] = node_declarations(node)
+            let d_count as i64 = decls.length()
+            var di as i64 = 0 to i64
+            while di < d_count:
+                self.mark_node(decls[di])
+                di = di + 1 to i64
+
+        elif k == NodeType.FunDecl:
+            let params as List[ptr[Node]] = node_params(node)
+            let p_count as i64 = params.length()
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                self.mark_node(params[pi])
+                pi = pi + 1 to i64
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.VarDecl:
+            let annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+            if annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                let annots as List[Option[ptr[TypeAnnotation]]] = deref annots_ptr
+                let a_count as i64 = annots.length()
+                var ai as i64 = 0 to i64
+                while ai < a_count:
+                    let opt_a as Option[ptr[TypeAnnotation]] = annots[ai]
+                    let opt_ref as ptr[u8] = (ref opt_a) to ptr[u8]
+                    if (deref (opt_ref to ptr[u8])) != 0 to u8:
+                        let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                        let ta as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
+                        if ta != None to ptr[TypeAnnotation] and (deref ta).name.data != None to ptr[u8]:
+                            let t_name as cstr = (deref ta).name.data to cstr
+                            if strcmp(t_name, "qbit" to cstr) == 0 or strcmp(t_name, "qreg" to cstr) == 0:
+                                (deref self).quantum_used = True
+                    ai = ai + 1 to i64
+            self.mark_node(node_left(node))
+
+        elif k == NodeType.IfStmt:
+            let cond as ptr[Node] = node_cond(node)
+            var take_then as bool = True
+            var take_else as bool = True
+            if cond != None to ptr[Node] and node_kind(cond) == NodeType.BooleanLiteral:
+                let v as f64 = node_val(cond)
+                if v == 1.0:
+                    take_else = False
+                else:
+                    take_then = False
+            else:
+                self.mark_node(cond)
+
+            if take_then:
+                self.mark_node(node_then_branch(node))
+            if take_else:
+                let opt_eb as Option[ptr[Node]] = node_else_branch(node)
+                let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
+                if (deref (opt_ref to ptr[u8])) != 0 to u8:
+                    let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                    self.mark_node(val_p to ptr[Node])
+
+        elif k == NodeType.WhileStmt:
+            self.mark_node(node_cond(node))
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.ForStmt:
+            self.mark_node(node_left(node))
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.WithStmt:
+            self.mark_node(node_left(node))
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.BlockStmt:
+            let stmts as List[ptr[Node]] = node_declarations(node)
+            let s_count as i64 = stmts.length()
+            var si as i64 = 0 to i64
+            while si < s_count:
+                self.mark_node(stmts[si])
+                si = si + 1 to i64
+
+        elif k == NodeType.ParamBlockStmt:
+            let params as List[ptr[Node]] = node_params(node)
+            let p_count as i64 = params.length()
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                self.mark_node(params[pi])
+                pi = pi + 1 to i64
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.CallExpr:
+            let callee as ptr[Node] = node_left(node)
+            self.mark_node(callee)
+            let args as List[ptr[Node]] = node_params(node)
+            let a_count as i64 = args.length()
+            var ai as i64 = 0 to i64
+            while ai < a_count:
+                self.mark_node(args[ai])
+                ai = ai + 1 to i64
+
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+                let c_name as String = node_name(callee)
+                if c_name.data != None to ptr[u8]:
+                    let cn as cstr = c_name.data to cstr
+                    if strcmp(cn, "H" to cstr) == 0 or strcmp(cn, "measure" to cstr) == 0 or strcmp(cn, "CNOT" to cstr) == 0 or strcmp(cn, "X" to cstr) == 0 or strcmp(cn, "Y" to cstr) == 0 or strcmp(cn, "Z" to cstr) == 0 or strcmp(cn, "qbit" to cstr) == 0 or strcmp(cn, "qreg" to cstr) == 0:
+                        (deref self).quantum_used = True
+
+        elif k == NodeType.BinaryExpr:
+            self.mark_node(node_left(node))
+            self.mark_node(node_right(node))
+
+        elif k == NodeType.UnaryExpr or k == NodeType.CastExpr or k == NodeType.MemberExpr:
+            self.mark_node(node_left(node))
+
+        elif k == NodeType.Identifier:
+            let id_name as String = node_name(node)
+            if id_name.data != None to ptr[u8]:
+                let in_c as cstr = id_name.data to cstr
+                if strcmp(in_c, "qbit" to cstr) == 0 or strcmp(in_c, "qreg" to cstr) == 0 or strcmp(in_c, "H" to cstr) == 0 or strcmp(in_c, "measure" to cstr) == 0 or strcmp(in_c, "CNOT" to cstr) == 0:
+                    (deref self).quantum_used = True
+
+        elif k == NodeType.ListLiteral or k == NodeType.DictLiteral:
+            let elems as List[ptr[Node]] = node_declarations(node)
+            let e_count as i64 = elems.length()
+            var ei as i64 = 0 to i64
+            while ei < e_count:
+                self.mark_node(elems[ei])
+                ei = ei + 1 to i64
+
+        elif k == NodeType.ClosureExpr:
+            let params as List[ptr[Node]] = node_params(node)
+            let p_count as i64 = params.length()
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                self.mark_node(params[pi])
+                pi = pi + 1 to i64
+            self.mark_node(node_body(node))
+
+        elif k == NodeType.ReturnStmt:
+            self.mark_node(node_body(node))
+
+    public fn sweep_node(self as ptr[DeadCodeEliminator], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        let k as NodeType = node_kind(node)
+        if k == NodeType.Program:
+            let decls as List[ptr[Node]] = node_declarations(node)
+            var new_decls as List[ptr[Node]] = List[ptr[Node]]()
+            let d_count as i64 = decls.length()
+            var di as i64 = 0 to i64
+            while di < d_count:
+                let decl as ptr[Node] = decls[di]
+                if decl != None to ptr[Node] and node_kind(decl) == NodeType.ImportDecl:
+                    let target as String = node_target(decl)
+                    if target.data != None to ptr[u8]:
+                        if strcmp(target.data to cstr, "std.quantum" to cstr) == 0 and not (deref self).quantum_used:
+                            // Prune unused quantum import! Zero-cost abstraction!
+                            di = di + 1 to i64
+                            continue
+                new_decls.append(decl)
+                self.sweep_node(decl)
+                di = di + 1 to i64
+            set_node_declarations(node, new_decls)
+
+        elif k == NodeType.BlockStmt:
+            let stmts as List[ptr[Node]] = node_declarations(node)
+            var new_stmts as List[ptr[Node]] = List[ptr[Node]]()
+            let s_count as i64 = stmts.length()
+            var si as i64 = 0 to i64
+            while si < s_count:
+                let stmt as ptr[Node] = stmts[si]
+                if stmt != None to ptr[Node] and node_kind(stmt) == NodeType.IfStmt:
+                    let cond as ptr[Node] = node_cond(stmt)
+                    if cond != None to ptr[Node] and node_kind(cond) == NodeType.BooleanLiteral:
+                        let v as f64 = node_val(cond)
+                        if v == 1.0:
+                            // Constant True: replace IfStmt with then_branch body
+                            let tb as ptr[Node] = node_then_branch(stmt)
+                            if tb != None to ptr[Node]:
+                                self.sweep_node(tb)
+                                if node_kind(tb) == NodeType.BlockStmt:
+                                    let in_stmts as List[ptr[Node]] = node_declarations(tb)
+                                    let in_count as i64 = in_stmts.length()
+                                    var ini as i64 = 0 to i64
+                                    while ini < in_count:
+                                        new_stmts.append(in_stmts[ini])
+                                        ini = ini + 1 to i64
+                                    si = si + 1 to i64
+                                    continue
+                                else:
+                                    new_stmts.append(tb)
+                                    si = si + 1 to i64
+                                    continue
+                        else:
+                            // Constant False: replace IfStmt with else_branch if it exists
+                            let opt_eb as Option[ptr[Node]] = node_else_branch(stmt)
+                            let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
+                            if (deref (opt_ref to ptr[u8])) != 0 to u8:
+                                let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                                let eb as ptr[Node] = val_p to ptr[Node]
+                                if eb != None to ptr[Node]:
+                                    self.sweep_node(eb)
+                                    if node_kind(eb) == NodeType.BlockStmt:
+                                        let in_stmts as List[ptr[Node]] = node_declarations(eb)
+                                        let in_count as i64 = in_stmts.length()
+                                        var ini as i64 = 0 to i64
+                                        while ini < in_count:
+                                            new_stmts.append(in_stmts[ini])
+                                            ini = ini + 1 to i64
+                                        si = si + 1 to i64
+                                        continue
+                                    else:
+                                        new_stmts.append(eb)
+                                        si = si + 1 to i64
+                                        continue
+                            // Pruned completely!
+                            si = si + 1 to i64
+                            continue
+
+                new_stmts.append(stmt)
+                self.sweep_node(stmt)
+                si = si + 1 to i64
+            set_node_declarations(node, new_stmts)
+
+        elif k == NodeType.FunDecl or k == NodeType.ParamBlockStmt or k == NodeType.WhileStmt or k == NodeType.ForStmt or k == NodeType.WithStmt:
+            self.sweep_node(node_body(node))
+
+        elif k == NodeType.IfStmt:
+            self.sweep_node(node_then_branch(node))
+            let opt_eb as Option[ptr[Node]] = node_else_branch(node)
+            let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
+            if (deref (opt_ref to ptr[u8])) != 0 to u8:
+                let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                self.sweep_node(val_p to ptr[Node])

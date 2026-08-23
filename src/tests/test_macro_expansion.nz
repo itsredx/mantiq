@@ -1,0 +1,96 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Test Assertions ──────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1)
+
+// ── Macro Definitions ────────────────────────────────────────────────────
+macro add_expr(a, b):
+    a + b
+
+macro mul_expr(a, b):
+    a * b
+
+macro poly(x, c):
+    x * x + c
+
+macro max_of(a, b):
+    a if a > b else b
+
+macro double_val(x):
+    x + x
+
+macro quad_val(x):
+    double_val!(double_val!(x))
+
+macro compute_block(val):
+    let local_a = val * 2
+    let local_b = local_a + 3
+    local_b * 4
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+fn test_expression_macros():
+    printf("[TEST] Testing Expression Macros (add_expr, mul_expr, poly)...\n" to cstr)
+    let res_add as i32 = add_expr!(15, 27)
+    printf("  add_expr!(15, 27) = %d\n" to cstr, res_add)
+    assert_true(res_add == 42, "add_expr!(15, 27) == 42" to cstr)
+
+    let res_mul as i32 = mul_expr!(6, 7)
+    printf("  mul_expr!(6, 7) = %d\n" to cstr, res_mul)
+    assert_true(res_mul == 42, "mul_expr!(6, 7) == 42" to cstr)
+
+    let res_poly as i32 = poly!(5, 7)
+    printf("  poly!(5, 7) = %d\n" to cstr, res_poly)
+    assert_true(res_poly == 32, "poly!(5, 7) == 32" to cstr)
+    printf("  [PASS] Expression macros verified.\n" to cstr)
+
+fn test_control_flow_macros():
+    printf("[TEST] Testing Control Flow / Ternary Macros...\n" to cstr)
+    let m1 as i32 = max_of!(42, 17)
+    printf("  max_of!(42, 17) = %d\n" to cstr, m1)
+    assert_true(m1 == 42, "max_of!(42, 17) == 42" to cstr)
+
+    let m2 as i32 = max_of!(15, 99)
+    printf("  max_of!(15, 99) = %d\n" to cstr, m2)
+    assert_true(m2 == 99, "max_of!(15, 99) == 99" to cstr)
+    printf("  [PASS] Control flow macros verified.\n" to cstr)
+
+fn test_nested_macro_expansion():
+    printf("[TEST] Testing Nested Macro Expansion (double_val, quad_val)...\n" to cstr)
+    let d as i32 = double_val!(10)
+    printf("  double_val!(10) = %d\n" to cstr, d)
+    assert_true(d == 20, "double_val!(10) == 20" to cstr)
+
+    let q as i32 = quad_val!(5)
+    printf("  quad_val!(5) = %d\n" to cstr, q)
+    assert_true(q == 20, "quad_val!(5) == 20" to cstr)
+    printf("  [PASS] Nested macro expansion verified.\n" to cstr)
+
+fn test_block_macro_and_hygiene():
+    printf("[TEST] Testing Block Macros & Variable Hygiene...\n" to cstr)
+    let local_a as i32 = 100
+    let local_b as i32 = 200
+
+    let res_blk as i32 = compute_block!(10)
+    printf("  compute_block!(10) = %d\n" to cstr, res_blk)
+    assert_true(res_blk == 92, "compute_block!(10) == 92" to cstr)
+
+    // Verify outer locals were not overwritten by macro hygienic locals
+    assert_true(local_a == 100, "local_a preserved outside macro" to cstr)
+    assert_true(local_b == 200, "local_b preserved outside macro" to cstr)
+    printf("  [PASS] Block macros and hygiene verified.\n" to cstr)
+
+// ── Main ─────────────────────────────────────────────────────────────────
+fn main() as i32:
+    printf("=== Starting Macro Expansion Test Suite (Spec 0024) ===\n" to cstr)
+    test_expression_macros()
+    test_control_flow_macros()
+    test_nested_macro_expansion()
+    test_block_macro_and_hygiene()
+    printf("=== All Macro Expansion Tests Passed! ===\n" to cstr)
+    return 0

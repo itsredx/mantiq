@@ -1,0 +1,174 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+import symbols
+from symbols import Node, NodeType, Span, Symbol, node_kind, node_name, node_declarations
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+import borrowck
+from borrowck import BorrowChecker
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Test 1: Valid NLL Early Release ──────────────────────────────────────
+fn test_nll_early_release() as bool:
+    let src as cstr = "fn test_nll():\n    var x as i32 = 42\n    let r as life[a] i32 = ref x\n    let v as i32 = deref r\n    x = 100\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_nll1.nz" to cstr)
+    let root as ptr[Node] = lr.lower_source()
+    
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema("test_nll1.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(root)
+    
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc.init_bc()
+    (deref bc).current_file = String.make("test_nll1.nz" to cstr)
+    bc.walk_ast(root)
+    
+    if (deref bc).errors.length() == 0 to i64:
+        printf("  [PASS] NLL Early Release (assign after last use permitted)\n" to cstr)
+        return True
+    else:
+        printf("  [FAIL] NLL Early Release reported false positive error!\n" to cstr)
+        return False
+
+// ── Test 2: Move While Borrowed Rejection ────────────────────────────────
+fn test_move_while_borrowed() as bool:
+    let src as cstr = "fn test_mv():\n    var x as String = String()\n    let r as life[a] String = ref x\n    let y as String = x\n    let v as String = deref r\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_nll2.nz" to cstr)
+    let root as ptr[Node] = lr.lower_source()
+    
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema("test_nll2.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc.init_bc()
+    (deref bc).current_file = String.make("test_nll2.nz" to cstr)
+    bc.walk_ast(root)
+    
+    if (deref bc).errors.length() > 0 to i64:
+        printf("  [PASS] Move While Borrowed correctly rejected (E0403)\n" to cstr)
+        return True
+    else:
+        printf("  [FAIL] Move While Borrowed was NOT detected!\n" to cstr)
+        return False
+
+// ── Test 3: Assign While Borrowed Rejection ─────────────────────────────
+fn test_assign_while_borrowed() as bool:
+    let src as cstr = "fn test_assign():\n    var x as i32 = 42\n    let r as life[a] i32 = ref x\n    x = 100\n    let v as i32 = deref r\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_nll3.nz" to cstr)
+    let root as ptr[Node] = lr.lower_source()
+    
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema("test_nll3.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc.init_bc()
+    (deref bc).current_file = String.make("test_nll3.nz" to cstr)
+    bc.walk_ast(root)
+    
+    if (deref bc).errors.length() > 0 to i64:
+        printf("  [PASS] Assign While Borrowed correctly rejected (E0404)\n" to cstr)
+        return True
+    else:
+        printf("  [FAIL] Assign While Borrowed was NOT detected!\n" to cstr)
+        return False
+
+// ── Test 4: Aliasing XOR Mutability Rejection ────────────────────────────
+fn test_aliasing_mutability() as bool:
+    let src as cstr = "fn test_alias():\n    var x as i32 = 42\n    let r1 as life[a] mut i32 = ref mut x\n    let r2 as life[b] mut i32 = ref mut x\n    let v as i32 = (deref r1) + (deref r2)\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_nll4.nz" to cstr)
+    let root as ptr[Node] = lr.lower_source()
+    
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema("test_nll4.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc.init_bc()
+    (deref bc).current_file = String.make("test_nll4.nz" to cstr)
+    bc.walk_ast(root)
+    
+    if (deref bc).errors.length() > 0 to i64:
+        printf("  [PASS] Concurrent Mutable Borrows correctly rejected (E0405)\n" to cstr)
+        return True
+    else:
+        printf("  [FAIL] Concurrent Mutable Borrows were NOT detected!\n" to cstr)
+        return False
+
+// ── Test 5: Dangling Local Stack Reference Rejection ─────────────────────
+fn test_dangling_reference() as bool:
+    let src as cstr = "fn test_dangle() as ptr[i32]:\n    var local_val as i32 = 42\n    return ref local_val\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_nll5.nz" to cstr)
+    let root as ptr[Node] = lr.lower_source()
+    
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema("test_nll5.nz" to cstr)
+    s.declare_pass(root)
+    s.resolve_pass(root)
+    
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    bc.init_bc()
+    (deref bc).current_file = String.make("test_nll5.nz" to cstr)
+    bc.walk_ast(root)
+    
+    if (deref bc).errors.length() > 0 to i64:
+        printf("  [PASS] Dangling Stack Reference correctly rejected (E0407)\n" to cstr)
+        return True
+    else:
+        printf("  [FAIL] Dangling Stack Reference was NOT detected!\n" to cstr)
+        return False
+
+// ── Test 6: Executable End-to-End Reference Computation ──────────────────
+fn add_lifetime_refs(a as life[x] i32, b as life[y] i32) as i32:
+    return (deref a) + (deref b)
+
+fn main() -> i32:
+    printf("=== Starting Non-Lexical Lifetimes (NLL) Test Suite (Spec 0013) ===\n" to cstr)
+    
+    var ok as bool = True
+    ok = ok and test_nll_early_release()
+    ok = ok and test_move_while_borrowed()
+    ok = ok and test_assign_while_borrowed()
+    ok = ok and test_aliasing_mutability()
+    ok = ok and test_dangling_reference()
+    
+    // Executable verification
+    var val1 as i32 = 40
+    let r1 as life[a] i32 = ref val1
+    let extracted1 as i32 = deref r1
+    val1 = extracted1 + 2 // Valid under NLL (borrow ended)
+    
+    var val2 as i32 = 58
+    let r2 as life[b] i32 = ref val2
+    let sum as i32 = add_lifetime_refs(ref val1, r2)
+    
+    if sum == 100:
+        printf("  [PASS] Executable NLL Reference Computation (sum = %d)\n" to cstr, sum)
+    else:
+        printf("  [FAIL] Executable NLL computation mismatch: got %d\n" to cstr, sum)
+        ok = False
+        
+    if ok:
+        printf("=== All NLL Verification Tests Passed! ===\n" to cstr)
+        return 0
+    else:
+        printf("=== Some NLL Tests Failed! ===\n" to cstr)
+        return 1
