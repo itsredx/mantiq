@@ -4,7 +4,7 @@ from std.string import String
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots
 from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
@@ -237,17 +237,9 @@ struct Lowerer:
         elif strcmp(kind, "assignment" to cstr) == 0 or strcmp(kind, "assignment_expression" to cstr) == 0 or strcmp(kind, "assign_stmt" to cstr) == 0 or strcmp(kind, "augmented_assignment" to cstr) == 0:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "class_decl" to cstr) == 0:
-            let m as i32 = (deref self).mode to i32
-            let target as i32 = LanguageMode.Nizam to i32
-            if m == target:
-                let r_err as i32 = printf("Error: 'class' is a Mantiq-only feature. Use 'struct' in Nizam strict mode.\n" to cstr, "" to cstr)
-                return None to ptr[Node]
-            
-            let n as ptr[Node] = make_node(NodeType.ClassDecl, self.get_span(ts_node))
-            let data as ptr[ClassDeclData] = make[ClassDeclData](1 to usize) to ptr[ClassDeclData]
-            (deref data).name = String.make("" to cstr)
-            (deref n).data = data to ptr[u8]
-            return n
+            return self.lower_class_decl(ts_node)
+        elif strcmp(kind, "interface_decl" to cstr) == 0:
+            return self.lower_interface_decl(ts_node)
         elif strcmp(kind, "struct_decl" to cstr) == 0:
             return self.lower_struct_decl(ts_node)
         elif strcmp(kind, "enum_decl" to cstr) == 0:
@@ -2120,6 +2112,113 @@ struct Lowerer:
         (deref data).body = catch_body
         (deref n).data = data to ptr[u8]
         return n
+
+    public fn lower_class_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let m as i32 = (deref self).mode to i32
+        let target_mode as i32 = LanguageMode.Nizam to i32
+        if m == target_mode:
+            let r_err as i32 = printf("Error: 'class' is a Mantiq-only feature. Use 'struct' in Nizam strict mode.\n" to cstr, "" to cstr)
+            return None to ptr[Node]
+
+        let span as Span = self.get_span(ts_node)
+        var name as String = String.make("" to cstr)
+        var base_name as String = String.make("" to cstr)
+        let ifaces as List[String] = List[String]()
+        let body_stmts as List[ptr[Node]] = List[ptr[Node]]()
+
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            if ts_node_is_named_ptr(ref child):
+                let c_kind as cstr = ts_node_type_ptr(ref child)
+                if strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
+                    let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
+                    let text as String = deref slice_ptr
+                    drop(slice_ptr to ptr)
+                    if name.len == 0 to usize:
+                        name = text
+                    elif base_name.len == 0 to usize:
+                        base_name = text
+                    else:
+                        ifaces.append(text)
+                elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
+                    let b_count as u32 = ts_node_child_count_ptr(ref child)
+                    var b as u32 = 0 to u32
+                    while b < b_count:
+                        var b_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, b, ref b_child)
+                        if ts_node_is_named_ptr(ref b_child):
+                            let b_type as cstr = ts_node_type_ptr(ref b_child)
+                            if strcmp(b_type, "var_decl" to cstr) == 0 or strcmp(b_type, "field_decl" to cstr) == 0 or strcmp(b_type, "fun_decl" to cstr) == 0 or strcmp(b_type, "named_function" to cstr) == 0 or strcmp(b_type, "function_decl" to cstr) == 0:
+                                let lowered as ptr[Node] = self.lower_node(ref b_child)
+                                if lowered != None to ptr[Node]:
+                                    body_stmts.append(lowered)
+                        b = b + 1 to u32
+            i = i + 1 to u32
+
+        let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
+        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        (deref body_data).declarations = body_stmts
+        (deref body_data).auto_drops = List[String]()
+        (deref body_node).data = body_data to ptr[u8]
+
+        let n as ptr[Node] = make_node(NodeType.ClassDecl, span)
+        let data as ptr[ClassDeclData] = make[ClassDeclData](1 to usize) to ptr[ClassDeclData]
+        (deref data).name = name
+        (deref data).target = base_name
+        (deref data).imported_symbols = ifaces
+        (deref data).body = body_node
+        (deref n).data = data to ptr[u8]
+        return n
+
+    public fn lower_interface_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        var name as String = String.make("" to cstr)
+        let body_stmts as List[ptr[Node]] = List[ptr[Node]]()
+
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            if ts_node_is_named_ptr(ref child):
+                let c_kind as cstr = ts_node_type_ptr(ref child)
+                if strcmp(c_kind, "identifier" to cstr) == 0 or strcmp(c_kind, "type_identifier" to cstr) == 0:
+                    if name.len == 0 to usize:
+                        let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
+                        name = deref slice_ptr
+                        drop(slice_ptr to ptr)
+                elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
+                    let b_count as u32 = ts_node_child_count_ptr(ref child)
+                    var b as u32 = 0 to u32
+                    while b < b_count:
+                        var b_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, b, ref b_child)
+                        if ts_node_is_named_ptr(ref b_child):
+                            let b_type as cstr = ts_node_type_ptr(ref b_child)
+                            if strcmp(b_type, "fun_decl" to cstr) == 0 or strcmp(b_type, "function_decl" to cstr) == 0 or strcmp(b_type, "named_function" to cstr) == 0:
+                                let lowered as ptr[Node] = self.lower_node(ref b_child)
+                                if lowered != None to ptr[Node]:
+                                    body_stmts.append(lowered)
+                        b = b + 1 to u32
+            i = i + 1 to u32
+
+        let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
+        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        (deref body_data).declarations = body_stmts
+        (deref body_data).auto_drops = List[String]()
+        (deref body_node).data = body_data to ptr[u8]
+
+        let n as ptr[Node] = make_node(NodeType.InterfaceDecl, span)
+        let data as ptr[InterfaceDeclData] = make[InterfaceDeclData](1 to usize) to ptr[InterfaceDeclData]
+        (deref data).name = name
+        (deref data).body = body_node
+        (deref data).imported_symbols = List[String]()
+        (deref n).data = data to ptr[u8]
+        return n
+
 
     public fn lower_struct_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         extern fn memset(s as ptr, c as i32, n as usize) as ptr

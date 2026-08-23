@@ -224,6 +224,10 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let t1 as i64 = perf_begin(perf, "sema")
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref sema).init_sema(path_cstr)
+    if mode == LanguageMode.Nizam to i32:
+        (deref sema).mode = LanguageMode.Nizam
+    else:
+        (deref sema).mode = LanguageMode.Mantiq
     (deref sema).engine = engine
     (deref sema).root_ast = root
     sema.declare_pass(root)

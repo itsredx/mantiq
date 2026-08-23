@@ -34,10 +34,12 @@ fn test_nll_early_release() as bool:
     
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc.init_bc()
+    (deref bc).sema = s
     (deref bc).current_file = String.make("test_nll1.nz" to cstr)
     bc.walk_ast(root)
     
-    if (deref bc).errors.length() == 0 to i64:
+    let errs1 as ptr[List[String]] = ref (deref bc).errors
+    if (deref errs1).length() == 0 to i64:
         printf("  [PASS] NLL Early Release (assign after last use permitted)\n" to cstr)
         return True
     else:
@@ -57,10 +59,12 @@ fn test_move_while_borrowed() as bool:
     
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc.init_bc()
+    (deref bc).sema = s
     (deref bc).current_file = String.make("test_nll2.nz" to cstr)
     bc.walk_ast(root)
     
-    if (deref bc).errors.length() > 0 to i64:
+    let errs2 as ptr[List[String]] = ref (deref bc).errors
+    if (deref errs2).length() > 0 to i64:
         printf("  [PASS] Move While Borrowed correctly rejected (E0403)\n" to cstr)
         return True
     else:
@@ -80,10 +84,12 @@ fn test_assign_while_borrowed() as bool:
     
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc.init_bc()
+    (deref bc).sema = s
     (deref bc).current_file = String.make("test_nll3.nz" to cstr)
     bc.walk_ast(root)
     
-    if (deref bc).errors.length() > 0 to i64:
+    let errs3 as ptr[List[String]] = ref (deref bc).errors
+    if (deref errs3).length() > 0 to i64:
         printf("  [PASS] Assign While Borrowed correctly rejected (E0404)\n" to cstr)
         return True
     else:
@@ -103,10 +109,12 @@ fn test_aliasing_mutability() as bool:
     
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc.init_bc()
+    (deref bc).sema = s
     (deref bc).current_file = String.make("test_nll4.nz" to cstr)
     bc.walk_ast(root)
     
-    if (deref bc).errors.length() > 0 to i64:
+    let errs4 as ptr[List[String]] = ref (deref bc).errors
+    if (deref errs4).length() > 0 to i64:
         printf("  [PASS] Concurrent Mutable Borrows correctly rejected (E0405)\n" to cstr)
         return True
     else:
@@ -126,10 +134,12 @@ fn test_dangling_reference() as bool:
     
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc.init_bc()
+    (deref bc).sema = s
     (deref bc).current_file = String.make("test_nll5.nz" to cstr)
     bc.walk_ast(root)
     
-    if (deref bc).errors.length() > 0 to i64:
+    let errs5 as ptr[List[String]] = ref (deref bc).errors
+    if (deref errs5).length() > 0 to i64:
         printf("  [PASS] Dangling Stack Reference correctly rejected (E0407)\n" to cstr)
         return True
     else:
@@ -140,15 +150,15 @@ fn test_dangling_reference() as bool:
 fn add_lifetime_refs(a as life[x] i32, b as life[y] i32) as i32:
     return (deref a) + (deref b)
 
-fn main() -> i32:
+fn main() as i32:
     printf("=== Starting Non-Lexical Lifetimes (NLL) Test Suite (Spec 0013) ===\n" to cstr)
     
-    var ok as bool = True
-    ok = ok and test_nll_early_release()
-    ok = ok and test_move_while_borrowed()
-    ok = ok and test_assign_while_borrowed()
-    ok = ok and test_aliasing_mutability()
-    ok = ok and test_dangling_reference()
+    let ok1 as bool = test_nll_early_release()
+    let ok2 as bool = test_move_while_borrowed()
+    let ok3 as bool = test_assign_while_borrowed()
+    let ok4 as bool = test_aliasing_mutability()
+    let ok5 as bool = test_dangling_reference()
+    var ok as bool = ok1 and ok2 and ok3 and ok4 and ok5
     
     // Executable verification
     var val1 as i32 = 40

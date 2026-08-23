@@ -1,0 +1,84 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Test Assertions ──────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1)
+
+// ── Interface & Class Definitions ────────────────────────────────────────
+interface Shape:
+    fn area(self) as f64
+    fn perimeter(self) as f64
+
+class Circle:
+    public var radius as f64
+
+    public fn area(self) as f64:
+        return 3.14159 * (deref self).radius * (deref self).radius
+
+    public fn perimeter(self) as f64:
+        return 2.0 * 3.14159 * (deref self).radius
+
+class Rectangle:
+    public var width as f64
+    public var height as f64
+
+    public fn area(self) as f64:
+        return (deref self).width * (deref self).height
+
+    public fn perimeter(self) as f64:
+        return 2.0 * ((deref self).width + (deref self).height)
+
+interface Printable:
+    fn print_info(self) as i32
+
+class Document:
+    public var doc_id as i32
+    public var pages as i32
+
+    public fn print_info(self) as i32:
+        let _ as i32 = printf("Document[ID=%d, pages=%d]\n" to cstr, (deref self).doc_id, (deref self).pages)
+        return (deref self).doc_id
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+fn test_class_creation_and_methods():
+    printf("[TEST] Testing Class Creation and Method Invocation (Mantiq Mode)...\n" to cstr)
+    var c as Circle = Circle(10.0)
+    let c_area as f64 = c.area()
+    let c_perim as f64 = c.perimeter()
+    printf("  Circle(10.0) area: %f, perimeter: %f\n" to cstr, c_area, c_perim)
+    assert_true(c_area > 314.0 and c_area < 315.0, "Circle area matches expected value" to cstr)
+    assert_true(c_perim > 62.0 and c_perim < 63.0, "Circle perimeter matches expected value" to cstr)
+
+    var r as Rectangle = Rectangle(5.0, 8.0)
+    let r_area as f64 = r.area()
+    let r_perim as f64 = r.perimeter()
+    printf("  Rectangle(5.0, 8.0) area: %f, perimeter: %f\n" to cstr, r_area, r_perim)
+    assert_true(r_area == 40.0, "Rectangle area == 40.0" to cstr)
+    assert_true(r_perim == 26.0, "Rectangle perimeter == 26.0" to cstr)
+    printf("  [PASS] Class creation and methods verified.\n" to cstr)
+
+fn test_interface_dispatch():
+    printf("[TEST] Testing Interface & Trait Contracts (Mantiq Mode)...\n" to cstr)
+    var doc as Document = Document(101, 42)
+    let doc_id as i32 = doc.print_info()
+    assert_true(doc_id == 101, "Document print_info matches id" to cstr)
+    printf("  [PASS] Interface contracts verified.\n" to cstr)
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────
+fn main() as i32:
+    printf("========================================\n" to cstr)
+    printf("Running Interfaces, Traits & Classes Test Suite (Spec 0025 - Mantiq)\n" to cstr)
+    printf("========================================\n" to cstr)
+
+    test_class_creation_and_methods()
+    test_interface_dispatch()
+
+    printf("========================================\n" to cstr)
+    printf("All Interface and Class Tests Passed Successfully!\n" to cstr)
+    printf("========================================\n" to cstr)
+    return 0

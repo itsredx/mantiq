@@ -101,6 +101,16 @@ fn make_union_type(name as String) as ptr[Type]:
     (deref t).name = name
     return t
 
+fn make_class_type(name as String) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Class)
+    (deref t).name = name
+    return t
+
+fn make_interface_type(name as String) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Interface)
+    (deref t).name = name
+    return t
+
 // ── Copy/Move Type Classification ──────────────────────────────────────
 fn is_copy_type(t as ptr[Type]) as bool:
     if t == None to ptr[Type]:
@@ -175,6 +185,8 @@ fn is_copy_type(t as ptr[Type]) as bool:
     if k == TypeKind.Option:
         return True
     if k == TypeKind.Enum:
+        return True
+    if k == TypeKind.Interface:
         return True
     if k == TypeKind.QBit:
         return True

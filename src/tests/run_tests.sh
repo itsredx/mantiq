@@ -45,6 +45,7 @@ TEST_FILES=(
     "src/tests/test_quantum_dce.nz"
     "src/tests/test_macro_expansion.nz"
     "src/tests/test_nll_borrowck.nz"
+    "src/tests/test_interfaces_and_classes.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}
@@ -53,7 +54,7 @@ FAILED_SUITES=0
 
 for test_file in "${TEST_FILES[@]}"; do
     test_path="${ROOT_DIR}/${test_file}"
-    test_name="$(basename "${test_file}" .nz)"
+    test_name="$(basename "${test_file}" | sed 's/\.[^.]*$//')"
     bin_path="/tmp/${test_name}"
 
     echo "------------------------------------------------------------"

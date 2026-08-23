@@ -703,8 +703,31 @@ struct Sema:
             if (deref (deref self).current_scope).symbols.has(name):
                 self.report_error_node("E0102" to cstr, String.make("duplicate class declaration" to cstr), node)
             else:
-                let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Struct, node)
+                let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Class, node)
                 (deref (deref self).current_scope).symbols[name] = sym
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
+            (deref self).current_scope = child_scope
+            (deref self).fn_scopes[node to usize] = child_scope
+            if node_body(node) != None to ptr[Node]:
+                self.declare_pass(node_body(node))
+            let self_ref_cd as ptr[Sema] = self
+            (deref self_ref_cd).current_scope = parent_scope
+        elif nt == NodeType.InterfaceDecl:
+            let name as String = node_name(node)
+            if (deref (deref self).current_scope).symbols.has(name):
+                self.report_error_node("E0102" to cstr, String.make("duplicate interface declaration" to cstr), node)
+            else:
+                let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Interface, node)
+                (deref (deref self).current_scope).symbols[name] = sym
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            let child_scope as ptr[Scope] = make_scope(parent_scope, node)
+            (deref self).current_scope = child_scope
+            (deref self).fn_scopes[node to usize] = child_scope
+            if node_body(node) != None to ptr[Node]:
+                self.declare_pass(node_body(node))
+            let self_ref_id as ptr[Sema] = self
+            (deref self_ref_id).current_scope = parent_scope
         elif nt == NodeType.StructDecl:
             let name as String = node_name(node)
             if (deref (deref self).current_scope).symbols.has(name):
@@ -1110,6 +1133,24 @@ struct Sema:
         elif nt == NodeType.ThrowStmt:
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
+        elif nt == NodeType.ClassDecl:
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            if (deref self).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
+                (deref self).current_scope = child_scope
+                if node_body(node) != None to ptr[Node]:
+                    self.resolve_pass(node_body(node))
+                let self_ref_cd2 as ptr[Sema] = self
+                (deref self_ref_cd2).current_scope = parent_scope
+        elif nt == NodeType.InterfaceDecl:
+            let parent_scope as ptr[Scope] = (deref self).current_scope
+            if (deref self).fn_scopes.has(node to usize):
+                let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
+                (deref self).current_scope = child_scope
+                if node_body(node) != None to ptr[Node]:
+                    self.resolve_pass(node_body(node))
+                let self_ref_id2 as ptr[Sema] = self
+                (deref self_ref_id2).current_scope = parent_scope
         elif nt == NodeType.StructDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             if (deref self).fn_scopes.has(node to usize):

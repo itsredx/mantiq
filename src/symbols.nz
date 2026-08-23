@@ -40,6 +40,7 @@ enum NodeType:
     VarDecl
     IfStmt
     ClassDecl
+    InterfaceDecl
     BinaryExpr
     Identifier
     NumberLiteral
@@ -113,6 +114,14 @@ struct IfStmtData:
 
 struct ClassDeclData:
     public var name as String
+    public var target as String
+    public var imported_symbols as List[String]
+    public var body as ptr[Node]
+
+struct InterfaceDeclData:
+    public var name as String
+    public var body as ptr[Node]
+    public var imported_symbols as List[String]
 
 struct BinaryExprData:
     public var op as String
@@ -277,6 +286,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[IfStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ClassDecl:
         (deref n).data = make[ClassDeclData](1 to usize) to ptr[u8]
+    elif nk == NodeType.InterfaceDecl:
+        (deref n).data = make[InterfaceDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.BinaryExpr:
         (deref n).data = make[BinaryExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.Identifier:
@@ -438,6 +449,9 @@ fn node_name(n as ptr[Node]) as String:
     elif k == NodeType.ClassDecl:
         let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
         return (deref d).name
+    elif k == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
+        return (deref d).name
     return String.make("" to cstr)
 
 fn node_name_ptr(n as ptr[Node]) as ptr[String]:
@@ -486,6 +500,9 @@ fn node_name_ptr(n as ptr[Node]) as ptr[String]:
     elif k == NodeType.ClassDecl:
         let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
         return ref (deref d).name
+    elif k == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
+        return ref (deref d).name
     return None to ptr[String]
 
 fn set_node_name(n as ptr[Node], name as String):
@@ -533,6 +550,9 @@ fn set_node_name(n as ptr[Node], name as String):
         (deref d).name = name
     elif k == NodeType.ClassDecl:
         let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).name = name
+    elif k == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
         (deref d).name = name
 
 // left accessor (14 node types have it):
@@ -699,6 +719,12 @@ fn node_body(n as ptr[Node]) as ptr[Node]:
     elif k == NodeType.ParamBlockStmt:
         let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         r = (deref d).body
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        r = (deref d).body
+    elif k == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
+        r = (deref d).body
     return r
 
 fn set_node_body(n as ptr[Node], body as ptr[Node]):
@@ -738,6 +764,12 @@ fn set_node_body(n as ptr[Node], body as ptr[Node]):
     elif k == NodeType.ParamBlockStmt:
         let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         (deref d).body = body
+    elif k == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).body = body
+    elif k == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
+        (deref d).body = body
 
 // declarations accessor (6 node types have it):
 fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
@@ -763,6 +795,10 @@ fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
     elif k == NodeType.MatchStmt:
         let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         r = (deref d).declarations
+    elif k == NodeType.ClassDecl or k == NodeType.InterfaceDecl or k == NodeType.StructDecl:
+        let b as ptr[Node] = node_body(n)
+        if b != None to ptr[Node] and (deref b).kind == NodeType.BlockStmt:
+            return node_declarations(b)
     return r
 
 fn node_declarations_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
@@ -1290,13 +1326,16 @@ fn set_node_return_type_annots(n as ptr[Node], annots as ptr[List[Option[ptr[Typ
         let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         (deref d).return_type_annots = annots
 
-// target accessor (ImportDecl):
+// target accessor (ImportDecl, ClassDecl):
 fn node_target(n as ptr[Node]) as String:
     var r as String = String.make("" to cstr)
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return r
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).target
+    elif (deref n).kind == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
         r = (deref d).target
     return r
 
@@ -1306,14 +1345,23 @@ fn set_node_target(n as ptr[Node], target as String):
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
         (deref d).target = target
+    elif (deref n).kind == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).target = target
 
-// imported_symbols accessor (ImportDecl):
+// imported_symbols accessor (ImportDecl, ClassDecl, InterfaceDecl):
 fn node_imported_symbols(n as ptr[Node]) as List[String]:
     var r as List[String] = List[String]()
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return r
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        r = (deref d).imported_symbols
+    elif (deref n).kind == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        r = (deref d).imported_symbols
+    elif (deref n).kind == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
         r = (deref d).imported_symbols
     return r
 
@@ -1322,6 +1370,12 @@ fn set_node_imported_symbols(n as ptr[Node], syms as List[String]):
         return
     if (deref n).kind == NodeType.ImportDecl:
         let d as ptr[ImportDeclData] = (deref n).data to ptr[ImportDeclData]
+        (deref d).imported_symbols = syms
+    elif (deref n).kind == NodeType.ClassDecl:
+        let d as ptr[ClassDeclData] = (deref n).data to ptr[ClassDeclData]
+        (deref d).imported_symbols = syms
+    elif (deref n).kind == NodeType.InterfaceDecl:
+        let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
         (deref d).imported_symbols = syms
 
 // alias accessor (ImportDecl):
@@ -1367,6 +1421,8 @@ enum SymbolKind:
     Enum
     Module
     TypeAlias
+    Class
+    Interface
 
 // ── Symbol ─────────────────────────────────────────────────────────────
 struct Symbol:

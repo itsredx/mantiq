@@ -212,31 +212,49 @@ struct BorrowChecker:
                 let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
                 (deref lu_ref)[id_name] = row
         
-        let decls_raw as List[ptr[Node]] = node_declarations(node)
-        let decls as ptr[List[ptr[Node]]] = ref decls_raw
-        let count as i64 = (deref decls).length()
-        var i as i64 = 0 to i64
-        while i < count:
-            self.scan_last_uses((deref decls)[i])
-            i = i + 1 to i64
-            
-        let params_raw as List[ptr[Node]] = node_params(node)
-        let params as ptr[List[ptr[Node]]] = ref params_raw
-        let p_count as i64 = (deref params).length()
-        var p_i as i64 = 0 to i64
-        while p_i < p_count:
-            self.scan_last_uses((deref params)[p_i])
-            p_i = p_i + 1 to i64
-            
-        self.scan_last_uses(node_left(node))
-        self.scan_last_uses(node_right(node))
-        self.scan_last_uses(node_body(node))
-        self.scan_last_uses(node_cond(node))
-        self.scan_last_uses(node_then_branch(node))
-        let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
-        let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
-        if option_has_value(else_opt):
-            self.scan_last_uses(option_value(else_opt) to ptr[Node])
+        if nt == NodeType.Program or nt == NodeType.BlockStmt or nt == NodeType.ParamBlockStmt:
+            let decls_raw as List[ptr[Node]] = node_declarations(node)
+            let decls as ptr[List[ptr[Node]]] = ref decls_raw
+            let count as i64 = (deref decls).length()
+            var i as i64 = 0 to i64
+            while i < count:
+                self.scan_last_uses((deref decls)[i])
+                i = i + 1 to i64
+        elif nt == NodeType.FunDecl:
+            let params_raw as List[ptr[Node]] = node_params(node)
+            let params as ptr[List[ptr[Node]]] = ref params_raw
+            let p_count as i64 = (deref params).length()
+            var p_i as i64 = 0 to i64
+            while p_i < p_count:
+                self.scan_last_uses((deref params)[p_i])
+                p_i = p_i + 1 to i64
+            self.scan_last_uses(node_body(node))
+        elif nt == NodeType.BinaryExpr or nt == NodeType.IndexExpr or nt == NodeType.VarDecl or nt == NodeType.FieldDecl:
+            self.scan_last_uses(node_left(node))
+            self.scan_last_uses(node_right(node))
+        elif nt == NodeType.UnaryExpr or nt == NodeType.CastExpr or nt == NodeType.ReturnStmt or nt == NodeType.SpreadExpr or nt == NodeType.MemberExpr:
+            self.scan_last_uses(node_left(node))
+        elif nt == NodeType.IfStmt:
+            self.scan_last_uses(node_cond(node))
+            self.scan_last_uses(node_then_branch(node))
+            let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
+            let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
+            if option_has_value(else_opt):
+                self.scan_last_uses(option_value(else_opt) to ptr[Node])
+        elif nt == NodeType.WhileStmt or nt == NodeType.WithStmt:
+            self.scan_last_uses(node_cond(node))
+            self.scan_last_uses(node_body(node))
+        elif nt == NodeType.CallExpr:
+            self.scan_last_uses(node_left(node))
+            let params_raw as List[ptr[Node]] = node_params(node)
+            let params as ptr[List[ptr[Node]]] = ref params_raw
+            let p_count as i64 = (deref params).length()
+            var p_i as i64 = 0 to i64
+            while p_i < p_count:
+                self.scan_last_uses((deref params)[p_i])
+                p_i = p_i + 1 to i64
+        elif nt == NodeType.ClassDecl or nt == NodeType.StructDecl or nt == NodeType.InterfaceDecl:
+            self.scan_last_uses(node_body(node))
 
     public fn update_borrows_liveness(self as ptr[BorrowChecker], row as u32):
         if row == 0 to u32:

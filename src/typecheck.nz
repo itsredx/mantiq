@@ -7,7 +7,7 @@ from std.mem import make
 import symbols
 from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots
 import types
-from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type
+from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type
 import sema
 from sema import Sema, make_scope, make_symbol
 import error
@@ -1243,11 +1243,11 @@ struct TypeChecker:
                     ret_type = make_type(TypeKind.Any)
             else:
                 var struct_name as String = String.make("" to cstr)
-                if obj_kind == TypeKind.Struct:
+                if obj_kind == TypeKind.Struct or obj_kind == TypeKind.Class or obj_kind == TypeKind.Interface:
                     struct_name = (deref obj_t).name
                 elif obj_kind == TypeKind.RawPointer and (deref obj_t).payload != None to ptr[Type]:
                     let pl as ptr[Type] = (deref obj_t).payload
-                    if (deref pl).kind == TypeKind.Struct:
+                    if (deref pl).kind == TypeKind.Struct or (deref pl).kind == TypeKind.Class or (deref pl).kind == TypeKind.Interface:
                         struct_name = (deref pl).name
                 if struct_name.len > 0 to usize:
                     extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
@@ -1376,6 +1376,8 @@ struct TypeChecker:
             elif strcmp(op.data to cstr, "deref" to cstr) == 0:
                 if (deref operand_t).kind == TypeKind.RawPointer and (deref operand_t).payload != None to ptr[Type]:
                     ret_type = (deref operand_t).payload
+                elif (deref operand_t).kind == TypeKind.Class or (deref operand_t).kind == TypeKind.Struct:
+                    ret_type = operand_t
                 else:
                     ret_type = make_type(TypeKind.Any)
             elif strcmp(op.data to cstr, "~" to cstr) == 0:
@@ -1560,6 +1562,46 @@ struct TypeChecker:
 
         elif nt == NodeType.BooleanLiteral:
             ret_type = make_type(TypeKind.Boolean)
+
+        elif nt == NodeType.ClassDecl:
+            let class_name as String = node_name(node)
+            ret_type = make_class_type(class_name)
+            if node_body(node) != None to ptr[Node]:
+                let sema_cd as ptr[Sema] = (deref self).sema
+                let saved_scope_cd as ptr[Scope] = (deref sema_cd).current_scope
+                var class_scope_cd as ptr[Scope] = None to ptr[Scope]
+                if (deref sema_cd).fn_scopes.has(node to usize):
+                    class_scope_cd = (deref sema_cd).fn_scopes[node to usize]
+                    (deref sema_cd).current_scope = class_scope_cd
+                else:
+                    class_scope_cd = make_scope(saved_scope_cd, node)
+                    (deref sema_cd).fn_scopes[node to usize] = class_scope_cd
+                    (deref sema_cd).current_scope = class_scope_cd
+                let saved_struct_t as ptr[Type] = (deref self).current_struct_type
+                (deref self).current_struct_type = ret_type
+                let dummy_cd as ptr[Type] = self.typecheck_node(node_body(node))
+                (deref self).current_struct_type = saved_struct_t
+                (deref sema_cd).current_scope = saved_scope_cd
+
+        elif nt == NodeType.InterfaceDecl:
+            let iface_name as String = node_name(node)
+            ret_type = make_interface_type(iface_name)
+            if node_body(node) != None to ptr[Node]:
+                let sema_id as ptr[Sema] = (deref self).sema
+                let saved_scope_id as ptr[Scope] = (deref sema_id).current_scope
+                var iface_scope_id as ptr[Scope] = None to ptr[Scope]
+                if (deref sema_id).fn_scopes.has(node to usize):
+                    iface_scope_id = (deref sema_id).fn_scopes[node to usize]
+                    (deref sema_id).current_scope = iface_scope_id
+                else:
+                    iface_scope_id = make_scope(saved_scope_id, node)
+                    (deref sema_id).fn_scopes[node to usize] = iface_scope_id
+                    (deref sema_id).current_scope = iface_scope_id
+                let saved_struct_t as ptr[Type] = (deref self).current_struct_type
+                (deref self).current_struct_type = ret_type
+                let dummy_id as ptr[Type] = self.typecheck_node(node_body(node))
+                (deref self).current_struct_type = saved_struct_t
+                (deref sema_id).current_scope = saved_scope_id
 
         elif nt == NodeType.StructDecl:
             let struct_name as String = node_name(node)
