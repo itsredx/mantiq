@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
@@ -1479,6 +1479,13 @@ struct LLVMCodegen:
                         s_i = s_i + 1 to i64
             elif dk == NodeType.ClassDecl:
                 let cn as String = node_name(decl)
+                let target_base as String = node_target(decl)
+                if target_base.data != None to ptr[u8] and target_base.len > 0 to usize:
+                    let base_k as StringBuilder = StringBuilder.make()
+                    append_cstr(ref base_k, "__base_" to cstr)
+                    append_str(ref base_k, cn)
+                    set_dict_str(ref (deref self).type_aliases, base_k.to_string(), target_base)
+                    base_k.deinit()
                 if node_body(decl) != None to ptr[Node]:
                     let c_body as ptr[Node] = node_body(decl)
                     let c_decls as List[ptr[Node]] = node_declarations(c_body)
@@ -1549,17 +1556,21 @@ struct LLVMCodegen:
             return
         set_dict_bool(ref (deref self).defined_functions, name, True)
 
-        if name.data != None:
-            let u_ptr as cstr = strchr(name.data to cstr, '_' to i32)
-            if u_ptr != None to cstr:
-                let prefix_len as usize = (u_ptr to usize) - (name.data to usize)
-                let p_buf as ptr[u8] = make[u8](prefix_len + 1 to usize) to ptr[u8]
-                let _ as ptr = memcpy(p_buf to ptr, name.data to ptr, prefix_len)
-                p_buf[prefix_len] = 0 to u8
-                (deref self).current_struct_name = String.make(p_buf to cstr)
-                free(p_buf to ptr)
-            else:
-                (deref self).current_struct_name = String.make("" to cstr)
+        if (deref self).current_struct_name.len == 0 to usize:
+            if name.data != None:
+                let u_ptr as cstr = strchr(name.data to cstr, '_' to i32)
+                if u_ptr != None to cstr:
+                    var prefix_len as usize = (u_ptr to usize) - (name.data to usize)
+                    if prefix_len == 0 to usize and name.len > 1 to usize:
+                        let u_ptr2 as cstr = strchr((name.data to usize + 1 to usize) to cstr, '_' to i32)
+                        if u_ptr2 != None to cstr:
+                            prefix_len = (u_ptr2 to usize) - (name.data to usize)
+                    if prefix_len > 0 to usize:
+                        let p_buf as ptr[u8] = make[u8](prefix_len + 1 to usize) to ptr[u8]
+                        let _ as ptr = memcpy(p_buf to ptr, name.data to ptr, prefix_len)
+                        p_buf[prefix_len] = 0 to u8
+                        (deref self).current_struct_name = String.make(p_buf to cstr)
+                        free(p_buf to ptr)
 
         let params as List[ptr[Node]] = node_params(node)
         let body as ptr[Node] = node_body(node)
@@ -3051,6 +3062,22 @@ struct LLVMCodegen:
                 let dy_s as String = dy_key.to_string()
                 if (deref self).struct_field_indices.has(dy_s):
                     field_idx = (deref self).struct_field_indices[dy_s]
+                else:
+                    let base_k as StringBuilder = StringBuilder.make()
+                    append_cstr(ref base_k, "__base_" to cstr)
+                    append_str(ref base_k, struct_name)
+                    let bk_s as String = base_k.to_string()
+                    if (deref self).type_aliases.has(bk_s):
+                        let base_n as String = (deref self).type_aliases[bk_s]
+                        let base_fkey as StringBuilder = StringBuilder.make()
+                        append_str(ref base_fkey, base_n)
+                        append_cstr(ref base_fkey, "." to cstr)
+                        append_str(ref base_fkey, field_name)
+                        let bf_s as String = base_fkey.to_string()
+                        if (deref self).struct_field_indices.has(bf_s):
+                            field_idx = (deref self).struct_field_indices[bf_s]
+                        base_fkey.deinit()
+                    base_k.deinit()
                 dy_key.deinit()
 
             let obj_type_str as String = type_to_llvm(node_inferred_type(obj))
@@ -4663,14 +4690,21 @@ struct LLVMCodegen:
                 var c0_c as u8 = 0 to u8
                 if c_name.data != None to ptr[u8] and c_name.len > 0 to usize:
                     c0_c = deref (c_name.data to ptr[u8])
-                if c0_c >= 65 to u8 and c0_c <= 90 to u8:
-                    let call_t as ptr[Type] = node_inferred_type(node)
-                    var is_ctor as bool = False
-                    if call_t != None to ptr[Type] and (deref call_t).kind == TypeKind.Struct:
-                        is_ctor = True
-                    if strcmp(c_name.data to cstr, "String" to cstr) == 0 or strcmp(c_name.data to cstr, "StringBuilder" to cstr) == 0:
-                        is_ctor = True
-                    if is_ctor:
+                let call_t as ptr[Type] = node_inferred_type(node)
+                var is_ctor as bool = False
+                if call_t != None to ptr[Type] and ((deref call_t).kind == TypeKind.Struct or (deref call_t).kind == TypeKind.Class):
+                    is_ctor = True
+                if (deref self).defined_types.has(c_name):
+                    is_ctor = True
+                let is_cls_check as StringBuilder = StringBuilder.make()
+                append_cstr(ref is_cls_check, "__is_class_" to cstr)
+                append_str(ref is_cls_check, c_name)
+                if (deref self).struct_field_indices.has(is_cls_check.to_string()):
+                    is_ctor = True
+                is_cls_check.deinit()
+                if strcmp(c_name.data to cstr, "String" to cstr) == 0 or strcmp(c_name.data to cstr, "StringBuilder" to cstr) == 0:
+                    is_ctor = True
+                if is_ctor:
                         var s_alloc as ptr[u8] = None to ptr[u8]
                         if strcmp(c_name.data to cstr, "String" to cstr) == 0:
                             s_alloc = self.fresh_temp()
@@ -4860,6 +4894,78 @@ struct LLVMCodegen:
                         if fc >= 65 to u8 and fc <= 90 to u8:
                             is_struct_static = True
                 if not is_struct_static:
+                    var is_super as bool = False
+                    if node_kind(obj_node) == NodeType.Identifier and strcmp(node_name(obj_node).data to cstr, "super" to cstr) == 0:
+                        is_super = True
+                    if is_super:
+                        let m_name as String = node_name(callee)
+                        var base_class_name as String = String.make("" to cstr)
+                        if (deref self).current_struct_name.len > 0 to usize:
+                            let base_k as StringBuilder = StringBuilder.make()
+                            append_cstr(ref base_k, "__base_" to cstr)
+                            append_str(ref base_k, (deref self).current_struct_name)
+                            let bk_str as String = base_k.to_string()
+                            if (deref self).type_aliases.has(bk_str):
+                                base_class_name = (deref self).type_aliases[bk_str]
+                            base_k.deinit()
+                        
+                        let mangled_target as StringBuilder = StringBuilder.make()
+                        append_str(ref mangled_target, base_class_name)
+                        append_cstr(ref mangled_target, "_" to cstr)
+                        append_str(ref mangled_target, m_name)
+                        let target_fn as String = mangled_target.to_string()
+                        mangled_target.deinit()
+
+                        let self_reg as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, self_reg to cstr)
+                        append_cstr(ref (deref self).main_out, " = load ptr, ptr %self\n")
+
+                        append_cstr(ref arg_buf, "ptr ")
+                        append_cstr(ref arg_buf, self_reg to cstr)
+                        
+                        let params_raw as List[ptr[Node]] = node_params(node)
+                        let params as ptr[List[ptr[Node]]] = ref params_raw
+                        let count as i64 = (deref params).length()
+                        var p_i as i64 = 0 to i64
+                        while p_i < count:
+                            let arg_node as ptr[Node] = get_node_decl(params, p_i)
+                            let a_val as ptr[u8] = self.emit_expr(arg_node)
+                            var a_type as String = type_to_llvm(node_inferred_type(arg_node))
+                            if a_type.len == 0 to usize or strcmp(a_type.data to cstr, "void" to cstr) == 0:
+                                a_type = String.make("i32" to cstr)
+                            append_cstr(ref arg_buf, ", ")
+                            append_str(ref arg_buf, a_type)
+                            append_cstr(ref arg_buf, " ")
+                            append_cstr(ref arg_buf, a_val to cstr)
+                            p_i = p_i + 1 to i64
+                        
+                        var ret_llvm_type as String = type_to_llvm(node_inferred_type(node))
+                        if ret_llvm_type.len == 0 to usize:
+                            ret_llvm_type = String.make("void" to cstr)
+                        
+                        if strcmp(ret_llvm_type.data to cstr, "void" to cstr) == 0:
+                            append_cstr(ref (deref self).main_out, "  call void @")
+                            append_str(ref (deref self).main_out, target_fn)
+                            append_cstr(ref (deref self).main_out, "(")
+                            append_str(ref (deref self).main_out, arg_buf.to_string())
+                            append_cstr(ref (deref self).main_out, ")\n")
+                            arg_buf.deinit()
+                            return "0" to ptr[u8]
+                        else:
+                            let res_reg as ptr[u8] = self.fresh_temp()
+                            append_cstr(ref (deref self).main_out, "  ")
+                            append_cstr(ref (deref self).main_out, res_reg to cstr)
+                            append_cstr(ref (deref self).main_out, " = call ")
+                            append_str(ref (deref self).main_out, ret_llvm_type)
+                            append_cstr(ref (deref self).main_out, " @")
+                            append_str(ref (deref self).main_out, target_fn)
+                            append_cstr(ref (deref self).main_out, "(")
+                            append_str(ref (deref self).main_out, arg_buf.to_string())
+                            append_cstr(ref (deref self).main_out, ")\n")
+                            arg_buf.deinit()
+                            return res_reg
+
                     var obj_val as ptr[u8] = "null" to ptr[u8]
                     var inner_rec as ptr[Node] = obj_node
                     var is_deref_obj as bool = False
@@ -8282,23 +8388,25 @@ struct LLVMCodegen:
                     self.emit_fun_decl(decl)
                 i = i + 1 to i64
 
+    public fn get_field_llvm_type(self as ptr[LLVMCodegen], decl as ptr[Node]) as String:
+        let resolved_type as ptr[Type] = self.resolve_field_type(decl)
+        if resolved_type != None to ptr[Type]:
+            let r_llvm as String = type_to_llvm(resolved_type)
+            if r_llvm.data != None to ptr[u8]:
+                return r_llvm
+        let f_nm as String = node_name(decl)
+        if f_nm.data != None to ptr[u8]:
+            return get_struct_field_type("Node" to cstr, f_nm.data to cstr)
+        return String.make("ptr" to cstr)
+
     public fn emit_one_struct_field(self as ptr[LLVMCodegen], decl as ptr[Node], fields_str as ptr[StringBuilder], field_idx_ptr as ptr[i64]):
         let is_var as bool = node_kind(decl) == NodeType.VarDecl or node_kind(decl) == NodeType.FieldDecl
         if is_var:
             if deref field_idx_ptr > 0 to i64:
                 append_cstr(fields_str, ", " to cstr)
-            let resolved_type as ptr[Type] = self.resolve_field_type(decl)
-            if resolved_type != None to ptr[Type]:
-                let r_llvm as String = type_to_llvm(resolved_type)
-                if r_llvm.data != None to ptr[u8]:
-                    append_cstr(fields_str, r_llvm.data to cstr)
-            else:
-                let f_nm as String = node_name(decl)
-                var f_t as String = String.make("ptr" to cstr)
-                if f_nm.data != None to ptr[u8]:
-                    f_t = get_struct_field_type("Node" to cstr, f_nm.data to cstr)
-                if f_t.data != None to ptr[u8]:
-                    append_cstr(fields_str, f_t.data to cstr)
+            let f_t as String = self.get_field_llvm_type(decl)
+            if f_t.data != None to ptr[u8]:
+                append_cstr(fields_str, f_t.data to cstr)
             deref field_idx_ptr = deref field_idx_ptr + 1 to i64
 
     public fn emit_struct_fields(self as ptr[LLVMCodegen], node as ptr[Node], name as String):
@@ -8392,6 +8500,14 @@ struct LLVMCodegen:
 
     public fn emit_class_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)
+        let target_base as String = node_target(node)
+        if target_base.data != None to ptr[u8] and target_base.len > 0 to usize:
+            let base_k as StringBuilder = StringBuilder.make()
+            append_cstr(ref base_k, "__base_" to cstr)
+            append_str(ref base_k, name)
+            set_dict_str(ref (deref self).type_aliases, base_k.to_string(), target_base)
+            base_k.deinit()
+
         if not (deref self).defined_types.has(name):
             set_dict_bool(ref (deref self).defined_types, name, True)
             let is_cls_k as StringBuilder = StringBuilder.make()
@@ -8407,6 +8523,28 @@ struct LLVMCodegen:
         let fields_str as StringBuilder = StringBuilder.make()
         append_cstr(ref fields_str, "ptr" to cstr)
         var field_idx as i64 = 1 to i64
+
+        let all_fields_str as StringBuilder = StringBuilder.make()
+
+        let target_base as String = node_target(node)
+        if target_base.data != None to ptr[u8] and target_base.len > 0 to usize:
+            let base_fk as StringBuilder = StringBuilder.make()
+            append_cstr(ref base_fk, "__all_fields_" to cstr)
+            append_str(ref base_fk, target_base)
+            let base_fk_s as String = base_fk.to_string()
+            if (deref self).type_aliases.has(base_fk_s):
+                let base_f_str as String = (deref self).type_aliases[base_fk_s]
+                if base_f_str.len > 0 to usize:
+                    append_cstr(ref fields_str, ", " to cstr)
+                    append_str(ref fields_str, base_f_str)
+                    append_str(ref all_fields_str, base_f_str)
+                    var b_ci as usize = 0 to usize
+                    while b_ci < base_f_str.len:
+                        if (deref ((base_f_str.data to usize + b_ci) to ptr[u8])) == 44 to u8:
+                            field_idx = field_idx + 1 to i64
+                        b_ci = b_ci + 1 to usize
+                    field_idx = field_idx + 1 to i64
+            base_fk.deinit()
 
         let body as ptr[Node] = node_body(node)
         if body != None to ptr[Node]:
@@ -8426,8 +8564,19 @@ struct LLVMCodegen:
                         let f_ks as String = f_key.to_string()
                         set_dict_i32(ref (deref self).struct_field_indices, f_ks, field_idx to i32)
                         f_key.deinit()
+                    let f_t as String = self.get_field_llvm_type(decl)
+                    if all_fields_str.len > 0 to usize:
+                        append_cstr(ref all_fields_str, ", " to cstr)
+                    append_str(ref all_fields_str, f_t)
                     self.emit_one_struct_field(decl, ref fields_str, ref field_idx)
                 i = i + 1 to i64
+
+        let save_fk as StringBuilder = StringBuilder.make()
+        append_cstr(ref save_fk, "__all_fields_" to cstr)
+        append_str(ref save_fk, name)
+        set_dict_str(ref (deref self).type_aliases, save_fk.to_string(), all_fields_str.to_string())
+        save_fk.deinit()
+        all_fields_str.deinit()
 
         let body_str as StringBuilder = StringBuilder.make()
         append_cstr(ref body_str, "{ " to cstr)

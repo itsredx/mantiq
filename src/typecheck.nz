@@ -5,7 +5,7 @@ from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
 import symbols
-from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots
+from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target
 import types
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type
 import sema
@@ -919,6 +919,18 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.Void)
             elif strcmp(name, "Empty" to cstr) == 0 or strcmp(name, "None" to cstr) == 0:
                 ret_type = make_type(TypeKind.Option)
+            elif strcmp(name, "super" to cstr) == 0:
+                var base_class_name as String = String.make("" to cstr)
+                let cur_st as ptr[Type] = (deref self).current_struct_type
+                if cur_st != None to ptr[Type]:
+                    let c_nm as String = (deref cur_st).name
+                    let c_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(c_nm)
+                    if c_sym != None to ptr[Symbol] and (deref c_sym).decl_node != None to ptr[Node]:
+                        base_class_name = node_target((deref c_sym).decl_node)
+                if base_class_name.len > 0 to usize:
+                    ret_type = make_class_type(base_class_name)
+                else:
+                    ret_type = make_type(TypeKind.Any)
             else:
                 let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(name))
                 if sym != None to ptr[Symbol]:

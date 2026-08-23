@@ -43,6 +43,19 @@ class Document:
         let _ as i32 = printf("Document[ID=%d, pages=%d]\n" to cstr, (deref self).doc_id, (deref self).pages)
         return (deref self).doc_id
 
+class _Base:
+    public var base_val as i32
+
+    public fn act(self) as i32:
+        return (deref self).base_val * 2
+
+class _Derived(_Base):
+    public var derived_val as i32
+
+    public fn act(self) as i32:
+        let b as i32 = super().act()
+        return b + (deref self).derived_val
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 fn test_class_creation_and_methods():
@@ -69,6 +82,14 @@ fn test_interface_dispatch():
     assert_true(doc_id == 101, "Document print_info matches id" to cstr)
     printf("  [PASS] Interface contracts verified.\n" to cstr)
 
+fn test_super_delegation():
+    printf("[TEST] Testing Base Class Delegation via super().act()...\n" to cstr)
+    var d as _Derived = _Derived(10, 5)
+    let res as i32 = d.act()
+    printf("  _Derived(10, 5).act() = %d (expected 25)\n" to cstr, res)
+    assert_true(res == 25, "super().act() delegation returned correct value" to cstr)
+    printf("  [PASS] super() method delegation verified.\n" to cstr)
+
 // ── Main Entrypoint ──────────────────────────────────────────────────────
 fn main() as i32:
     printf("========================================\n" to cstr)
@@ -77,6 +98,7 @@ fn main() as i32:
 
     test_class_creation_and_methods()
     test_interface_dispatch()
+    test_super_delegation()
 
     printf("========================================\n" to cstr)
     printf("All Interface and Class Tests Passed Successfully!\n" to cstr)

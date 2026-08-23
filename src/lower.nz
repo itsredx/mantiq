@@ -9,6 +9,7 @@ from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_man
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
 extern fn strtod(str as cstr, endptr as ptr) as f64
 extern fn printf(format as cstr, ...) as i32
 extern fn fflush(f as ptr) as i32
@@ -186,7 +187,32 @@ struct Lowerer:
             return self.lower_string(ts_node)
         elif strcmp(kind, "binary_expression" to cstr) == 0:
             return self.lower_binary(ts_node)
-        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "primary" to cstr) == 0 or strcmp(kind, "collection_item" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0 or strcmp(kind, "parenthesized_expression" to cstr) == 0 or strcmp(kind, "expression_statement" to cstr) == 0:
+        elif strcmp(kind, "super" to cstr) == 0:
+            let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
+            let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            (deref data).name = String.make("super" to cstr)
+            (deref n).data = data to ptr[u8]
+            return n
+        elif strcmp(kind, "primary" to cstr) == 0:
+            let slice_ptr as ptr[String] = self.slice_string_from_node(ts_node)
+            let s_text as String = deref slice_ptr
+            drop(slice_ptr to ptr)
+            if s_text.len >= 5 to usize and strncmp(s_text.data to cstr, "super" to cstr, 5 to usize) == 0:
+                let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
+                let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+                (deref data).name = String.make("super" to cstr)
+                (deref n).data = data to ptr[u8]
+                return n
+            let count as u32 = ts_node_child_count_ptr(ts_node)
+            var i as u32 = 0 to u32
+            while i < count:
+                var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                ts_node_child_ptr(ts_node, i, ref child)
+                if ts_node_is_named_ptr(ref child):
+                    return self.lower_node(ref child)
+                i = i + 1 to u32
+            return None to ptr[Node]
+        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "collection_item" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0 or strcmp(kind, "parenthesized_expression" to cstr) == 0 or strcmp(kind, "expression_statement" to cstr) == 0:
             let count as u32 = ts_node_child_count_ptr(ts_node)
             var i as u32 = 0 to u32
             while i < count:
@@ -322,15 +348,7 @@ struct Lowerer:
             return self.lower_index_expr(ts_node)
         elif strcmp(kind, "comment" to cstr) == 0:
             return None to ptr[Node]
-        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "primary" to cstr) == 0 or strcmp(kind, "expression_statement" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0 or strcmp(kind, "collection_item" to cstr) == 0 or strcmp(kind, "parenthesized_expression" to cstr) == 0:
-            let child_count as u32 = ts_node_child_count_ptr(ts_node)
-            var c_idx as u32 = 0 to u32
-            while c_idx < child_count:
-                var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-                ts_node_child_ptr(ts_node, c_idx, ref child)
-                if ts_node_is_named_ptr(ref child):
-                    return self.lower_node(ref child)
-                c_idx = c_idx + 1 to u32
+
         let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
         let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
         (deref data).name = String.make("UNSUPPORTED" to cstr)
