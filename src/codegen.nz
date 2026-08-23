@@ -1556,6 +1556,8 @@ struct LLVMCodegen:
             return
         set_dict_bool(ref (deref self).defined_functions, name, True)
 
+        let saved_struct_name as String = (deref self).current_struct_name
+
         if (deref self).current_struct_name.len == 0 to usize:
             if name.data != None:
                 let u_ptr as cstr = strchr(name.data to cstr, '_' to i32)
@@ -1569,7 +1571,9 @@ struct LLVMCodegen:
                         let p_buf as ptr[u8] = make[u8](prefix_len + 1 to usize) to ptr[u8]
                         let _ as ptr = memcpy(p_buf to ptr, name.data to ptr, prefix_len)
                         p_buf[prefix_len] = 0 to u8
-                        (deref self).current_struct_name = String.make(p_buf to cstr)
+                        let cand_st as String = String.make(p_buf to cstr)
+                        if (deref self).defined_types.has(cand_st):
+                            (deref self).current_struct_name = cand_st
                         free(p_buf to ptr)
 
         let params as List[ptr[Node]] = node_params(node)
@@ -1603,6 +1607,7 @@ struct LLVMCodegen:
         // Handle extern functions: emit declare instead of define
         if node_is_extern(node):
             if (deref self).external_decls.has(name):
+                (deref self).current_struct_name = saved_struct_name
                 return
             set_dict_bool(ref (deref self).external_decls, name, True)
             let param_buf as StringBuilder = StringBuilder.make()
@@ -1628,6 +1633,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).type_out, param_buf.buffer to cstr)
             param_buf.deinit()
             append_cstr(ref (deref self).type_out, ")\n")
+            (deref self).current_struct_name = saved_struct_name
             return
         var is_main as bool = strcmp(name.data to cstr, "main" to cstr) == 0
         if is_main and strcmp(ret_type.data to cstr, "void" to cstr) == 0:
@@ -1774,6 +1780,7 @@ struct LLVMCodegen:
             elif t_idx >= 0 to i64 and (deref ((out_buf to usize + t_idx to usize) to ptr[u8])) == 58 to u8:
                 append_cstr(ref (deref self).main_out, "  unreachable\n")
         append_cstr(ref (deref self).main_out, "}\n\n")
+        (deref self).current_struct_name = saved_struct_name
 
     public fn emit_var_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name_ptr as ptr[String] = node_name_ptr(node)
@@ -4690,18 +4697,16 @@ struct LLVMCodegen:
                 var c0_c as u8 = 0 to u8
                 if c_name.data != None to ptr[u8] and c_name.len > 0 to usize:
                     c0_c = deref (c_name.data to ptr[u8])
-                let call_t as ptr[Type] = node_inferred_type(node)
-                var is_ctor as bool = False
-                if call_t != None to ptr[Type] and ((deref call_t).kind == TypeKind.Struct or (deref call_t).kind == TypeKind.Class):
-                    is_ctor = True
-                if (deref self).defined_types.has(c_name):
-                    is_ctor = True
                 let is_cls_check as StringBuilder = StringBuilder.make()
                 append_cstr(ref is_cls_check, "__is_class_" to cstr)
                 append_str(ref is_cls_check, c_name)
-                if (deref self).struct_field_indices.has(is_cls_check.to_string()):
-                    is_ctor = True
+                let is_class_type as bool = (deref self).struct_field_indices.has(is_cls_check.to_string())
                 is_cls_check.deinit()
+
+                var is_ctor as bool = False
+                if (c0_c >= 65 to u8 and c0_c <= 90 to u8) or is_class_type:
+                    if not (deref self).enum_variant_tags.has(c_name):
+                        is_ctor = True
                 if strcmp(c_name.data to cstr, "String" to cstr) == 0 or strcmp(c_name.data to cstr, "StringBuilder" to cstr) == 0:
                     is_ctor = True
                 if is_ctor:
@@ -8385,7 +8390,12 @@ struct LLVMCodegen:
                     append_cstr(ref mangled, "_" to cstr)
                     append_str(ref mangled, method_name)
                     set_node_name(decl, mangled.to_string())
+                    let saved_st as String = (deref self).current_struct_name
+                    (deref self).current_struct_name = struct_name
                     self.emit_fun_decl(decl)
+                    (deref self).current_struct_name = saved_st
+                    set_node_name(decl, method_name)
+                    mangled.deinit()
                 i = i + 1 to i64
 
     public fn get_field_llvm_type(self as ptr[LLVMCodegen], decl as ptr[Node]) as String:
