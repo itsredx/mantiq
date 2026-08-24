@@ -1,0 +1,103 @@
+import string
+from string import String
+import error
+from error import DiagnosticEngine
+import symbols
+from symbols import Node, NodeType, LanguageMode, node_kind
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import types
+from types import Type, TypeKind
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Assertions ─────────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+fn test_ast_lowering_and_sema():
+    let src as cstr = "let a = [for x in [1, 2, 3]: x * 2]\nlet b = [for x: i64 in 0..5: if x > 2: x * 10]\nlet c = [for s in [\"a\", \"b\"]: s]\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_comp.mq" to cstr)
+    let ast_root as ptr[Node] = (deref lr).lower_source()
+    assert_true(ast_root != None to ptr[Node], "AST Root must not be null" to cstr)
+    assert_true(node_kind(ast_root) == NodeType.Program, "Root must be Program" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test_comp.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(ast_root)
+    s.resolve_pass(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Sema must report zero errors" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
+    let _ as i32 = printf("  PASS: List Comprehensions AST lowering, sema, and typecheck\n" to cstr)
+
+fn test_basic_comprehension():
+    let doubled as List[i64] = [for x in [1 to i64, 2 to i64, 3 to i64, 4 to i64, 5 to i64]: x * 2 to i64]
+    assert_true(doubled.length() == 5 to i64, "doubled list length must be 5" to cstr)
+    assert_true(doubled[0 to i64] == 2 to i64, "doubled[0] must be 2" to cstr)
+    assert_true(doubled[1 to i64] == 4 to i64, "doubled[1] must be 4" to cstr)
+    assert_true(doubled[2 to i64] == 6 to i64, "doubled[2] must be 6" to cstr)
+    assert_true(doubled[3 to i64] == 8 to i64, "doubled[3] must be 8" to cstr)
+    assert_true(doubled[4 to i64] == 10 to i64, "doubled[4] must be 10" to cstr)
+    let _ as i32 = printf("  PASS: Basic List Comprehension on Collection\n" to cstr)
+
+fn test_range_comprehension():
+    let squares as List[i64] = [for x in 0..6: (x to i64) * (x to i64)]
+    assert_true(squares.length() == 6 to i64, "squares list length must be 6" to cstr)
+    assert_true(squares[0 to i64] == 0 to i64, "squares[0] must be 0" to cstr)
+    assert_true(squares[1 to i64] == 1 to i64, "squares[1] must be 1" to cstr)
+    assert_true(squares[2 to i64] == 4 to i64, "squares[2] must be 4" to cstr)
+    assert_true(squares[3 to i64] == 9 to i64, "squares[3] must be 9" to cstr)
+    assert_true(squares[4 to i64] == 16 to i64, "squares[4] must be 16" to cstr)
+    assert_true(squares[5 to i64] == 25 to i64, "squares[5] must be 25" to cstr)
+    let _ as i32 = printf("  PASS: Range List Comprehension\n" to cstr)
+
+fn test_filtered_comprehension():
+    let evens as List[i64] = [for x in 0..10: if (x % 2) == 0: x to i64]
+    assert_true(evens.length() == 5 to i64, "evens list length must be 5" to cstr)
+    assert_true(evens[0 to i64] == 0 to i64, "evens[0] must be 0" to cstr)
+    assert_true(evens[1 to i64] == 2 to i64, "evens[1] must be 2" to cstr)
+    assert_true(evens[2 to i64] == 4 to i64, "evens[2] must be 4" to cstr)
+    assert_true(evens[3 to i64] == 6 to i64, "evens[3] must be 6" to cstr)
+    assert_true(evens[4 to i64] == 8 to i64, "evens[4] must be 8" to cstr)
+
+    let bigs as List[i64] = [for x in [10 to i64, 20 to i64, 30 to i64, 40 to i64, 50 to i64]: if x > 25 to i64: x + 1 to i64]
+    assert_true(bigs.length() == 3 to i64, "bigs list length must be 3" to cstr)
+    assert_true(bigs[0 to i64] == 31 to i64, "bigs[0] must be 31" to cstr)
+    assert_true(bigs[1 to i64] == 41 to i64, "bigs[1] must be 41" to cstr)
+    assert_true(bigs[2 to i64] == 51 to i64, "bigs[2] must be 51" to cstr)
+    let _ as i32 = printf("  PASS: Filtered List Comprehension\n" to cstr)
+
+fn test_string_comprehension():
+    let words as List[String] = [for s in [String.make("alpha" to cstr), String.make("beta" to cstr), String.make("gamma" to cstr)]: s]
+    assert_true(words.length() == 3 to i64, "words list length must be 3" to cstr)
+    assert_true(strcmp(words[0 to i64].data to cstr, "alpha" to cstr) == 0, "words[0] must be alpha" to cstr)
+    assert_true(strcmp(words[1 to i64].data to cstr, "beta" to cstr) == 0, "words[1] must be beta" to cstr)
+    assert_true(strcmp(words[2 to i64].data to cstr, "gamma" to cstr) == 0, "words[2] must be gamma" to cstr)
+    let _ as i32 = printf("  PASS: String List Comprehension\n" to cstr)
+
+fn main() as i32:
+    let _ as i32 = printf("=== Running Inline List Comprehensions Test Suite ===\n" to cstr)
+    test_ast_lowering_and_sema()
+    test_basic_comprehension()
+    test_range_comprehension()
+    test_filtered_comprehension()
+    test_string_comprehension()
+    let _ as i32 = printf("All Inline List Comprehension tests PASSED!\n" to cstr)
+    return 0

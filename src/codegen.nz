@@ -323,6 +323,8 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "35" to ptr[u8]
         elif strcmp(v_cstr, "ColorLiteral" to cstr) == 0:
             return "36" to ptr[u8]
+        elif strcmp(v_cstr, "ListComprehension" to cstr) == 0:
+            return "37" to ptr[u8]
     elif strcmp(e_cstr, "TypeKind" to cstr) == 0:
         if strcmp(v_cstr, "I8" to cstr) == 0:
             return "0" to ptr[u8]
@@ -1061,6 +1063,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("UnionDeclData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("FieldDeclData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("ColorLiteralData", "{ double, i8, i8, i8, i8 }")
+        self.register_builtin_struct("ListComprehensionData", "{ { ptr, i64, i64 }, ptr, ptr, ptr, ptr }")
         self.register_builtin_struct("Span", "{ i32, i32, i32, i32, i32, i32 }")
         self.register_builtin_struct("Label", "{ %Span, { ptr, i64, i64 }, i32 }")
         self.register_builtin_struct("Suggestion", "{ %Span, { ptr, i64, i64 }, { ptr, i64, i64 } }")
@@ -1184,6 +1187,11 @@ struct LLVMCodegen:
         self.register_field_idx("ColorLiteralData" to cstr, "g" to cstr, 2 to i32)
         self.register_field_idx("ColorLiteralData" to cstr, "b" to cstr, 3 to i32)
         self.register_field_idx("ColorLiteralData" to cstr, "a" to cstr, 4 to i32)
+        self.register_field_idx("ListComprehensionData" to cstr, "name" to cstr, 0 to i32)
+        self.register_field_idx("ListComprehensionData" to cstr, "left" to cstr, 1 to i32)
+        self.register_field_idx("ListComprehensionData" to cstr, "cond" to cstr, 2 to i32)
+        self.register_field_idx("ListComprehensionData" to cstr, "right" to cstr, 3 to i32)
+        self.register_field_idx("ListComprehensionData" to cstr, "type_annots" to cstr, 4 to i32)
 
         self.register_field_idx("Lowerer" to cstr, "source_code" to cstr, 0 to i32)
         self.register_field_idx("Lowerer" to cstr, "mode" to cstr, 1 to i32)
@@ -1454,6 +1462,8 @@ struct LLVMCodegen:
         elif nt == NodeType.CastExpr: // CastExpr as statement
             let _ as ptr[u8] = self.emit_expr(node)
         elif nt == NodeType.ListLiteral: // ListLiteral as statement
+            let _ as ptr[u8] = self.emit_expr(node)
+        elif nt == NodeType.ListComprehension: // ListComprehension as statement
             let _ as ptr[u8] = self.emit_expr(node)
         elif nt == NodeType.IndexExpr: // IndexExpr as statement
             let _ as ptr[u8] = self.emit_expr(node)
@@ -2269,6 +2279,8 @@ struct LLVMCodegen:
             return self.emit_cast_expr(node)
         elif nt == NodeType.ListLiteral: // ListLiteral
             return self.emit_list_literal(node)
+        elif nt == NodeType.ListComprehension: // ListComprehension
+            return self.emit_list_comprehension(node)
         elif nt == NodeType.IndexExpr: // IndexExpr
             return self.emit_index_expr(node)
         elif nt == NodeType.MemberExpr: // MemberExpr
@@ -8102,6 +8114,419 @@ struct LLVMCodegen:
         append_i64(ref (deref self).main_out, buf_size)
         append_cstr(ref (deref self).main_out, ", 2\n")
         return list_temp3
+
+    public fn emit_list_comprehension(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
+        let yield_node as ptr[Node] = node_right(node)
+        let yield_t_desc as ptr[Type] = node_inferred_type(yield_node)
+        var yield_llvm_type as String = String.make("i64" to cstr)
+        var yield_byte_size as i64 = 8 to i64
+        if yield_t_desc != None to ptr[Type]:
+            yield_llvm_type = type_to_llvm(yield_t_desc)
+            if strcmp(yield_llvm_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                yield_llvm_type = String.make("ptr" to cstr)
+            yield_byte_size = self.type_llvm_byte_size(yield_t_desc)
+        if yield_byte_size <= 0 to i64:
+            yield_byte_size = 8 to i64
+
+        let iter_name_ptr as ptr[String] = node_name_ptr(node)
+        var iter_name as String = String.make("" to cstr)
+        if iter_name_ptr != None to ptr[String]:
+            iter_name = deref iter_name_ptr
+
+        let iterable as ptr[Node] = node_left(node)
+        var start_node as ptr[Node] = None to ptr[Node]
+        var end_node as ptr[Node] = None to ptr[Node]
+        let is_range as bool = self.extract_range_nodes(iterable, ref start_node, ref end_node)
+
+        var start_val as ptr[u8] = "0" to ptr[u8]
+        var end_val as ptr[u8] = "0" to ptr[u8]
+        var total_count_temp as ptr[u8] = "0" to ptr[u8]
+        var src_ptr as ptr[u8] = "null" to ptr[u8]
+        var elem_llvm_type as String = String.make("i64" to cstr)
+        var elem_byte_size as i64 = 8 to i64
+
+        if is_range:
+            start_val = self.emit_expr(start_node)
+            if start_val != None to ptr[u8] and deref start_val == 37 to u8:
+                let st_t as String = type_to_llvm(node_inferred_type(start_node))
+                if strcmp(st_t.data to cstr, "i32" to cstr) == 0:
+                    let ext as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, " = sext i32 ")
+                    append_cstr(ref (deref self).main_out, start_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to i64\n")
+                    start_val = ext
+            end_val = self.emit_expr(end_node)
+            if end_val != None to ptr[u8] and deref end_val == 37 to u8:
+                let et_t as String = type_to_llvm(node_inferred_type(end_node))
+                if strcmp(et_t.data to cstr, "i32" to cstr) == 0:
+                    let ext as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, " = sext i32 ")
+                    append_cstr(ref (deref self).main_out, end_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to i64\n")
+                    end_val = ext
+
+            let diff_temp as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, diff_temp to cstr)
+            append_cstr(ref (deref self).main_out, " = sub i64 ")
+            append_cstr(ref (deref self).main_out, end_val to cstr)
+            append_cstr(ref (deref self).main_out, ", ")
+            append_cstr(ref (deref self).main_out, start_val to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+            total_count_temp = diff_temp
+            let start_t as ptr[Type] = node_inferred_type(start_node)
+            if start_t != None to ptr[Type]:
+                elem_llvm_type = type_to_llvm(start_t)
+                elem_byte_size = self.type_llvm_byte_size(start_t)
+        else:
+            let iter_val as ptr[u8] = self.emit_expr(iterable)
+            let s_ptr_temp as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, s_ptr_temp to cstr)
+            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, iter_val to cstr)
+            append_cstr(ref (deref self).main_out, ", 0\n")
+            src_ptr = s_ptr_temp
+
+            let s_len_temp as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, s_len_temp to cstr)
+            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, iter_val to cstr)
+            append_cstr(ref (deref self).main_out, ", 1\n")
+            total_count_temp = s_len_temp
+
+            let iter_t_desc as ptr[Type] = node_inferred_type(iterable)
+            if iter_t_desc != None to ptr[Type] and (deref iter_t_desc).payload != None to ptr[Type]:
+                let pl as ptr[Type] = (deref iter_t_desc).payload
+                elem_llvm_type = type_to_llvm(pl)
+                if strcmp(elem_llvm_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                    elem_llvm_type = String.make("ptr" to cstr)
+                elem_byte_size = self.type_llvm_byte_size(pl)
+            if elem_byte_size <= 0 to i64:
+                elem_byte_size = 8 to i64
+
+        let cap_cmp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, cap_cmp to cstr)
+        append_cstr(ref (deref self).main_out, " = icmp sgt i64 ")
+        append_cstr(ref (deref self).main_out, total_count_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", 0\n")
+
+        let alloc_cap as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, alloc_cap to cstr)
+        append_cstr(ref (deref self).main_out, " = select i1 ")
+        append_cstr(ref (deref self).main_out, cap_cmp to cstr)
+        append_cstr(ref (deref self).main_out, ", i64 ")
+        append_cstr(ref (deref self).main_out, total_count_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", i64 8\n")
+
+        let byte_size_temp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, byte_size_temp to cstr)
+        append_cstr(ref (deref self).main_out, " = mul i64 ")
+        append_cstr(ref (deref self).main_out, alloc_cap to cstr)
+        append_cstr(ref (deref self).main_out, ", ")
+        append_i64(ref (deref self).main_out, yield_byte_size)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let buf_temp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, buf_temp to cstr)
+        append_cstr(ref (deref self).main_out, " = call ptr @malloc(i64 ")
+        append_cstr(ref (deref self).main_out, byte_size_temp to cstr)
+        append_cstr(ref (deref self).main_out, ")\n")
+
+        let acc_buf_slot as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, acc_buf_slot to cstr)
+        append_cstr(ref (deref self).main_out, " = alloca ptr\n")
+        append_cstr(ref (deref self).main_out, "  store ptr ")
+        append_cstr(ref (deref self).main_out, buf_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, acc_buf_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let acc_len_slot as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
+        append_cstr(ref (deref self).main_out, " = alloca i64\n")
+        append_cstr(ref (deref self).main_out, "  store i64 0, ptr ")
+        append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let idx_slot as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, idx_slot to cstr)
+        append_cstr(ref (deref self).main_out, " = alloca i64\n")
+        append_cstr(ref (deref self).main_out, "  store i64 0, ptr ")
+        append_cstr(ref (deref self).main_out, idx_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        var slot_name as String = iter_name
+        var count as i32 = 0 to i32
+        if (deref self).var_counts.has(iter_name):
+            count = (deref self).var_counts[iter_name]
+        set_dict_i32(ref (deref self).var_counts, iter_name, count + 1 to i32)
+        if count > 0 to i32:
+            let slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+            let _ as i32 = sprintf(slot_buf, "%s_%d" to cstr, iter_name.data to cstr, count)
+            slot_name = String.make(slot_buf to cstr)
+        set_dict_str(ref (deref self).var_slots, iter_name, slot_name)
+        set_dict_str(ref (deref self).var_types, iter_name, elem_llvm_type)
+
+        append_cstr(ref (deref self).main_out, "  %")
+        append_str(ref (deref self).main_out, slot_name)
+        append_cstr(ref (deref self).main_out, " = alloca ")
+        append_str(ref (deref self).main_out, elem_llvm_type)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let cond_label as ptr[u8] = self.fresh_label()
+        let body_label as ptr[u8] = self.fresh_label()
+        let yield_label as ptr[u8] = self.fresh_label()
+        let inc_label as ptr[u8] = self.fresh_label()
+        let end_label as ptr[u8] = self.fresh_label()
+
+        append_cstr(ref (deref self).main_out, "  br label %")
+        append_cstr(ref (deref self).main_out, cond_label to cstr)
+        append_cstr(ref (deref self).main_out, "\n\n")
+
+        // Condition label
+        append_cstr(ref (deref self).main_out, cond_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+        let curr_idx as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, curr_idx to cstr)
+        append_cstr(ref (deref self).main_out, " = load i64, ptr ")
+        append_cstr(ref (deref self).main_out, idx_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let loop_cmp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, loop_cmp to cstr)
+        append_cstr(ref (deref self).main_out, " = icmp slt i64 ")
+        append_cstr(ref (deref self).main_out, curr_idx to cstr)
+        append_cstr(ref (deref self).main_out, ", ")
+        append_cstr(ref (deref self).main_out, total_count_temp to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, "  br i1 ")
+        append_cstr(ref (deref self).main_out, loop_cmp to cstr)
+        append_cstr(ref (deref self).main_out, ", label %")
+        append_cstr(ref (deref self).main_out, body_label to cstr)
+        append_cstr(ref (deref self).main_out, ", label %")
+        append_cstr(ref (deref self).main_out, end_label to cstr)
+        append_cstr(ref (deref self).main_out, "\n\n")
+
+        // Body label
+        append_cstr(ref (deref self).main_out, body_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+        if is_range:
+            let r_item as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, r_item to cstr)
+            append_cstr(ref (deref self).main_out, " = add i64 ")
+            append_cstr(ref (deref self).main_out, start_val to cstr)
+            append_cstr(ref (deref self).main_out, ", ")
+            append_cstr(ref (deref self).main_out, curr_idx to cstr)
+            var store_val as ptr[u8] = r_item
+            if strcmp(elem_llvm_type.data to cstr, "i32" to cstr) == 0:
+                let tr as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, tr to cstr)
+                append_cstr(ref (deref self).main_out, " = trunc i64 ")
+                append_cstr(ref (deref self).main_out, r_item to cstr)
+                append_cstr(ref (deref self).main_out, " to i32\n")
+                store_val = tr
+            append_cstr(ref (deref self).main_out, "  store ")
+            append_str(ref (deref self).main_out, elem_llvm_type)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, store_val to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr %")
+            append_str(ref (deref self).main_out, slot_name)
+            append_cstr(ref (deref self).main_out, "\n")
+        else:
+            let elem_offset as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, elem_offset to cstr)
+            append_cstr(ref (deref self).main_out, " = mul i64 ")
+            append_cstr(ref (deref self).main_out, curr_idx to cstr)
+            append_cstr(ref (deref self).main_out, ", ")
+            append_i64(ref (deref self).main_out, elem_byte_size)
+            append_cstr(ref (deref self).main_out, "\n")
+
+            let elem_ptr as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, elem_ptr to cstr)
+            append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
+            append_cstr(ref (deref self).main_out, src_ptr to cstr)
+            append_cstr(ref (deref self).main_out, ", i64 ")
+            append_cstr(ref (deref self).main_out, elem_offset to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+
+            let elem_val as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, " = load ")
+            append_str(ref (deref self).main_out, elem_llvm_type)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+            append_cstr(ref (deref self).main_out, elem_ptr to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+
+            append_cstr(ref (deref self).main_out, "  store ")
+            append_str(ref (deref self).main_out, elem_llvm_type)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr %")
+            append_str(ref (deref self).main_out, slot_name)
+            append_cstr(ref (deref self).main_out, "\n")
+
+        // Condition check
+        if node_cond(node) != None to ptr[Node]:
+            let cond_val as ptr[u8] = self.emit_expr(node_cond(node))
+            let cond_cmp as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, cond_cmp to cstr)
+            append_cstr(ref (deref self).main_out, " = icmp ne i1 ")
+            append_cstr(ref (deref self).main_out, cond_val to cstr)
+            append_cstr(ref (deref self).main_out, ", 0\n")
+            append_cstr(ref (deref self).main_out, "  br i1 ")
+            append_cstr(ref (deref self).main_out, cond_cmp to cstr)
+            append_cstr(ref (deref self).main_out, ", label %")
+            append_cstr(ref (deref self).main_out, yield_label to cstr)
+            append_cstr(ref (deref self).main_out, ", label %")
+            append_cstr(ref (deref self).main_out, inc_label to cstr)
+            append_cstr(ref (deref self).main_out, "\n\n")
+        else:
+            append_cstr(ref (deref self).main_out, "  br label %")
+            append_cstr(ref (deref self).main_out, yield_label to cstr)
+            append_cstr(ref (deref self).main_out, "\n\n")
+
+        // Yield label
+        append_cstr(ref (deref self).main_out, yield_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+        let yielded_val as ptr[u8] = self.emit_expr(yield_node)
+
+        let cur_len_temp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, cur_len_temp to cstr)
+        append_cstr(ref (deref self).main_out, " = load i64, ptr ")
+        append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let cur_buf_temp as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, cur_buf_temp to cstr)
+        append_cstr(ref (deref self).main_out, " = load ptr, ptr ")
+        append_cstr(ref (deref self).main_out, acc_buf_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let dest_offset as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, dest_offset to cstr)
+        append_cstr(ref (deref self).main_out, " = mul i64 ")
+        append_cstr(ref (deref self).main_out, cur_len_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", ")
+        append_i64(ref (deref self).main_out, yield_byte_size)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let dest_ptr as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, dest_ptr to cstr)
+        append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
+        append_cstr(ref (deref self).main_out, cur_buf_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", i64 ")
+        append_cstr(ref (deref self).main_out, dest_offset to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        append_cstr(ref (deref self).main_out, "  store ")
+        append_str(ref (deref self).main_out, yield_llvm_type)
+        append_cstr(ref (deref self).main_out, " ")
+        append_cstr(ref (deref self).main_out, yielded_val to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, dest_ptr to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let next_len as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, next_len to cstr)
+        append_cstr(ref (deref self).main_out, " = add i64 ")
+        append_cstr(ref (deref self).main_out, cur_len_temp to cstr)
+        append_cstr(ref (deref self).main_out, ", 1\n")
+        append_cstr(ref (deref self).main_out, "  store i64 ")
+        append_cstr(ref (deref self).main_out, next_len to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, "  br label %")
+        append_cstr(ref (deref self).main_out, inc_label to cstr)
+        append_cstr(ref (deref self).main_out, "\n\n")
+
+        // Inc label
+        append_cstr(ref (deref self).main_out, inc_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+        let next_idx as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, next_idx to cstr)
+        append_cstr(ref (deref self).main_out, " = add i64 ")
+        append_cstr(ref (deref self).main_out, curr_idx to cstr)
+        append_cstr(ref (deref self).main_out, ", 1\n")
+        append_cstr(ref (deref self).main_out, "  store i64 ")
+        append_cstr(ref (deref self).main_out, next_idx to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, idx_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+        append_cstr(ref (deref self).main_out, "  br label %")
+        append_cstr(ref (deref self).main_out, cond_label to cstr)
+        append_cstr(ref (deref self).main_out, "\n\n")
+
+        // End label
+        append_cstr(ref (deref self).main_out, end_label to cstr)
+        append_cstr(ref (deref self).main_out, ":\n")
+        let final_buf as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, final_buf to cstr)
+        append_cstr(ref (deref self).main_out, " = load ptr, ptr ")
+        append_cstr(ref (deref self).main_out, acc_buf_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let final_len as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, final_len to cstr)
+        append_cstr(ref (deref self).main_out, " = load i64, ptr ")
+        append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+
+        let fat1 as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fat1 to cstr)
+        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } undef, ptr ")
+        append_cstr(ref (deref self).main_out, final_buf to cstr)
+        append_cstr(ref (deref self).main_out, ", 0\n")
+
+        let fat2 as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fat2 to cstr)
+        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+        append_cstr(ref (deref self).main_out, fat1 to cstr)
+        append_cstr(ref (deref self).main_out, ", i64 ")
+        append_cstr(ref (deref self).main_out, final_len to cstr)
+        append_cstr(ref (deref self).main_out, ", 1\n")
+
+        let fat3 as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fat3 to cstr)
+        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+        append_cstr(ref (deref self).main_out, fat2 to cstr)
+        append_cstr(ref (deref self).main_out, ", i64 ")
+        append_cstr(ref (deref self).main_out, final_len to cstr)
+        append_cstr(ref (deref self).main_out, ", 2\n")
+
+        return fat3
 
     public fn node_index_collection_is_dict(self as ptr[LLVMCodegen], node as ptr[Node]) as bool:
         let collection as ptr[Node] = node_left(node)

@@ -152,6 +152,12 @@ struct DeadCodeEliminator:
                 self.mark_node(elems[ei])
                 ei = ei + 1 to i64
 
+        elif k == NodeType.ListComprehension:
+            self.mark_node(node_left(node))
+            if node_cond(node) != None to ptr[Node]:
+                self.mark_node(node_cond(node))
+            self.mark_node(node_right(node))
+
         elif k == NodeType.ClosureExpr:
             let params as List[ptr[Node]] = node_params(node)
             let p_count as i64 = params.length()

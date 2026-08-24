@@ -72,6 +72,7 @@ enum NodeType:
     UnionDecl
     FieldDecl
     ColorLiteral
+    ListComprehension
 
 enum ImportKind:
     Normal
@@ -263,6 +264,13 @@ struct ColorLiteralData:
     public var b as u8
     public var a as u8
 
+struct ListComprehensionData:
+    public var name as String
+    public var left as ptr[Node]
+    public var cond as ptr[Node]
+    public var right as ptr[Node]
+    public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
@@ -365,6 +373,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[FieldDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.ColorLiteral:
         (deref n).data = make[ColorLiteralData](1 to usize) to ptr[u8]
+    elif nk == NodeType.ListComprehension:
+        (deref n).data = make[ListComprehensionData](1 to usize) to ptr[u8]
     else:
         (deref n).data = None to ptr[u8]
     return n
@@ -469,6 +479,9 @@ fn node_name(n as ptr[Node]) as String:
     elif k == NodeType.InterfaceDecl:
         let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
         return (deref d).name
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
+        return (deref d).name
     return String.make("" to cstr)
 
 fn node_name_ptr(n as ptr[Node]) as ptr[String]:
@@ -520,6 +533,9 @@ fn node_name_ptr(n as ptr[Node]) as ptr[String]:
     elif k == NodeType.InterfaceDecl:
         let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
         return ref (deref d).name
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
+        return ref (deref d).name
     return None to ptr[String]
 
 fn set_node_name(n as ptr[Node], name as String):
@@ -570,6 +586,9 @@ fn set_node_name(n as ptr[Node], name as String):
         (deref d).name = name
     elif k == NodeType.InterfaceDecl:
         let d as ptr[InterfaceDeclData] = (deref n).data to ptr[InterfaceDeclData]
+        (deref d).name = name
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         (deref d).name = name
 
 // left accessor (14 node types have it):
@@ -623,6 +642,9 @@ fn node_left(n as ptr[Node]) as ptr[Node]:
     elif k == NodeType.TryStmt:
         let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
         r = (deref d).left
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
+        r = (deref d).left
     return r
 
 fn set_node_left(n as ptr[Node], left as ptr[Node]):
@@ -671,8 +693,11 @@ fn set_node_left(n as ptr[Node], left as ptr[Node]):
     elif k == NodeType.TryStmt:
         let d as ptr[TryStmtData] = (deref n).data to ptr[TryStmtData]
         (deref d).left = left
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
+        (deref d).left = left
 
-// right accessor (BinaryExpr, IndexExpr):
+// right accessor (BinaryExpr, IndexExpr, ListComprehension):
 fn node_right(n as ptr[Node]) as ptr[Node]:
     var r as ptr[Node] = None to ptr[Node]
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
@@ -683,6 +708,9 @@ fn node_right(n as ptr[Node]) as ptr[Node]:
         r = (deref d).right
     elif k == NodeType.IndexExpr:
         let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        r = (deref d).right
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         r = (deref d).right
     return r
 
@@ -695,6 +723,9 @@ fn set_node_right(n as ptr[Node], right as ptr[Node]):
         (deref d).right = right
     elif k == NodeType.IndexExpr:
         let d as ptr[IndexExprData] = (deref n).data to ptr[IndexExprData]
+        (deref d).right = right
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         (deref d).right = right
 
 // body accessor (9 node types have it):
@@ -983,7 +1014,7 @@ fn set_node_op(n as ptr[Node], op as String):
         let d as ptr[CastExprData] = (deref n).data to ptr[CastExprData]
         (deref d).op = op
 
-// cond accessor (IfStmt, WhileStmt):
+// cond accessor (IfStmt, WhileStmt, ListComprehension):
 fn node_cond(n as ptr[Node]) as ptr[Node]:
     var r as ptr[Node] = None to ptr[Node]
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
@@ -994,6 +1025,9 @@ fn node_cond(n as ptr[Node]) as ptr[Node]:
         r = (deref d).cond
     elif k == NodeType.WhileStmt:
         let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        r = (deref d).cond
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         r = (deref d).cond
     return r
 
@@ -1006,6 +1040,9 @@ fn set_node_cond(n as ptr[Node], cond as ptr[Node]):
         (deref d).cond = cond
     elif k == NodeType.WhileStmt:
         let d as ptr[WhileStmtData] = (deref n).data to ptr[WhileStmtData]
+        (deref d).cond = cond
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         (deref d).cond = cond
 
 // then_branch accessor (IfStmt):
@@ -1283,6 +1320,9 @@ fn node_type_annots(n as ptr[Node]) as ptr[List[Option[ptr[TypeAnnotation]]]] :
     elif k == NodeType.ParamBlockStmt:
         let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
         r = (deref d).type_annots
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
+        r = (deref d).type_annots
     return r
 
 fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]):
@@ -1306,6 +1346,9 @@ fn set_node_type_annots(n as ptr[Node], type_annots as ptr[List[Option[ptr[TypeA
         (deref d).type_annots = type_annots
     elif k == NodeType.ParamBlockStmt:
         let d as ptr[ParamBlockStmtData] = (deref n).data to ptr[ParamBlockStmtData]
+        (deref d).type_annots = type_annots
+    elif k == NodeType.ListComprehension:
+        let d as ptr[ListComprehensionData] = (deref n).data to ptr[ListComprehensionData]
         (deref d).type_annots = type_annots
 
 // auto_drops accessor (ReturnStmt, BlockStmt, ParamBlockStmt):

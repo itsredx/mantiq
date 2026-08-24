@@ -51,6 +51,7 @@ TEST_FILES=(
     "src/tests/test_oop_override_final_access.mq"
     "src/tests/test_reflection_downcast.mq"
     "src/tests/test_color_literals.mq"
+    "src/tests/test_list_comprehensions.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

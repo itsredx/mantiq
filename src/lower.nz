@@ -4,7 +4,7 @@ from std.string import String
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ColorLiteralData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ColorLiteralData, ListComprehensionData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
 from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
@@ -224,7 +224,9 @@ struct Lowerer:
                     return self.lower_node(ref child)
                 i = i + 1 to u32
             return None to ptr[Node]
-        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "collection_item" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0 or strcmp(kind, "parenthesized_expression" to cstr) == 0 or strcmp(kind, "expression_statement" to cstr) == 0:
+        elif strcmp(kind, "collection_item" to cstr) == 0:
+            return self.lower_collection_item(ts_node)
+        elif strcmp(kind, "expression" to cstr) == 0 or strcmp(kind, "statement" to cstr) == 0 or strcmp(kind, "expr_stmt" to cstr) == 0 or strcmp(kind, "parenthesized_expression" to cstr) == 0 or strcmp(kind, "expression_statement" to cstr) == 0:
             let count as u32 = ts_node_child_count_ptr(ts_node)
             var i as u32 = 0 to u32
             while i < count:
@@ -634,6 +636,91 @@ struct Lowerer:
             return n
         return operand
 
+    public fn lower_collection_item(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var is_for as bool = False
+        var is_if as bool = False
+        var iter_name as String = String.make("" to cstr)
+        var iter_type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = None to ptr[List[Option[ptr[TypeAnnotation]]]]
+        var iterable_node as ptr[Node] = None to ptr[Node]
+        var yield_expr as ptr[Node] = None to ptr[Node]
+        var condition as ptr[Node] = None to ptr[Node]
+        var if_cond as ptr[Node] = None to ptr[Node]
+        var if_then as ptr[Node] = None to ptr[Node]
+        var if_else as ptr[Node] = None to ptr[Node]
+
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            let child_type as cstr = ts_node_type_ptr(ref child)
+            if strcmp(child_type, "for" to cstr) == 0:
+                is_for = True
+            elif strcmp(child_type, "if" to cstr) == 0:
+                is_if = True
+            elif strcmp(child_type, "identifier" to cstr) == 0 and is_for and iter_name.len == 0 to usize:
+                let slice_ptr as ptr[String] = self.slice_string_from_node(ref child)
+                iter_name = deref slice_ptr
+                drop(slice_ptr to ptr)
+            elif strcmp(child_type, "type_annotation" to cstr) == 0 and is_for:
+                let annot as ptr[TypeAnnotation] = self.lower_type_annotation(ref child)
+                let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+                (deref wrapper).list.append(Some(annot))
+            elif strcmp(child_type, "kw_in" to cstr) == 0 or strcmp(child_type, "in" to cstr) == 0:
+                // Skip 'in' keyword
+                pass
+            elif is_for and iterable_node == None to ptr[Node] and ts_node_is_named_ptr(ref child):
+                iterable_node = self.lower_node(ref child)
+            elif is_for and iterable_node != None to ptr[Node] and ts_node_is_named_ptr(ref child):
+                let lowered_item as ptr[Node] = self.lower_node(ref child)
+                if lowered_item != None to ptr[Node]:
+                    if (deref lowered_item).kind == NodeType.IfStmt:
+                        condition = node_cond(lowered_item)
+                        yield_expr = node_then_branch(lowered_item)
+                    else:
+                        yield_expr = lowered_item
+            elif is_if and if_cond == None to ptr[Node] and ts_node_is_named_ptr(ref child):
+                if_cond = self.lower_node(ref child)
+            elif is_if and if_cond != None to ptr[Node] and if_then == None to ptr[Node] and ts_node_is_named_ptr(ref child):
+                if_then = self.lower_node(ref child)
+            elif is_if and if_then != None to ptr[Node] and ts_node_is_named_ptr(ref child):
+                if_else = self.lower_node(ref child)
+            i = i + 1 to u32
+
+        if is_for and iterable_node != None to ptr[Node] and yield_expr != None to ptr[Node]:
+            let n as ptr[Node] = make_node(NodeType.ListComprehension, self.get_span(ts_node))
+            let data as ptr[ListComprehensionData] = make[ListComprehensionData](1 to usize) to ptr[ListComprehensionData]
+            (deref data).name = iter_name
+            (deref data).left = iterable_node
+            (deref data).cond = condition
+            (deref data).right = yield_expr
+            (deref data).type_annots = iter_type_annots
+            (deref n).data = data to ptr[u8]
+            return n
+
+        if is_if and if_cond != None to ptr[Node] and if_then != None to ptr[Node]:
+            let n as ptr[Node] = make_node(NodeType.IfStmt, self.get_span(ts_node))
+            let data as ptr[IfStmtData] = make[IfStmtData](1 to usize) to ptr[IfStmtData]
+            (deref data).cond = if_cond
+            (deref data).then_branch = if_then
+            if if_else != None to ptr[Node]:
+                (deref data).else_branch = Some(if_else)
+            else:
+                (deref data).else_branch = Empty
+            (deref n).data = data to ptr[u8]
+            return n
+
+        // Fallback: unwrap first named child
+        var j as u32 = 0 to u32
+        while j < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, j, ref child)
+            if ts_node_is_named_ptr(ref child):
+                return self.lower_node(ref child)
+            j = j + 1 to u32
+        return None to ptr[Node]
+
     public fn lower_list_literal(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         let elements as List[ptr[Node]] = List[ptr[Node]]()
         let count as u32 = ts_node_child_count_ptr(ts_node)
@@ -650,12 +737,20 @@ struct Lowerer:
                     ts_node_child_ptr(ref child, a, ref arg_child)
                     if ts_node_is_named_ptr(ref arg_child):
                         let el as ptr[Node] = self.lower_node(ref arg_child)
-                        elements.append(el)
+                        if el != None to ptr[Node]:
+                            elements.append(el)
                     a = a + 1 to u32
             elif ts_node_is_named_ptr(ref child):
                 let el as ptr[Node] = self.lower_node(ref child)
-                elements.append(el)
+                if el != None to ptr[Node]:
+                    elements.append(el)
             i = i + 1 to u32
+
+        if elements.length() == 1 to i64:
+            let first_item as ptr[Node] = elements[0 to i64]
+            if first_item != None to ptr[Node] and (deref first_item).kind == NodeType.ListComprehension:
+                return first_item
+
         let n as ptr[Node] = make_node(NodeType.ListLiteral, self.get_span(ts_node))
         let data as ptr[ListLiteralData] = make[ListLiteralData](1 to usize) to ptr[ListLiteralData]
         (deref data).declarations = elements
