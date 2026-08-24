@@ -7,7 +7,7 @@ from std.mem import make
 import symbols
 from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_imported_symbols
 import types
-from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type
+from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type, make_color_type
 import sema
 from sema import Sema, make_scope, make_symbol
 import error
@@ -137,6 +137,8 @@ struct TypeChecker:
             return make_type(TypeKind.QBit)
         elif strcmp(name, "qreg" to cstr) == 0:
             return make_type(TypeKind.QReg)
+        elif strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0:
+            return make_color_type()
         elif strcmp(name, "List" to cstr) == 0:
             let opt_gen as ptr[u8] = (ref (deref annot).generics) to ptr[u8]
             if option_has_value(opt_gen):
@@ -504,7 +506,7 @@ struct TypeChecker:
                 skip = True
             elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "bf16" to cstr) == 0 or strcmp(name, "BFloat16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
                 skip = True
-            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
                 skip = True
                 
             let name_ptr as ptr[u8] = name to ptr[u8]
@@ -558,6 +560,12 @@ struct TypeChecker:
             
         // Any conversions
         if fk == TypeKind.Any or tk == TypeKind.Any:
+            return True
+
+        // Color conversions
+        if fk == TypeKind.Color and (tk == TypeKind.Color or tk == TypeKind.U32 or tk == TypeKind.I32 or tk == TypeKind.U64 or tk == TypeKind.I64 or tk == TypeKind.USize):
+            return True
+        if tk == TypeKind.Color and (fk == TypeKind.Color or fk == TypeKind.U32 or fk == TypeKind.I32 or fk == TypeKind.U64 or fk == TypeKind.I64 or fk == TypeKind.USize):
             return True
 
         // String conversions
@@ -1560,6 +1568,8 @@ struct TypeChecker:
                                     resolved_target_t = make_type(TypeKind.F64)
                                 elif strcmp(t_cstr, "bool" to cstr) == 0:
                                     resolved_target_t = make_type(TypeKind.Boolean)
+                                elif strcmp(t_cstr, "color" to cstr) == 0 or strcmp(t_cstr, "Color" to cstr) == 0:
+                                    resolved_target_t = make_color_type()
                                 elif strcmp(t_cstr, "String" to cstr) == 0 or strcmp(t_cstr, "str" to cstr) == 0:
                                     resolved_target_t = make_type(TypeKind.String)
                                 else:
@@ -1680,6 +1690,9 @@ struct TypeChecker:
 
         elif nt == NodeType.BooleanLiteral:
             ret_type = make_type(TypeKind.Boolean)
+
+        elif nt == NodeType.ColorLiteral:
+            ret_type = make_color_type()
 
         elif nt == NodeType.ClassDecl:
             let class_name as String = node_name(node)

@@ -321,6 +321,8 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "34" to ptr[u8]
         elif strcmp(v_cstr, "FieldDecl" to cstr) == 0:
             return "35" to ptr[u8]
+        elif strcmp(v_cstr, "ColorLiteral" to cstr) == 0:
+            return "36" to ptr[u8]
     elif strcmp(e_cstr, "TypeKind" to cstr) == 0:
         if strcmp(v_cstr, "I8" to cstr) == 0:
             return "0" to ptr[u8]
@@ -426,8 +428,10 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "50" to ptr[u8]
         elif strcmp(v_cstr, "Any" to cstr) == 0:
             return "51" to ptr[u8]
-        elif strcmp(v_cstr, "Void" to cstr) == 0:
+        elif strcmp(v_cstr, "Color" to cstr) == 0:
             return "52" to ptr[u8]
+        elif strcmp(v_cstr, "Void" to cstr) == 0:
+            return "53" to ptr[u8]
     return "0" to ptr[u8]
 
 fn type_to_llvm(t as ptr[Type]) as String:
@@ -440,7 +444,7 @@ fn type_to_llvm(t as ptr[Type]) as String:
         return String.make("i8" to cstr)
     if k == TypeKind.I16 or k == TypeKind.U16:
         return String.make("i16" to cstr)
-    if k == TypeKind.I32 or k == TypeKind.U32:
+    if k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.Color:
         return String.make("i32" to cstr)
     if k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.ISize or k == TypeKind.USize:
         return String.make("i64" to cstr)
@@ -1056,6 +1060,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("EnumDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("UnionDeclData", "{ { ptr, i64, i64 }, ptr }")
         self.register_builtin_struct("FieldDeclData", "{ { ptr, i64, i64 }, ptr }")
+        self.register_builtin_struct("ColorLiteralData", "{ double, i8, i8, i8, i8 }")
         self.register_builtin_struct("Span", "{ i32, i32, i32, i32, i32, i32 }")
         self.register_builtin_struct("Label", "{ %Span, { ptr, i64, i64 }, i32 }")
         self.register_builtin_struct("Suggestion", "{ %Span, { ptr, i64, i64 }, { ptr, i64, i64 } }")
@@ -1174,6 +1179,11 @@ struct LLVMCodegen:
         self.register_field_idx("UnionDeclData" to cstr, "body" to cstr, 1 to i32)
         self.register_field_idx("FieldDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("FieldDeclData" to cstr, "type_annots" to cstr, 1 to i32)
+        self.register_field_idx("ColorLiteralData" to cstr, "val" to cstr, 0 to i32)
+        self.register_field_idx("ColorLiteralData" to cstr, "r" to cstr, 1 to i32)
+        self.register_field_idx("ColorLiteralData" to cstr, "g" to cstr, 2 to i32)
+        self.register_field_idx("ColorLiteralData" to cstr, "b" to cstr, 3 to i32)
+        self.register_field_idx("ColorLiteralData" to cstr, "a" to cstr, 4 to i32)
 
         self.register_field_idx("Lowerer" to cstr, "source_code" to cstr, 0 to i32)
         self.register_field_idx("Lowerer" to cstr, "mode" to cstr, 1 to i32)
@@ -1518,6 +1528,8 @@ struct LLVMCodegen:
                         v_type = String.make("i32" to cstr)
                     let init_node as ptr[Node] = node_left(decl)
                     var init_val as ptr[u8] = "0" to ptr[u8]
+                    if (deref (v_type.data)) == 123 to u8 or strcmp(v_type.data to cstr, "ptr" to cstr) == 0:
+                        init_val = "zeroinitializer" to ptr[u8]
                     if init_node != None to ptr[Node] and node_kind(init_node) == NodeType.NumberLiteral:
                         let s_raw as String = node_str_val(init_node)
                         if s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
@@ -1527,6 +1539,14 @@ struct LLVMCodegen:
                             let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
                             let _ as i32 = sprintf(buf, "%ld" to cstr, num_val)
                             init_val = buf
+                    elif init_node != None to ptr[Node] and node_kind(init_node) == NodeType.ColorLiteral:
+                        let c_val as u64 = node_val(init_node) to u64
+                        let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                        let _ as i32 = sprintf(buf, "%u" to cstr, c_val to u32)
+                        init_val = buf
+                    elif init_node != None to ptr[Node] and node_kind(init_node) == NodeType.StringLiteral:
+                        let _ as ptr[u8] = self.emit_expr(init_node)
+                        init_val = "zeroinitializer" to ptr[u8]
                     append_cstr(ref (deref self).type_out, "@")
                     append_str(ref (deref self).type_out, v_name)
                     append_cstr(ref (deref self).type_out, " = internal global ")
@@ -1671,7 +1691,7 @@ struct LLVMCodegen:
                                 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
                                 if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
                                     param_type = String.make("ptr" to cstr)
-                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
                                     param_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
                                     param_type = String.make("i64" to cstr)
@@ -1732,7 +1752,7 @@ struct LLVMCodegen:
                                 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
                                 if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0:
                                     p_type = String.make("ptr" to cstr)
-                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
                                     p_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0:
                                     p_type = String.make("i64" to cstr)
@@ -1826,7 +1846,7 @@ struct LLVMCodegen:
                                     var_type = String.make("{ i8, ptr }" to cstr)
                                 elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0 or strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
                                     var_type = String.make("i64" to cstr)
-                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0:
+                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "char" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
                                     var_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i16" to cstr) == 0 or strcmp(pa_name, "u16" to cstr) == 0:
                                     var_type = String.make("i16" to cstr)
@@ -2475,6 +2495,11 @@ struct LLVMCodegen:
                 return "1" to ptr[u8]
             else:
                 return "0" to ptr[u8]
+        elif nt == NodeType.ColorLiteral:
+            let val as f64 = node_val(node)
+            let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+            let _ as i32 = sprintf(buf, "%u" to cstr, (val to u64) to u32)
+            return buf
         return "void" to ptr[u8]
 
     public fn emit_lvalue_ptr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
@@ -3872,7 +3897,7 @@ struct LLVMCodegen:
                 let ro as cstr = right_op.data to cstr
                 if strcmp(ro, "==" to cstr) == 0 or strcmp(ro, "!=" to cstr) == 0 or strcmp(ro, "<" to cstr) == 0 or strcmp(ro, ">" to cstr) == 0 or strcmp(ro, "<=" to cstr) == 0 or strcmp(ro, ">=" to cstr) == 0:
                     right_is_cmp = True
-        let is_arith as bool = strcmp(op.data to cstr, "+" to cstr) == 0 or strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "*" to cstr) == 0 or strcmp(op.data to cstr, "/" to cstr) == 0 or strcmp(op.data to cstr, "%" to cstr) == 0 or strcmp(op.data to cstr, "or" to cstr) == 0 or strcmp(op.data to cstr, "and" to cstr) == 0
+        let is_arith as bool = strcmp(op.data to cstr, "+" to cstr) == 0 or strcmp(op.data to cstr, "-" to cstr) == 0 or strcmp(op.data to cstr, "*" to cstr) == 0 or strcmp(op.data to cstr, "/" to cstr) == 0 or strcmp(op.data to cstr, "%" to cstr) == 0 or strcmp(op.data to cstr, "or" to cstr) == 0 or strcmp(op.data to cstr, "and" to cstr) == 0 or strcmp(op.data to cstr, "&" to cstr) == 0 or strcmp(op.data to cstr, "|" to cstr) == 0 or strcmp(op.data to cstr, "^" to cstr) == 0 or strcmp(op.data to cstr, "<<" to cstr) == 0 or strcmp(op.data to cstr, ">>" to cstr) == 0
         var operand_type as String = left_t_str
         if is_arith:
             if left_is_cmp or right_is_cmp or strcmp(left_t_str.data to cstr, "i1" to cstr) == 0 or strcmp(right_t_str.data to cstr, "i1" to cstr) == 0:
@@ -4091,10 +4116,25 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, " = sdiv ")
         elif strcmp(op.data to cstr, "%" to cstr) == 0:
             append_cstr(ref (deref self).main_out, " = srem ")
-        elif strcmp(op.data to cstr, "or" to cstr) == 0:
+        elif strcmp(op.data to cstr, "or" to cstr) == 0 or strcmp(op.data to cstr, "|" to cstr) == 0:
             append_cstr(ref (deref self).main_out, " = or ")
-        elif strcmp(op.data to cstr, "and" to cstr) == 0:
+        elif strcmp(op.data to cstr, "and" to cstr) == 0 or strcmp(op.data to cstr, "&" to cstr) == 0:
             append_cstr(ref (deref self).main_out, " = and ")
+        elif strcmp(op.data to cstr, "^" to cstr) == 0:
+            append_cstr(ref (deref self).main_out, " = xor ")
+        elif strcmp(op.data to cstr, "<<" to cstr) == 0:
+            append_cstr(ref (deref self).main_out, " = shl ")
+        elif strcmp(op.data to cstr, ">>" to cstr) == 0:
+            var is_unsigned as bool = False
+            let left_t as ptr[Type] = node_inferred_type(actual_left)
+            if left_t != None to ptr[Type]:
+                let lk as TypeKind = (deref left_t).kind
+                if lk == TypeKind.U8 or lk == TypeKind.U16 or lk == TypeKind.U32 or lk == TypeKind.U64 or lk == TypeKind.U128 or lk == TypeKind.U256 or lk == TypeKind.U512 or lk == TypeKind.U1024 or lk == TypeKind.USize or lk == TypeKind.Color:
+                    is_unsigned = True
+            if is_unsigned:
+                append_cstr(ref (deref self).main_out, " = lshr ")
+            else:
+                append_cstr(ref (deref self).main_out, " = ashr ")
         elif strcmp(op.data to cstr, "<" to cstr) == 0:
             if is_fop:
                 append_cstr(ref (deref self).main_out, " = fcmp olt ")
@@ -7388,7 +7428,7 @@ struct LLVMCodegen:
                             let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
                             if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
                                 let pa_name as cstr = (deref pa).name.data to cstr
-                                if strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0:
+                                if strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
                                     r_type = String.make("i32" to cstr)
                                 elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0 or strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0:
                                     r_type = String.make("i64" to cstr)
@@ -7745,8 +7785,13 @@ struct LLVMCodegen:
                 target_type = String.make("bfloat" to cstr)
             elif strcmp(target_cstr, "ptr" to cstr) == 0 or (deref (target_cstr to ptr[u8])) == 112 to u8 or (deref (target_cstr to ptr[u8])) == 91 to u8:
                 target_type = String.make("ptr" to cstr)
+            elif strcmp(target_cstr, "Any" to cstr) == 0:
+                target_type = String.make("{ ptr, ptr }" to cstr)
         if (deref target_type.data) == 37 to u8:
             target_type = String.make("ptr" to cstr)
+
+        if strcmp(target_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or (target_op.data != None and strcmp(target_op.data to cstr, "Any" to cstr) == 0):
+            return self.emit_box_to_any(operand_val, source_type, operand)
 
         if operand != None to ptr[Node] and node_kind(operand) == NodeType.StringLiteral and (deref target_type.data) == 105 to u8:
             let reg as ptr[u8] = self.fresh_temp()
@@ -8706,6 +8751,8 @@ struct LLVMCodegen:
                     type_name = String.make("f64" to cstr)
                 elif (deref inf_t).kind == TypeKind.Boolean:
                     type_name = String.make("bool" to cstr)
+                elif (deref inf_t).kind == TypeKind.Color:
+                    type_name = String.make("color" to cstr)
                 elif (deref inf_t).kind == TypeKind.String:
                     type_name = String.make("String" to cstr)
 

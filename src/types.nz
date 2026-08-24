@@ -58,6 +58,7 @@ enum TypeKind:
     RawPointer
     Unknown
     Any
+    Color
     Void
 
 // ── Type ────────────────────────────────────────────────────────────────
@@ -111,11 +112,17 @@ fn make_interface_type(name as String) as ptr[Type]:
     (deref t).name = name
     return t
 
+fn make_color_type() as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Color)
+    return t
+
 // ── Copy/Move Type Classification ──────────────────────────────────────
 fn is_copy_type(t as ptr[Type]) as bool:
     if t == None to ptr[Type]:
         return False
     let k as TypeKind = (deref t).kind
+    if k == TypeKind.Color:
+        return True
     if k == TypeKind.I8:
         return True
     if k == TypeKind.I16:

@@ -4,7 +4,7 @@ from std.string import String
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ColorLiteralData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
 from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
@@ -49,6 +49,15 @@ fn strip_quotes(d as ptr[u8], len as usize) as String:
     let res_all as String = deref slice_all
     drop(slice_all to ptr)
     return res_all
+
+fn hex_digit_to_val(c as u8) as u32:
+    if c >= 48 to u8 and c <= 57 to u8:
+        return (c - 48 to u8) to u32
+    if c >= 97 to u8 and c <= 102 to u8:
+        return ((c - 97 to u8) + 10 to u8) to u32
+    if c >= 65 to u8 and c <= 70 to u8:
+        return ((c - 65 to u8) + 10 to u8) to u32
+    return 0 to u32
 
 // ── Option Layout Helpers ────────────────────────────────────────────────
 fn option_has_value(opt as ptr[OptionLayout]) as bool:
@@ -186,6 +195,8 @@ struct Lowerer:
             return self.lower_number(ts_node)
         elif strcmp(kind, "string" to cstr) == 0:
             return self.lower_string(ts_node)
+        elif strcmp(kind, "color_literal" to cstr) == 0:
+            return self.lower_color_literal(ts_node)
         elif strcmp(kind, "binary_expression" to cstr) == 0:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "super" to cstr) == 0:
@@ -1006,6 +1017,68 @@ struct Lowerer:
         let n as ptr[Node] = make_node(NodeType.StringLiteral, span)
         let data as ptr[StringLiteralData] = make[StringLiteralData](1 to usize) to ptr[StringLiteralData]
         (deref data).str_val = slice_str
+        (deref n).data = data to ptr[u8]
+        return n
+
+    public fn lower_color_literal(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        let slice_ptr as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, span.start_byte to usize, span.end_byte to usize) to ptr[String]
+        let s_text as String = deref slice_ptr
+        let s_data as ptr[u8] = s_text.data
+        let s_len as usize = s_text.len
+
+        var offset as usize = 0 to usize
+        if s_len > 0 to usize and (deref s_data) == 35 to u8: // '#'
+            offset = 1 to usize
+
+        let hex_len as usize = s_len - offset
+        var r as u32 = 0 to u32
+        var g as u32 = 0 to u32
+        var b as u32 = 0 to u32
+        var a as u32 = 255 to u32
+
+        if hex_len == 3 to usize:
+            let r_n as u32 = hex_digit_to_val(deref ((s_data to usize + offset) to ptr[u8]))
+            let g_n as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 1 to usize) to ptr[u8]))
+            let b_n as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 2 to usize) to ptr[u8]))
+            r = (r_n * 16 to u32) + r_n
+            g = (g_n * 16 to u32) + g_n
+            b = (b_n * 16 to u32) + b_n
+            a = 255 to u32
+        elif hex_len == 6 to usize:
+            let r1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset) to ptr[u8]))
+            let r0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 1 to usize) to ptr[u8]))
+            let g1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 2 to usize) to ptr[u8]))
+            let g0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 3 to usize) to ptr[u8]))
+            let b1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 4 to usize) to ptr[u8]))
+            let b0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 5 to usize) to ptr[u8]))
+            r = (r1 * 16 to u32) + r0
+            g = (g1 * 16 to u32) + g0
+            b = (b1 * 16 to u32) + b0
+            a = 255 to u32
+        elif hex_len == 8 to usize:
+            let r1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset) to ptr[u8]))
+            let r0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 1 to usize) to ptr[u8]))
+            let g1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 2 to usize) to ptr[u8]))
+            let g0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 3 to usize) to ptr[u8]))
+            let b1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 4 to usize) to ptr[u8]))
+            let b0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 5 to usize) to ptr[u8]))
+            let a1 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 6 to usize) to ptr[u8]))
+            let a0 as u32 = hex_digit_to_val(deref ((s_data to usize + offset + 7 to usize) to ptr[u8]))
+            r = (r1 * 16 to u32) + r0
+            g = (g1 * 16 to u32) + g0
+            b = (b1 * 16 to u32) + b0
+            a = (a1 * 16 to u32) + a0
+
+        drop(slice_ptr to ptr)
+        let argb as u64 = ((a to u64) * 16777216 to u64) + ((r to u64) * 65536 to u64) + ((g to u64) * 256 to u64) + (b to u64)
+        let n as ptr[Node] = make_node(NodeType.ColorLiteral, span)
+        let data as ptr[ColorLiteralData] = make[ColorLiteralData](1 to usize) to ptr[ColorLiteralData]
+        (deref data).val = argb to f64
+        (deref data).r = r to u8
+        (deref data).g = g to u8
+        (deref data).b = b to u8
+        (deref data).a = a to u8
         (deref n).data = data to ptr[u8]
         return n
 

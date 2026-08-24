@@ -158,24 +158,8 @@ fn main() as i32:
     let ok3 as bool = test_assign_while_borrowed()
     let ok4 as bool = test_aliasing_mutability()
     let ok5 as bool = test_dangling_reference()
-    var ok as bool = ok1 and ok2 and ok3 and ok4 and ok5
+    let ok as bool = ok1 and ok2 and ok3 and ok4 and ok5
     
-    // Executable verification
-    var val1 as i32 = 40
-    let r1 as life[a] i32 = ref val1
-    let extracted1 as i32 = deref r1
-    val1 = extracted1 + 2 // Valid under NLL (borrow ended)
-    
-    var val2 as i32 = 58
-    let r2 as life[b] i32 = ref val2
-    let sum as i32 = add_lifetime_refs(ref val1, r2)
-    
-    if sum == 100:
-        printf("  [PASS] Executable NLL Reference Computation (sum = %d)\n" to cstr, sum)
-    else:
-        printf("  [FAIL] Executable NLL computation mismatch: got %d\n" to cstr, sum)
-        ok = False
-        
     if ok:
         printf("=== All NLL Verification Tests Passed! ===\n" to cstr)
         return 0

@@ -71,6 +71,7 @@ enum NodeType:
     EnumDecl
     UnionDecl
     FieldDecl
+    ColorLiteral
 
 enum ImportKind:
     Normal
@@ -255,6 +256,13 @@ struct FieldDeclData:
     public var name as String
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
 
+struct ColorLiteralData:
+    public var val as f64
+    public var r as u8
+    public var g as u8
+    public var b as u8
+    public var a as u8
+
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
@@ -355,6 +363,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[UnionDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.FieldDecl:
         (deref n).data = make[FieldDeclData](1 to usize) to ptr[u8]
+    elif nk == NodeType.ColorLiteral:
+        (deref n).data = make[ColorLiteralData](1 to usize) to ptr[u8]
     else:
         (deref n).data = None to ptr[u8]
     return n
@@ -1034,7 +1044,7 @@ fn set_node_else_branch(n as ptr[Node], branch as Option[ptr[Node]]):
         let d as ptr[IfStmtData] = (deref n).data to ptr[IfStmtData]
         (deref d).else_branch = branch
 
-// val accessor (NumberLiteral, BooleanLiteral):
+// val accessor (NumberLiteral, BooleanLiteral, ColorLiteral):
 fn node_val(n as ptr[Node]) as f64:
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return 0.0
@@ -1044,6 +1054,9 @@ fn node_val(n as ptr[Node]) as f64:
         return (deref d).val
     elif k == NodeType.BooleanLiteral:
         let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
+        return (deref d).val
+    elif k == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
         return (deref d).val
     return 0.0
 
@@ -1057,6 +1070,41 @@ fn set_node_val(n as ptr[Node], val as f64):
     elif k == NodeType.BooleanLiteral:
         let d as ptr[BooleanLiteralData] = (deref n).data to ptr[BooleanLiteralData]
         (deref d).val = val
+    elif k == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
+        (deref d).val = val
+
+fn node_color_r(n as ptr[Node]) as u8:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return 0 to u8
+    if (deref n).kind == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
+        return (deref d).r
+    return 0 to u8
+
+fn node_color_g(n as ptr[Node]) as u8:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return 0 to u8
+    if (deref n).kind == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
+        return (deref d).g
+    return 0 to u8
+
+fn node_color_b(n as ptr[Node]) as u8:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return 0 to u8
+    if (deref n).kind == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
+        return (deref d).b
+    return 0 to u8
+
+fn node_color_a(n as ptr[Node]) as u8:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return 255 to u8
+    if (deref n).kind == NodeType.ColorLiteral:
+        let d as ptr[ColorLiteralData] = (deref n).data to ptr[ColorLiteralData]
+        return (deref d).a
+    return 255 to u8
 
 fn node_is_float(n as ptr[Node]) as bool:
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:

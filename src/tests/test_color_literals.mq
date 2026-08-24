@@ -1,0 +1,141 @@
+import string
+from string import String
+import error
+from error import DiagnosticEngine
+import symbols
+from symbols import Node, NodeType, LanguageMode, node_kind, node_val, node_color_r, node_color_g, node_color_b, node_color_a
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import types
+from types import Type, TypeKind
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+fn get_red(c as color) as u32:
+    return ((c to u32) >> 16 to u32) & 255 to u32
+
+fn get_green(c as color) as u32:
+    return ((c to u32) >> 8 to u32) & 255 to u32
+
+fn get_blue(c as color) as u32:
+    return (c to u32) & 255 to u32
+
+fn get_alpha(c as color) as u32:
+    return ((c to u32) >> 24 to u32) & 255 to u32
+
+fn test_ast_lowering_and_sema():
+    let src as cstr = "let c1 = #000\nlet c2 = #FFF\nlet c3 = #FF5733\nlet c4 = #FF000080\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_color.mq" to cstr)
+    let ast_root as ptr[Node] = (deref lr).lower_source()
+    assert_true(ast_root != None to ptr[Node], "AST Root must not be null" to cstr)
+    assert_true(node_kind(ast_root) == NodeType.Program, "Root must be Program" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test_color.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(ast_root)
+    s.resolve_pass(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Sema must report zero errors" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
+    let _ as i32 = printf("  PASS: Color AST lowering, sema, and typecheck\n" to cstr)
+
+fn test_color_values():
+    // 3-digit hex literals (#RGB -> #RRGGBB with Alpha = 255)
+    let black as color = #000
+    assert_true((black to u32) == 4278190080 to u32, "black #000 must equal 0xFF000000 (4278190080)" to cstr)
+    assert_true(get_red(black) == 0 to u32, "#000 red must be 0" to cstr)
+    assert_true(get_green(black) == 0 to u32, "#000 green must be 0" to cstr)
+    assert_true(get_blue(black) == 0 to u32, "#000 blue must be 0" to cstr)
+    assert_true(get_alpha(black) == 255 to u32, "#000 alpha must be 255" to cstr)
+
+    let white as color = #FFF
+    assert_true((white to u32) == 4294967295 to u32, "white #FFF must equal 0xFFFFFFFF (4294967295)" to cstr)
+    assert_true(get_red(white) == 255 to u32, "#FFF red must be 255" to cstr)
+    assert_true(get_green(white) == 255 to u32, "#FFF green must be 255" to cstr)
+    assert_true(get_blue(white) == 255 to u32, "#FFF blue must be 255" to cstr)
+    assert_true(get_alpha(white) == 255 to u32, "#FFF alpha must be 255" to cstr)
+
+    let red as color = #F00
+    assert_true(get_red(red) == 255 to u32, "#F00 red must be 255" to cstr)
+    assert_true(get_green(red) == 0 to u32, "#F00 green must be 0" to cstr)
+    assert_true(get_blue(red) == 0 to u32, "#F00 blue must be 0" to cstr)
+    assert_true(get_alpha(red) == 255 to u32, "#F00 alpha must be 255" to cstr)
+
+    let green as color = #0F0
+    assert_true(get_red(green) == 0 to u32, "#0F0 red must be 0" to cstr)
+    assert_true(get_green(green) == 255 to u32, "#0F0 green must be 255" to cstr)
+    assert_true(get_blue(green) == 0 to u32, "#0F0 blue must be 0" to cstr)
+    assert_true(get_alpha(green) == 255 to u32, "#0F0 alpha must be 255" to cstr)
+
+    let blue as color = #00F
+    assert_true(get_red(blue) == 0 to u32, "#00F red must be 0" to cstr)
+    assert_true(get_green(blue) == 0 to u32, "#00F green must be 0" to cstr)
+    assert_true(get_blue(blue) == 255 to u32, "#00F blue must be 255" to cstr)
+    assert_true(get_alpha(blue) == 255 to u32, "#00F alpha must be 255" to cstr)
+
+    // 6-digit hex literals (#RRGGBB with Alpha = 255)
+    let c_hex6 as color = #FF5733
+    assert_true((c_hex6 to u32) == 4294924083 to u32, "#FF5733 must equal 0xFFFF5733 (4294924083)" to cstr)
+    assert_true(get_red(c_hex6) == 255 to u32, "#FF5733 red must be 255 (0xFF)" to cstr)
+    assert_true(get_green(c_hex6) == 87 to u32, "#FF5733 green must be 87 (0x57)" to cstr)
+    assert_true(get_blue(c_hex6) == 51 to u32, "#FF5733 blue must be 51 (0x33)" to cstr)
+    assert_true(get_alpha(c_hex6) == 255 to u32, "#FF5733 alpha must be 255 (0xFF)" to cstr)
+
+    let catppuccin_base as color = #1E1E2E
+    assert_true(get_red(catppuccin_base) == 30 to u32, "#1E1E2E red must be 30 (0x1E)" to cstr)
+    assert_true(get_green(catppuccin_base) == 30 to u32, "#1E1E2E green must be 30 (0x1E)" to cstr)
+    assert_true(get_blue(catppuccin_base) == 46 to u32, "#1E1E2E blue must be 46 (0x2E)" to cstr)
+    assert_true(get_alpha(catppuccin_base) == 255 to u32, "#1E1E2E alpha must be 255 (0xFF)" to cstr)
+
+    // 8-digit hex literals (#RRGGBBAA with explicit Alpha)
+    let semi_red as color = #FF000080
+    assert_true((semi_red to u32) == 2164195328 to u32, "#FF000080 must equal 0x80FF0000 (2164195328)" to cstr)
+    assert_true(get_red(semi_red) == 255 to u32, "#FF000080 red must be 255" to cstr)
+    assert_true(get_green(semi_red) == 0 to u32, "#FF000080 green must be 0" to cstr)
+    assert_true(get_blue(semi_red) == 0 to u32, "#FF000080 blue must be 0" to cstr)
+    assert_true(get_alpha(semi_red) == 128 to u32, "#FF000080 alpha must be 128 (0x80)" to cstr)
+
+    let transparent as color = #00000000
+    assert_true((transparent to u32) == 0 to u32, "#00000000 must equal 0" to cstr)
+    assert_true(get_alpha(transparent) == 0 to u32, "#00000000 alpha must be 0" to cstr)
+
+    printf("  PASS: Color Literal Runtime Values & Channel Extraction\n" to cstr)
+
+fn test_reflection_on_color():
+    let c as color = #FF5733
+    let boxed as Any = c to Any
+    var matched as bool = False
+    match boxed:
+        case col is color:
+            matched = True
+            assert_true(get_red(col) == 255 to u32, "Downcasted color must have correct red" to cstr)
+        case _:
+            matched = False
+    assert_true(matched, "Match downcast on color must succeed" to cstr)
+    printf("  PASS: Reflection / Match Downcast on Color Type\n" to cstr)
+
+fn main() as i32:
+    printf("=== Running Hex Color Literals Test Suite ===\n" to cstr)
+    test_ast_lowering_and_sema()
+    test_color_values()
+    test_reflection_on_color()
+    printf("All Hex Color Literals tests PASSED!\n" to cstr)
+    return 0
