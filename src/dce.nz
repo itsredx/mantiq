@@ -144,7 +144,7 @@ struct DeadCodeEliminator:
                 if strcmp(in_c, "qbit" to cstr) == 0 or strcmp(in_c, "qreg" to cstr) == 0 or strcmp(in_c, "H" to cstr) == 0 or strcmp(in_c, "measure" to cstr) == 0 or strcmp(in_c, "CNOT" to cstr) == 0:
                     (deref self).quantum_used = True
 
-        elif k == NodeType.ListLiteral or k == NodeType.DictLiteral:
+        elif k == NodeType.ListLiteral or k == NodeType.DictLiteral or k == NodeType.InterpolatedString:
             let elems as List[ptr[Node]] = node_declarations(node)
             let e_count as i64 = elems.length()
             var ei as i64 = 0 to i64

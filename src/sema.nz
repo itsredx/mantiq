@@ -979,6 +979,15 @@ struct Sema:
                 let self_ref_mc as ptr[Sema] = self
                 (deref self_ref_mc).current_scope = parent_scope
                 ci = ci + 1 to i64
+        elif nt == NodeType.InterpolatedString:
+            let parts as List[ptr[Node]] = node_declarations(node)
+            let part_cnt as i64 = parts.length()
+            var pi as i64 = 0 to i64
+            while pi < part_cnt:
+                let p as ptr[Node] = parts[pi]
+                if p != None to ptr[Node]:
+                    self.declare_pass(p)
+                pi = pi + 1 to i64
         elif nt == NodeType.ImportDecl:
             self.load_imported_module(node)
 
@@ -1260,3 +1269,12 @@ struct Sema:
                     let self_ref_m2 as ptr[Sema] = self
                     (deref self_ref_m2).current_scope = parent_scope
                 ci = ci + 1 to i64
+        elif nt == NodeType.InterpolatedString:
+            let parts as List[ptr[Node]] = node_declarations(node)
+            let part_cnt as i64 = parts.length()
+            var pi as i64 = 0 to i64
+            while pi < part_cnt:
+                let p as ptr[Node] = parts[pi]
+                if p != None to ptr[Node]:
+                    self.resolve_pass(p)
+                pi = pi + 1 to i64

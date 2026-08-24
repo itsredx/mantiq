@@ -52,6 +52,7 @@ TEST_FILES=(
     "src/tests/test_reflection_downcast.mq"
     "src/tests/test_color_literals.mq"
     "src/tests/test_list_comprehensions.mq"
+    "src/tests/test_string_interpolation.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

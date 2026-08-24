@@ -1694,6 +1694,17 @@ struct TypeChecker:
 
             ret_type = make_list_type(yield_t)
 
+        elif nt == NodeType.InterpolatedString:
+            ret_type = make_type(TypeKind.String)
+            let parts as List[ptr[Node]] = node_declarations(node)
+            let part_cnt as i64 = parts.length()
+            var pi as i64 = 0 to i64
+            while pi < part_cnt:
+                let p as ptr[Node] = parts[pi]
+                if p != None to ptr[Node]:
+                    self.typecheck_node(p)
+                pi = pi + 1 to i64
+
         elif nt == NodeType.DictLiteral:
             ret_type = make_type(TypeKind.Dict)
             let d_items as List[ptr[Node]] = node_declarations(node)

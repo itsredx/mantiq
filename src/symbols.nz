@@ -73,6 +73,7 @@ enum NodeType:
     FieldDecl
     ColorLiteral
     ListComprehension
+    InterpolatedString
 
 enum ImportKind:
     Normal
@@ -271,6 +272,9 @@ struct ListComprehensionData:
     public var right as ptr[Node]
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
 
+struct InterpolatedStringData:
+    public var declarations as List[ptr[Node]]
+
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
@@ -375,6 +379,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[ColorLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.ListComprehension:
         (deref n).data = make[ListComprehensionData](1 to usize) to ptr[u8]
+    elif nk == NodeType.InterpolatedString:
+        (deref n).data = make[InterpolatedStringData](1 to usize) to ptr[u8]
     else:
         (deref n).data = None to ptr[u8]
     return n
@@ -843,6 +849,9 @@ fn node_declarations(n as ptr[Node]) as List[ptr[Node]]:
     elif k == NodeType.MatchStmt:
         let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         r = (deref d).declarations
+    elif k == NodeType.InterpolatedString:
+        let d as ptr[InterpolatedStringData] = (deref n).data to ptr[InterpolatedStringData]
+        r = (deref d).declarations
     elif k == NodeType.ClassDecl or k == NodeType.InterfaceDecl or k == NodeType.StructDecl:
         let b as ptr[Node] = node_body(n)
         if b != None to ptr[Node] and (deref b).kind == NodeType.BlockStmt:
@@ -871,6 +880,9 @@ fn node_declarations_ptr(n as ptr[Node]) as ptr[List[ptr[Node]]]:
     elif k == NodeType.MatchStmt:
         let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
         return ref (deref d).declarations
+    elif k == NodeType.InterpolatedString:
+        let d as ptr[InterpolatedStringData] = (deref n).data to ptr[InterpolatedStringData]
+        return ref (deref d).declarations
     return None to ptr[List[ptr[Node]]]
 
 fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
@@ -894,6 +906,9 @@ fn set_node_declarations(n as ptr[Node], decls as List[ptr[Node]]):
         (deref d).declarations = decls
     elif k == NodeType.MatchStmt:
         let d as ptr[MatchStmtData] = (deref n).data to ptr[MatchStmtData]
+        (deref d).declarations = decls
+    elif k == NodeType.InterpolatedString:
+        let d as ptr[InterpolatedStringData] = (deref n).data to ptr[InterpolatedStringData]
         (deref d).declarations = decls
 
 // params accessor (5 node types have it):

@@ -1,0 +1,119 @@
+import string
+from string import String
+import error
+from error import DiagnosticEngine
+import symbols
+from symbols import Node, NodeType, LanguageMode, node_kind
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import types
+from types import Type, TypeKind
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Assertions ─────────────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+fn assert_str_eq(actual as String, expected as cstr, msg as cstr):
+    if strcmp(actual.data to cstr, expected) != 0:
+        let _ as i32 = printf("FAIL: %s (got '%s', expected '%s')\n" to cstr, msg, actual.data to cstr, expected)
+        exit(1 to i32)
+
+fn test_ast_lowering_and_sema():
+    let src as cstr = "let name = \"Alice\"\nlet msg = f\"Hello {name}!\"\nlet count = 42\nlet calc = `Count is: {count}`\nlet escaped = f\"Escaped {{braces}} {count}\"\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_interp.mq" to cstr)
+    let ast_root as ptr[Node] = (deref lr).lower_source()
+    assert_true(ast_root != None to ptr[Node], "AST Root must not be null" to cstr)
+    assert_true(node_kind(ast_root) == NodeType.Program, "Root must be Program" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test_interp.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(ast_root)
+    s.resolve_pass(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Sema must report zero errors" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
+    let _ as i32 = printf("  PASS: F-Strings AST lowering, sema, and typecheck\n" to cstr)
+
+fn test_basic_fstring():
+    let name as String = String.make("World" to cstr)
+    let greeting as String = f"Hello, {name}!"
+    assert_str_eq(greeting, "Hello, World!" to cstr, "Basic string interpolation" to cstr)
+    let _ as i32 = printf("  PASS: Basic F-String variable interpolation\n" to cstr)
+
+fn test_number_and_bool_interpolation():
+    let i as i32 = 100 to i32
+    let s_int as String = f"Value: {i}"
+    assert_str_eq(s_int, "Value: 100" to cstr, "i32 interpolation" to cstr)
+
+    let b_true as bool = True
+    let b_false as bool = False
+    let s_bool as String = f"Flag: {b_true}, Other: {b_false}"
+    assert_str_eq(s_bool, "Flag: True, Other: False" to cstr, "bool interpolation" to cstr)
+    let _ as i32 = printf("  PASS: Integer and Boolean interpolation\n" to cstr)
+
+fn test_expression_interpolation():
+    let a as i32 = 20 to i32
+    let b as i32 = 30 to i32
+    let s_expr as String = f"Sum: {a + b}"
+    assert_str_eq(s_expr, "Sum: 50" to cstr, "Binary expression interpolation" to cstr)
+    let _ as i32 = printf("  PASS: Binary expression inside interpolation\n" to cstr)
+
+fn test_backtick_and_escaped_braces():
+    let item as String = String.make("apple" to cstr)
+    let price as i32 = 5 to i32
+    let receipt as String = `Item: {item}, Price: ${price}`
+    assert_str_eq(receipt, "Item: apple, Price: $5" to cstr, "Backtick template string" to cstr)
+
+    let braces as String = f"{{literal braces}} and {item}"
+    assert_str_eq(braces, "{literal braces} and apple" to cstr, "Escaped braces in f-string" to cstr)
+    let _ as i32 = printf("  PASS: Backtick strings and escaped braces\n" to cstr)
+
+fn test_quote_varieties_and_floats():
+    let single_q as String = f'Single: {10 to i32}'
+    assert_str_eq(single_q, "Single: 10" to cstr, "Single-quoted f-string" to cstr)
+
+    let triple_d as String = f"""Triple: {20 to i32}"""
+    assert_str_eq(triple_d, "Triple: 20" to cstr, "Triple double-quoted f-string" to cstr)
+
+    let triple_s as String = f'''TripleSingle: {30 to i32}'''
+    assert_str_eq(triple_s, "TripleSingle: 30" to cstr, "Triple single-quoted f-string" to cstr)
+
+    let f_val as f64 = 3.14 to f64
+    let s_float as String = f"Float: {f_val}"
+    assert_str_eq(s_float, "Float: 3.140000" to cstr, "Float interpolation" to cstr)
+
+    let a as i32 = 1 to i32
+    let b as i32 = 2 to i32
+    let c as i32 = 3 to i32
+    let multi as String = f"{a} + {b} = {c}"
+    assert_str_eq(multi, "1 + 2 = 3" to cstr, "Multi-part interpolation" to cstr)
+    let _ as i32 = printf("  PASS: Quote varieties, floats, and multi-part interpolations\n" to cstr)
+
+fn main() as i32:
+    let _ as i32 = printf("=== Running String Interpolation (F-Strings) Test Suite ===\n" to cstr)
+    test_ast_lowering_and_sema()
+    test_basic_fstring()
+    test_number_and_bool_interpolation()
+    test_expression_interpolation()
+    test_backtick_and_escaped_braces()
+    test_quote_varieties_and_floats()
+    let _ as i32 = printf("All String Interpolation tests PASSED!\n" to cstr)
+    return 0
