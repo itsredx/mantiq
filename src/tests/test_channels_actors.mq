@@ -1,0 +1,148 @@
+import string
+from string import String
+import error
+from error import DiagnosticEngine
+import symbols
+from symbols import Node, NodeType, LanguageMode, node_kind
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import types
+from types import Type, TypeKind
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Assertions ─────────────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+// ── AST Lowering, Sema & Typecheck Tests ────────────────────────────────────
+fn test_channel_ast_lowering_and_sema():
+    let src as cstr = "fn producer(ch as Channel[i32]):\n    ch.send(42 to i32)\n    ch.close()\n\nfn main():\n    let ch as Channel[i32] = channel[i32](16 to i64)\n    let sz = ch.len()\n    let cap = ch.capacity()\n    let closed = ch.is_closed()\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_channel_ast.mq" to cstr)
+    let ast_root as ptr[Node] = (deref lr).lower_source()
+    assert_true(ast_root != None to ptr[Node], "AST Root must not be null" to cstr)
+    assert_true(node_kind(ast_root) == NodeType.Program, "Root must be Program" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test_channel_ast.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(ast_root)
+    s.resolve_pass(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Sema must report zero errors" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
+    let _ as i32 = printf("  PASS: Channel & Actor AST lowering, sema, and typecheck\n" to cstr)
+
+// ── Synchronous Channel Methods Tests ──────────────────────────────────────
+fn test_channel_basic_send_recv():
+    let ch as Channel[i32] = channel[i32](4 to i64)
+    assert_true(ch.capacity() == 4 to i64, "ch.capacity() must be 4" to cstr)
+    assert_true(ch.len() == 0 to i64, "Initial ch.len() must be 0" to cstr)
+    assert_true(not ch.is_closed(), "Channel must initially be open" to cstr)
+
+    ch.send(10 to i32)
+    ch.send(20 to i32)
+    ch.send(30 to i32)
+    assert_true(ch.len() == 3 to i64, "ch.len() after 3 sends must be 3" to cstr)
+
+    let v1 as i32 = ch.recv()
+    let v2 as i32 = ch.recv()
+    let v3 as i32 = ch.recv()
+
+    assert_true(v1 == 10 to i32, "First recv must be 10" to cstr)
+    assert_true(v2 == 20 to i32, "Second recv must be 20" to cstr)
+    assert_true(v3 == 30 to i32, "Third recv must be 30" to cstr)
+    assert_true(ch.len() == 0 to i64, "ch.len() after 3 recvs must be 0" to cstr)
+    let _ as i32 = printf("  PASS: Basic Channel send and recv\n" to cstr)
+
+fn test_channel_try_send_try_recv():
+    let ch as Channel[i32] = channel[i32](2 to i64)
+
+    let ok1 as bool = ch.try_send(100 to i32)
+    let ok2 as bool = ch.try_send(200 to i32)
+    let ok3 as bool = ch.try_send(300 to i32) // buffer is full (cap 2)
+
+    assert_true(ok1, "First try_send must succeed" to cstr)
+    assert_true(ok2, "Second try_send must succeed" to cstr)
+    assert_true(not ok3, "Third try_send on full channel must fail" to cstr)
+
+    let r1 as i32 = ch.recv()
+    assert_true(r1 == 100 to i32, "recv must return 100" to cstr)
+
+    let ok4 as bool = ch.try_send(400 to i32)
+    assert_true(ok4, "try_send after recv must succeed" to cstr)
+
+    let r2 as i32 = ch.recv()
+    let r3 as i32 = ch.recv()
+    assert_true(r2 == 200 to i32, "recv must return 200" to cstr)
+    assert_true(r3 == 400 to i32, "recv must return 400" to cstr)
+    let _ as i32 = printf("  PASS: Channel try_send and try_recv\n" to cstr)
+
+fn test_channel_close():
+    let ch as Channel[i32] = channel[i32](4 to i64)
+    ch.send(777 to i32)
+    assert_true(not ch.is_closed(), "Channel must be open before close" to cstr)
+
+    ch.close()
+    assert_true(ch.is_closed(), "Channel must be closed after close()" to cstr)
+
+    // Items already in buffer can still be received after close
+    let v as i32 = ch.recv()
+    assert_true(v == 777 to i32, "Buffered item must be receivable after close" to cstr)
+
+    // Sending to a closed channel fails
+    let sent as bool = ch.try_send(888 to i32)
+    assert_true(not sent, "try_send on closed channel must return false" to cstr)
+    let _ as i32 = printf("  PASS: Channel close and is_closed\n" to cstr)
+
+// ── Actor Concurrency (Producer / Consumer Threads) ────────────────────────
+async fn async_producer(ch as Channel[i32], count as i32) as i32:
+    var i as i32 = 1 to i32
+    while i <= count:
+        ch.send(i * 10 to i32)
+        i = i + 1 to i32
+    ch.close()
+    return count
+
+fn test_actor_channel_producer_consumer():
+    let ch as Channel[i32] = channel[i32](8 to i64)
+    let producer_task = spawn async_producer(ch, 5 to i32)
+
+    var sum as i32 = 0 to i32
+    var received_count as i32 = 0 to i32
+    while received_count < 5 to i32:
+        let item as i32 = ch.recv()
+        sum = sum + item
+        received_count = received_count + 1 to i32
+
+    let prod_res as i32 = await producer_task
+    assert_true(prod_res == 5 to i32, "Producer must finish and return 5" to cstr)
+    assert_true(received_count == 5 to i32, "Received count must be 5" to cstr)
+    // 10 + 20 + 30 + 40 + 50 = 150
+    assert_true(sum == 150 to i32, "Sum of messages must be 150" to cstr)
+    assert_true(ch.is_closed(), "Channel must be closed by producer" to cstr)
+    let _ as i32 = printf("  PASS: Actor & Channel producer-consumer concurrent message passing\n" to cstr)
+
+// ── Main Entry ─────────────────────────────────────────────────────────────
+fn main():
+    let _1 as i32 = printf("[TEST SUITE] Channels & Actor Concurrency (Channel[T], send, recv, try_send, try_recv, close)\n" to cstr)
+    test_channel_ast_lowering_and_sema()
+    test_channel_basic_send_recv()
+    test_channel_try_send_try_recv()
+    test_channel_close()
+    test_actor_channel_producer_consumer()
+    let _2 as i32 = printf("[ALL TESTS PASSED] 5/5 Channel & Actor Concurrency test suites succeeded!\n" to cstr)

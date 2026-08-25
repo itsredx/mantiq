@@ -134,7 +134,7 @@ struct DeadCodeEliminator:
             self.mark_node(node_left(node))
             self.mark_node(node_right(node))
 
-        elif k == NodeType.UnaryExpr or k == NodeType.CastExpr or k == NodeType.MemberExpr:
+        elif k == NodeType.UnaryExpr or k == NodeType.CastExpr or k == NodeType.MemberExpr or k == NodeType.SpreadExpr or k == NodeType.AwaitExpr or k == NodeType.SpawnStmt:
             self.mark_node(node_left(node))
 
         elif k == NodeType.Identifier:

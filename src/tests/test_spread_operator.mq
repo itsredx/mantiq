@@ -1,0 +1,109 @@
+import string
+from string import String
+import error
+from error import DiagnosticEngine
+import symbols
+from symbols import Node, NodeType, LanguageMode, node_kind
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import types
+from types import Type, TypeKind
+import sema
+from sema import Sema
+import typecheck
+from typecheck import TypeChecker
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Assertions ─────────────────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
+        exit(1 to i32)
+
+fn test_ast_lowering_and_sema():
+    let src as cstr = "let extra = [3, 4]\nlet combined = [1, 2, ...extra, 5]\nlet base = {\"host\": \"localhost\", \"port\": 8080}\nlet config = { ...base, \"ssl\": 1 }\n" to cstr
+    let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_spread.mq" to cstr)
+    let ast_root as ptr[Node] = (deref lr).lower_source()
+    assert_true(ast_root != None to ptr[Node], "AST Root must not be null" to cstr)
+    assert_true(node_kind(ast_root) == NodeType.Program, "Root must be Program" to cstr)
+
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make("test_spread.mq"), String.make(src))
+
+    let s as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    s.init_sema(engine)
+    (deref s).mode = LanguageMode.Mantiq
+    s.declare_pass(ast_root)
+    s.resolve_pass(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Sema must report zero errors" to cstr)
+
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    tc.init_tc(s)
+    tc.typecheck_node(ast_root)
+    assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
+    let _ as i32 = printf("  PASS: Spread AST lowering, sema, and typecheck\n" to cstr)
+
+fn test_basic_list_spread():
+    let extra as List[i32] = [30 to i32, 40 to i32]
+    let combined as List[i32] = [10 to i32, 20 to i32, ...extra, 50 to i32, 60 to i32]
+    assert_true(combined.length() == 6 to i64, "Combined length must be 6" to cstr)
+    assert_true(combined[0 to i64] == 10 to i32, "combined[0] == 10" to cstr)
+    assert_true(combined[1 to i64] == 20 to i32, "combined[1] == 20" to cstr)
+    assert_true(combined[2 to i64] == 30 to i32, "combined[2] == 30" to cstr)
+    assert_true(combined[3 to i64] == 40 to i32, "combined[3] == 40" to cstr)
+    assert_true(combined[4 to i64] == 50 to i32, "combined[4] == 50" to cstr)
+    assert_true(combined[5 to i64] == 60 to i32, "combined[5] == 60" to cstr)
+    let _ as i32 = printf("  PASS: Basic List spread unpacking\n" to cstr)
+
+fn test_multiple_list_spreads():
+    let a as List[i32] = [1 to i32, 2 to i32]
+    let b as List[i32] = [3 to i32, 4 to i32]
+    let c as List[i32] = [5 to i32, 6 to i32]
+    let all as List[i32] = [...a, ...b, ...c]
+    assert_true(all.length() == 6 to i64, "All length must be 6" to cstr)
+    assert_true(all[0 to i64] == 1 to i32, "all[0] == 1" to cstr)
+    assert_true(all[2 to i64] == 3 to i32, "all[2] == 3" to cstr)
+    assert_true(all[5 to i64] == 6 to i32, "all[5] == 6" to cstr)
+    let _ as i32 = printf("  PASS: Multiple List spreads concatenation\n" to cstr)
+
+fn test_dict_spread_unpacking():
+    let base as Dict[String, i32] = { String.make("host" to cstr): 10 to i32, String.make("port" to cstr): 8080 to i32 }
+    let extended as Dict[String, i32] = { ...base, String.make("ssl" to cstr): 1 to i32 }
+    assert_true(extended[String.make("host" to cstr)] == 10 to i32, "host must be 10" to cstr)
+    assert_true(extended[String.make("port" to cstr)] == 8080 to i32, "port must be 8080" to cstr)
+    assert_true(extended[String.make("ssl" to cstr)] == 1 to i32, "ssl must be 1" to cstr)
+    let _ as i32 = printf("  PASS: Dict spread unpacking\n" to cstr)
+
+fn test_dict_spread_precedence():
+    let defaults as Dict[String, i32] = { String.make("timeout" to cstr): 10 to i32, String.make("retries" to cstr): 3 to i32 }
+    let overridden as Dict[String, i32] = { ...defaults, String.make("timeout" to cstr): 30 to i32 }
+    assert_true(overridden[String.make("timeout" to cstr)] == 30 to i32, "overridden timeout must be 30" to cstr)
+    assert_true(overridden[String.make("retries" to cstr)] == 3 to i32, "overridden retries must be 3" to cstr)
+    let _ as i32 = printf("  PASS: Dict spread override precedence\n" to cstr)
+
+fn test_empty_spreads():
+    let empty_l as List[i32] = []
+    let l_res as List[i32] = [100 to i32, ...empty_l, 200 to i32]
+    assert_true(l_res.length() == 2 to i64, "l_res length must be 2" to cstr)
+    assert_true(l_res[0 to i64] == 100 to i32, "l_res[0] == 100" to cstr)
+    assert_true(l_res[1 to i64] == 200 to i32, "l_res[1] == 200" to cstr)
+
+    let empty_d as Dict[String, i32] = {}
+    let d_res as Dict[String, i32] = { ...empty_d, String.make("key" to cstr): 42 to i32 }
+    assert_true(d_res[String.make("key" to cstr)] == 42 to i32, "key must be 42" to cstr)
+    let _ as i32 = printf("  PASS: Empty collection spreads\n" to cstr)
+
+fn main() as i32:
+    let _ as i32 = printf("=== Running Spread Operator (...expr) Test Suite ===\n" to cstr)
+    test_ast_lowering_and_sema()
+    test_basic_list_spread()
+    test_multiple_list_spreads()
+    test_dict_spread_unpacking()
+    test_dict_spread_precedence()
+    test_empty_spreads()
+    let _ as i32 = printf("All Spread Operator tests PASSED!\n" to cstr)
+    return 0

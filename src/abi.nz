@@ -21,7 +21,7 @@ fn get_arg_abi(t as ptr[Type], target as Target) as ABISignature:
     if t == None to ptr[Type]:
         return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
     let k as TypeKind = (deref t).kind
-    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task:
+    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task or k == TypeKind.Channel:
         return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
     
     let sz as usize = get_size(t, target)
@@ -36,7 +36,7 @@ fn get_ret_abi(t as ptr[Type], target as Target) as ABISignature:
     if t == None to ptr[Type]:
         return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
     let k as TypeKind = (deref t).kind
-    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task:
+    if k == TypeKind.Void or k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Char or k == TypeKind.Boolean or k == TypeKind.I16 or k == TypeKind.U16 or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128 or k == TypeKind.Enum or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.QBit or k == TypeKind.Class or k == TypeKind.Interface or k == TypeKind.Slice or k == TypeKind.Task or k == TypeKind.Channel:
         return ABISignature(mode = PassMode.Direct, llvm_type = String.make("" to cstr), is_struct = False)
     
     let sz as usize = get_size(t, target)

@@ -74,6 +74,7 @@ enum NodeType:
     ColorLiteral
     ListComprehension
     InterpolatedString
+    SpawnStmt
 
 enum ImportKind:
     Normal
@@ -236,6 +237,9 @@ struct BooleanLiteralData:
 struct AwaitExprData:
     public var left as ptr[Node]
 
+struct SpawnStmtData:
+    public var left as ptr[Node]
+
 struct ClosureExprData:
     public var params as List[ptr[Node]]
     public var body as ptr[Node]
@@ -381,6 +385,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[ListComprehensionData](1 to usize) to ptr[u8]
     elif nk == NodeType.InterpolatedString:
         (deref n).data = make[InterpolatedStringData](1 to usize) to ptr[u8]
+    elif nk == NodeType.SpawnStmt:
+        (deref n).data = make[SpawnStmtData](1 to usize) to ptr[u8]
     else:
         (deref n).data = None to ptr[u8]
     return n
@@ -633,6 +639,9 @@ fn node_left(n as ptr[Node]) as ptr[Node]:
     elif k == NodeType.AwaitExpr:
         let d as ptr[AwaitExprData] = (deref n).data to ptr[AwaitExprData]
         r = (deref d).left
+    elif k == NodeType.SpawnStmt:
+        let d as ptr[SpawnStmtData] = (deref n).data to ptr[SpawnStmtData]
+        r = (deref d).left
     elif k == NodeType.ForStmt:
         let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]
         r = (deref d).left
@@ -683,6 +692,9 @@ fn set_node_left(n as ptr[Node], left as ptr[Node]):
         (deref d).left = left
     elif k == NodeType.AwaitExpr:
         let d as ptr[AwaitExprData] = (deref n).data to ptr[AwaitExprData]
+        (deref d).left = left
+    elif k == NodeType.SpawnStmt:
+        let d as ptr[SpawnStmtData] = (deref n).data to ptr[SpawnStmtData]
         (deref d).left = left
     elif k == NodeType.ForStmt:
         let d as ptr[ForStmtData] = (deref n).data to ptr[ForStmtData]

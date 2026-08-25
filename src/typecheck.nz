@@ -7,7 +7,7 @@ from std.mem import make
 import symbols
 from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_imported_symbols
 import types
-from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type, make_color_type, make_list_type
+from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type, make_color_type, make_list_type, make_channel_type
 import sema
 from sema import Sema, make_scope, make_symbol
 import error
@@ -198,6 +198,32 @@ struct TypeChecker:
             let t as ptr[Type] = make_type(TypeKind.Result)
             (deref t).payload = make_type(TypeKind.Any)
             return t
+        elif strcmp(name, "Channel" to cstr) == 0 or strcmp(name, "channel" to cstr) == 0:
+            let opt_gen as ptr[u8] = (ref (deref annot).generics) to ptr[u8]
+            if option_has_value(opt_gen):
+                let val_p as ptr[u8] = option_value(opt_gen)
+                let gen_list as ptr[List[TypeAnnotation]] = val_p to ptr[List[TypeAnnotation]]
+                if (deref gen_list).length() > 0 to i64:
+                    var elem_annot as TypeAnnotation = (deref gen_list)[0]
+                    let elem_type as ptr[Type] = self.resolve_type_annotation(ref elem_annot)
+                    let t as ptr[Type] = make_channel_type(elem_type)
+                    return t
+            let t as ptr[Type] = make_channel_type(make_type(TypeKind.Any))
+            return t
+        elif strcmp(name, "Task" to cstr) == 0 or strcmp(name, "task" to cstr) == 0:
+            let opt_gen as ptr[u8] = (ref (deref annot).generics) to ptr[u8]
+            if option_has_value(opt_gen):
+                let val_p as ptr[u8] = option_value(opt_gen)
+                let gen_list as ptr[List[TypeAnnotation]] = val_p to ptr[List[TypeAnnotation]]
+                if (deref gen_list).length() > 0 to i64:
+                    var elem_annot as TypeAnnotation = (deref gen_list)[0]
+                    let elem_type as ptr[Type] = self.resolve_type_annotation(ref elem_annot)
+                    let t as ptr[Type] = make_type(TypeKind.Task)
+                    (deref t).payload = elem_type
+                    return t
+            let t as ptr[Type] = make_type(TypeKind.Task)
+            (deref t).payload = make_type(TypeKind.Any)
+            return t
 
         if strncmp(name, "Dict[" to cstr, 5 to usize) == 0 and name_len > 6 to usize:
             extern fn strchr(s as cstr, c as i32) as cstr
@@ -375,6 +401,41 @@ struct TypeChecker:
             free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Result)
+            (deref t).payload = elem_type
+            return t
+
+        if (strncmp(name, "Channel[" to cstr, 8 to usize) == 0 and name_len > 9 to usize) or (strncmp(name, "channel[" to cstr, 8 to usize) == 0 and name_len > 9 to usize):
+            let inner_len as usize = name_len - 9 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m_chan as ptr = memcpy(inner_buf to ptr, (name_data to usize + 8 to usize) to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            let t as ptr[Type] = make_channel_type(elem_type)
+            return t
+
+        if (strncmp(name, "Task[" to cstr, 5 to usize) == 0 and name_len > 6 to usize) or (strncmp(name, "task[" to cstr, 5 to usize) == 0 and name_len > 6 to usize):
+            let inner_len as usize = name_len - 6 to usize
+            let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
+            let _m_tsk as ptr = memcpy(inner_buf to ptr, (name_data to usize + 5 to usize) to ptr, inner_len)
+            inner_buf[inner_len] = 0 to u8
+            let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).lifetime = Empty
+            (deref inner_annot).generics = Empty
+            (deref inner_annot).params = Empty
+            (deref inner_annot).return_type = None to ptr[TypeAnnotation]
+            let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(inner_buf to ptr)
+            free(inner_annot to ptr)
+            let t as ptr[Type] = make_type(TypeKind.Task)
             (deref t).payload = elem_type
             return t
 
@@ -1077,7 +1138,7 @@ struct TypeChecker:
                 let gc_name as String = node_name(callee)
                 if gc_name.data != None to ptr[u8]:
                     let gc_cstr as cstr = gc_name.data to cstr
-                    if strcmp(gc_cstr, "Dict" to cstr) == 0 or strcmp(gc_cstr, "List" to cstr) == 0 or strcmp(gc_cstr, "Set" to cstr) == 0:
+                    if strcmp(gc_cstr, "Dict" to cstr) == 0 or strcmp(gc_cstr, "List" to cstr) == 0 or strcmp(gc_cstr, "Set" to cstr) == 0 or strcmp(gc_cstr, "Channel" to cstr) == 0 or strcmp(gc_cstr, "channel" to cstr) == 0:
                         let gc_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
                         if gc_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                             let gc_annots as List[Option[ptr[TypeAnnotation]]] = deref gc_annots_ptr
@@ -1150,6 +1211,27 @@ struct TypeChecker:
                                         ret_type = make_type(TypeKind.Any)
                                 else:
                                     coll_handled = False
+                            elif coll_recv_k == TypeKind.Channel:
+                                if strcmp(coll_mname.data to cstr, "send") == 0 or strcmp(coll_mname.data to cstr, "close") == 0:
+                                    ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "recv") == 0:
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        ret_type = (deref coll_recv_t).payload
+                                    else:
+                                        ret_type = make_type(TypeKind.Any)
+                                elif strcmp(coll_mname.data to cstr, "try_send") == 0 or strcmp(coll_mname.data to cstr, "is_closed") == 0:
+                                    ret_type = make_type(TypeKind.Boolean)
+                                elif strcmp(coll_mname.data to cstr, "try_recv") == 0:
+                                    let opt_t as ptr[Type] = make_type(TypeKind.Option)
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        (deref opt_t).payload = (deref coll_recv_t).payload
+                                    else:
+                                        (deref opt_t).payload = make_type(TypeKind.Any)
+                                    ret_type = opt_t
+                                elif strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0 or strcmp(coll_mname.data to cstr, "capacity") == 0 or strcmp(coll_mname.data to cstr, "cap") == 0:
+                                    ret_type = make_type(TypeKind.I64)
+                                else:
+                                    coll_handled = False
                             elif coll_recv_k == TypeKind.String:
                                 if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
                                     ret_type = make_type(TypeKind.I64)
@@ -1193,6 +1275,11 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.QReg)
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "make" to cstr) == 0:
                 ret_type = make_ptr_type(make_type(TypeKind.Any))
+            elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "Channel" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "channel" to cstr) == 0):
+                if generic_ctor_t != None to ptr[Type]:
+                    ret_type = generic_ctor_t
+                else:
+                    ret_type = make_channel_type(make_type(TypeKind.Any))
             elif generic_ctor_t != None to ptr[Type]:
                 ret_type = generic_ctor_t
             elif callee_t != None to ptr[Type]:
@@ -1655,7 +1742,11 @@ struct TypeChecker:
             var elem_t as ptr[Type] = None to ptr[Type]
             var item_idx as i64 = 0 to i64
             while item_idx < item_count:
-                let cur_t as ptr[Type] = self.typecheck_node(items[item_idx])
+                let it_node as ptr[Node] = items[item_idx]
+                var cur_t as ptr[Type] = self.typecheck_node(it_node)
+                if it_node != None to ptr[Node] and (deref it_node).kind == NodeType.SpreadExpr:
+                    if cur_t != None to ptr[Type] and (deref cur_t).payload != None to ptr[Type]:
+                        cur_t = (deref cur_t).payload
                 if elem_t == None to ptr[Type]:
                     elem_t = cur_t
                 item_idx = item_idx + 1 to i64
@@ -1729,8 +1820,28 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.Any)
 
         elif nt == NodeType.SpreadExpr:
-            let _dummy_spread as ptr[Type] = self.typecheck_node(node_left(node))
-            ret_type = make_type(TypeKind.Any)
+            let sp_t as ptr[Type] = self.typecheck_node(node_left(node))
+            if sp_t != None to ptr[Type]:
+                ret_type = sp_t
+            else:
+                ret_type = make_type(TypeKind.Any)
+
+        elif nt == NodeType.SpawnStmt:
+            let call_t as ptr[Type] = self.typecheck_node(node_left(node))
+            ret_type = make_type(TypeKind.Task)
+            if call_t != None to ptr[Type]:
+                (deref ret_type).payload = call_t
+            else:
+                (deref ret_type).payload = make_type(TypeKind.Any)
+
+        elif nt == NodeType.AwaitExpr:
+            let task_t as ptr[Type] = self.typecheck_node(node_left(node))
+            if task_t != None to ptr[Type] and (deref task_t).kind == TypeKind.Task and (deref task_t).payload != None to ptr[Type]:
+                ret_type = (deref task_t).payload
+            elif task_t != None to ptr[Type] and (deref task_t).kind != TypeKind.Task:
+                ret_type = task_t
+            else:
+                ret_type = make_type(TypeKind.Any)
 
         elif nt == NodeType.BooleanLiteral:
             ret_type = make_type(TypeKind.Boolean)

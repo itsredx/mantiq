@@ -53,6 +53,9 @@ TEST_FILES=(
     "src/tests/test_color_literals.mq"
     "src/tests/test_list_comprehensions.mq"
     "src/tests/test_string_interpolation.mq"
+    "src/tests/test_spread_operator.mq"
+    "src/tests/test_async_concurrency.mq"
+    "src/tests/test_channels_actors.mq"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

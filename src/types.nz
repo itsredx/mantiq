@@ -44,6 +44,7 @@ enum TypeKind:
     Result
     Option
     Task
+    Channel
     QBit
     QReg
     Closure
@@ -118,6 +119,11 @@ fn make_color_type() as ptr[Type]:
 
 fn make_list_type(element as ptr[Type]) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.List)
+    (deref t).payload = element
+    return t
+
+fn make_channel_type(element as ptr[Type]) as ptr[Type]:
+    let t as ptr[Type] = make_type(TypeKind.Channel)
     (deref t).payload = element
     return t
 
@@ -203,6 +209,10 @@ fn is_copy_type(t as ptr[Type]) as bool:
     if k == TypeKind.QBit:
         return True
     if k == TypeKind.QReg:
+        return True
+    if k == TypeKind.Task:
+        return True
+    if k == TypeKind.Channel:
         return True
     if k == TypeKind.Struct:
         let sn as ptr[u8] = (deref t).name.data

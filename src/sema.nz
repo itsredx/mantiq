@@ -125,6 +125,8 @@ struct Sema:
         (deref gs).symbols[String.make("X")] = make_symbol(String.make("X"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Y")] = make_symbol(String.make("Y"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Z")] = make_symbol(String.make("Z"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("channel")] = make_symbol(String.make("channel"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("Channel")] = make_symbol(String.make("Channel"), SymbolKind.Struct, None to ptr[Node])
 
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
         self.report_error_with_code("E0101" to cstr, msg, (deref self).current_file, span)
@@ -1278,3 +1280,6 @@ struct Sema:
                 if p != None to ptr[Node]:
                     self.resolve_pass(p)
                 pi = pi + 1 to i64
+        elif nt == NodeType.SpreadExpr or nt == NodeType.SpawnStmt or nt == NodeType.AwaitExpr:
+            if node_left(node) != None to ptr[Node]:
+                self.resolve_pass(node_left(node))
