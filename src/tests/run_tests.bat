@@ -2,21 +2,33 @@
 rem ── Mantiq / Nizam Windows Test Runner ───────────────────────────────
 setlocal enabledelayedexpansion
 
-set SCRIPT_DIR=%~dp0
-set ROOT_DIR=%SCRIPT_DIR%..\..
-set NIZAM=%ROOT_DIR%\nizam.exe
-if not exist "%NIZAM%" set NIZAM=%ROOT_DIR%\stage3\mantiq.exe
-if not exist "%NIZAM%" set NIZAM=%ROOT_DIR%\mantiq\nizam.exe
+set "SCRIPT_DIR=%~dp0"
+pushd "%SCRIPT_DIR%..\.."
+set "MANTIQ_DIR=%CD%"
+popd
+pushd "%MANTIQ_DIR%\.."
+set "REPO_ROOT=%CD%"
+popd
+
+set "NIZAM=%MANTIQ_DIR%\nizam.exe"
+if not exist "%NIZAM%" set "NIZAM=%MANTIQ_DIR%\mantiq.exe"
+if not exist "%NIZAM%" set "NIZAM=%REPO_ROOT%\stage3\mantiq.exe"
+if not exist "%NIZAM%" set "NIZAM=%REPO_ROOT%\stage3\nizam.exe"
+if not exist "%NIZAM%" (
+    where nizam.exe >nul 2>&1
+    if not errorlevel 1 set "NIZAM=nizam.exe"
+)
 
 echo ============================================================
 echo      Mantiq / Nizam Windows Test Suite Runner               
 echo ============================================================
-echo Compiler: %NIZAM%
-echo Lib dir:  %ROOT_DIR%
+echo Compiler: "%NIZAM%"
+echo Lib dir:  "%MANTIQ_DIR%"
 echo.
 
 if not exist "%NIZAM%" (
-    echo [ERROR] Nizam compiler not found! Run build.bat first.
+    echo [ERROR] Nizam compiler not found!
+    echo Please run build.bat first or ensure nizam is installed on PATH.
     exit /b 1
 )
 
@@ -66,17 +78,17 @@ src\tests\test_async_concurrency.mq ^
 src\tests\test_channels_actors.mq ^
 src\tests\test_closures_lambdas.mq
 
-cd /d "%ROOT_DIR%"
+cd /d "%MANTIQ_DIR%"
 
 for %%f in (%TEST_FILES%) do (
     set /a TOTAL_SUITES+=1
-    set TEST_PATH=%ROOT_DIR%\%%f
-    set TEST_NAME=%%~nf
-    set BIN_PATH=%TEMP%\!TEST_NAME!.exe
+    set "TEST_PATH=%MANTIQ_DIR%\%%f"
+    set "TEST_NAME=%%~nf"
+    set "BIN_PATH=%TEMP%\!TEST_NAME!.exe"
 
     echo ------------------------------------------------------------
     echo [BUILDING] %%f ...
-    "%NIZAM%" build "!TEST_PATH!" -o "!BIN_PATH!" --lib-dir "%ROOT_DIR%"
+    "%NIZAM%" build "!TEST_PATH!" -o "!BIN_PATH!" --lib-dir "%MANTIQ_DIR%"
     if errorlevel 1 (
         echo [FAILED]   Compilation failed for %%f!
         set /a FAILED_SUITES+=1

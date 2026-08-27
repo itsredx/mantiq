@@ -2,21 +2,28 @@
 $ErrorActionPreference = "Continue"
 
 $ScriptDir = $PSScriptRoot
-$RootDir = (Get-Item (Join-Path $ScriptDir "..\..")).FullName
+$MantiqDir = (Get-Item (Join-Path $ScriptDir "..\..")).FullName
+$RepoRoot = (Get-Item (Join-Path $MantiqDir "..")).FullName
 
-$NizamExe = Join-Path $RootDir "nizam.exe"
-if (!(Test-Path $NizamExe)) { $NizamExe = Join-Path $RootDir "stage3\mantiq.exe" }
-if (!(Test-Path $NizamExe)) { $NizamExe = Join-Path $RootDir "mantiq\nizam.exe" }
+$NizamExe = Join-Path $MantiqDir "nizam.exe"
+if (!(Test-Path $NizamExe)) { $NizamExe = Join-Path $MantiqDir "mantiq.exe" }
+if (!(Test-Path $NizamExe)) { $NizamExe = Join-Path $RepoRoot "stage3\mantiq.exe" }
+if (!(Test-Path $NizamExe)) { $NizamExe = Join-Path $RepoRoot "stage3\nizam.exe" }
+if (!(Test-Path $NizamExe)) {
+    $CommandCheck = Get-Command "nizam.exe" -ErrorAction SilentlyContinue
+    if ($CommandCheck) { $NizamExe = $CommandCheck.Source }
+}
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "     Mantiq / Nizam Windows PowerShell Test Suite Runner    " -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "Compiler: $NizamExe"
-Write-Host "Lib dir:  $RootDir"
+Write-Host "Lib dir:  $MantiqDir"
 Write-Host ""
 
 if (!(Test-Path $NizamExe)) {
-    Write-Host "[ERROR] Nizam compiler not found! Run build.ps1 first." -ForegroundColor Red
+    Write-Host "[ERROR] Nizam compiler not found!" -ForegroundColor Red
+    Write-Host "Please run build.ps1 first or ensure nizam is installed on PATH." -ForegroundColor Red
     exit 1
 }
 
@@ -67,17 +74,17 @@ $TotalSuites = $TestFiles.Count
 $PassedSuites = 0
 $FailedSuites = 0
 
-Push-Location $RootDir
+Push-Location $MantiqDir
 
 foreach ($relFile in $TestFiles) {
-    $testPath = Join-Path $RootDir $relFile
+    $testPath = Join-Path $MantiqDir $relFile
     $testName = [System.IO.Path]::GetFileNameWithoutExtension($relFile)
     $binPath = Join-Path ([System.IO.Path]::GetTempPath()) "$testName.exe"
 
     Write-Host "------------------------------------------------------------"
     Write-Host "[BUILDING] $relFile ..." -ForegroundColor Yellow
 
-    & $NizamExe build $testPath -o $binPath --lib-dir $RootDir
+    & $NizamExe build $testPath -o $binPath --lib-dir $MantiqDir
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[FAILED]   Compilation failed for $relFile!" -ForegroundColor Red
         $FailedSuites++
