@@ -244,6 +244,7 @@ struct ClosureExprData:
     public var params as List[ptr[Node]]
     public var body as ptr[Node]
     public var type_annots as ptr[List[Option[ptr[TypeAnnotation]]]]
+    public var captured_vars as List[String]
 
 struct StructDeclData:
     public var name as String
@@ -371,6 +372,8 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
         (deref n).data = make[AwaitExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.ClosureExpr:
         (deref n).data = make[ClosureExprData](1 to usize) to ptr[u8]
+        let cd as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref cd).captured_vars = List[String]()
     elif nk == NodeType.StructDecl:
         (deref n).data = make[StructDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.EnumDecl:
@@ -1620,6 +1623,43 @@ fn set_node_access_modifier(n as ptr[Node], access_modifier as String):
         let d as ptr[StructDeclData] = (deref n).data to ptr[StructDeclData]
         (deref d).access_modifier = access_modifier
 
+
+// captured_vars accessor (ClosureExpr):
+fn node_captured_vars(n as ptr[Node]) as List[String]:
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return List[String]()
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        return (deref d).captured_vars
+    return List[String]()
+
+fn set_node_captured_vars(n as ptr[Node], captured_vars as List[String]):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        (deref d).captured_vars = captured_vars
+
+fn add_captured_var(n as ptr[Node], name as String):
+    extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    let k as NodeType = (deref n).kind
+    if k == NodeType.ClosureExpr:
+        let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
+        // Check for duplicates
+        let existing as List[String] = (deref d).captured_vars
+        let count as i64 = existing.length()
+        var i as i64 = 0 to i64
+        while i < count:
+            let e as String = existing[i]
+            if e.len == name.len and e.data != None to ptr[u8] and name.data != None to ptr[u8]:
+                if strncmp(e.data to cstr, name.data to cstr, name.len) == 0:
+                    return
+            i = i + 1 to i64
+        (deref d).captured_vars.append(name)
 
 // ── SymbolKind ─────────────────────────────────────────────────────────
 enum SymbolKind:

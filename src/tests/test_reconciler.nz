@@ -1,0 +1,383 @@
+// =============================================================================
+// Nizam Reconciler — PyThra-style Virtual DOM Diffing
+// =============================================================================
+
+import std.collections
+from std.string import String
+from std.collections import List, Dict
+from std.mem import make
+
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+fn str_eq(a as String, b as String) as bool:
+    return strcmp(a.data to cstr, b.data to cstr) == 0
+
+fn str_ne(a as String, b as String) as bool:
+    return strcmp(a.data to cstr, b.data to cstr) != 0
+
+struct RenderedNode:
+    public var html_id as String
+    public var widget_type as String
+    public var key as String
+    public var props as Dict[String, String]
+    public var children_keys as List[String]
+    public var parent_html_id as String
+    public var parent_key as String
+
+struct Patch:
+    public var action as String
+    public var html_id as String
+    public var data as Dict[String, String]
+
+struct DiffResult:
+    public var patches as List[Patch]
+    public var new_rendered_map as Dict[String, RenderedNode]
+
+struct Reconciler:
+    public var id_counter as i64
+
+    public fn init(self as ptr[Reconciler]) as void:
+        (deref self).id_counter = 0
+
+    public fn fresh_html_id(self as ptr[Reconciler]) as String:
+        let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        extern fn sprintf(buf as ptr[u8], fmt as cstr, ...) as i32
+        let _ as i32 = sprintf(buf, "el_%ld" to cstr, (deref self).id_counter)
+        (deref self).id_counter = (deref self).id_counter + 1
+        return String.make(buf to cstr)
+
+    public fn diff_props(self as ptr[Reconciler], old_props as Dict[String, String], new_props as Dict[String, String]) as Dict[String, String]:
+        var changes as Dict[String, String] = Dict[String, String]()
+        let old_keys as List[String] = old_props.keys()
+        var i as i64 = 0
+        let old_count as i64 = old_keys.length()
+        while i < old_count:
+            let k as String = old_keys[i]
+            if new_props.has(k):
+                let old_val as String = old_props[k]
+                let new_val as String = new_props[k]
+                if str_ne(old_val, new_val):
+                    changes[k] = new_val
+            else:
+                changes[k] = String.make("" to cstr)
+            i = i + 1
+        let new_keys as List[String] = new_props.keys()
+        var j as i64 = 0
+        let new_count as i64 = new_keys.length()
+        while j < new_count:
+            let k2 as String = new_keys[j]
+            if not old_props.has(k2):
+                changes[k2] = new_props[k2]
+            j = j + 1
+        return changes
+
+    public fn has_changes(self as ptr[Reconciler], changes as Dict[String, String]) as bool:
+        return changes.length() > 0 to i64
+
+    public fn generate_html_stub(self as ptr[Reconciler], widget as ptr[RenderedNode]) as String:
+        if widget == None to ptr[RenderedNode]:
+            return String.make("" to cstr)
+        let wid as String = (deref widget).html_id
+        let wtype as String = (deref widget).widget_type
+        let buf as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+        extern fn sprintf(buf as ptr[u8], fmt as cstr, ...) as i32
+        let _ as i32 = sprintf(buf, "<div id=\"%s\" data-type=\"%s\"></div>" to cstr, wid.data to cstr, wtype.data to cstr)
+        return String.make(buf to cstr)
+
+    public fn find_next_stable_html_id(self as ptr[Reconciler], start_idx as i64, new_children_keys as List[String], old_key_to_index as Dict[String, i64], rendered_map as Dict[String, RenderedNode]) as String:
+        var si as i64 = start_idx
+        let sc as i64 = new_children_keys.length()
+        while si < sc:
+            let sk as String = new_children_keys[si]
+            if old_key_to_index.has(sk) and rendered_map.has(sk):
+                let sn as RenderedNode = rendered_map[sk]
+                return sn.html_id
+            si = si + 1
+        return String.make("" to cstr)
+
+    public fn insert_node_recursive(self as ptr[Reconciler], widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+        if widget == None to ptr[RenderedNode]:
+            return
+        let new_html as String = self.generate_html_stub(widget)
+        let new_id as String = (deref widget).html_id
+        let wtype as String = (deref widget).widget_type
+        var insert_data as Dict[String, String] = Dict[String, String]()
+        insert_data[String.make("new_html" to cstr)] = new_html
+        insert_data[String.make("parent_html_id" to cstr)] = parent_html_id
+        (deref result).patches.append(Patch(action = String.make("INSERT" to cstr), html_id = (deref widget).html_id, data = insert_data))
+        (deref result).new_rendered_map[new_id] = RenderedNode(html_id = (deref widget).html_id, widget_type = wtype, key = (deref widget).key, props = (deref widget).props, children_keys = (deref widget).children_keys, parent_html_id = parent_html_id, parent_key = parent_key)
+        let is_sw as bool = str_eq(wtype, String.make("StatefulWidget" to cstr))
+        let is_sl as bool = str_eq(wtype, String.make("StatelessWidget" to cstr))
+        let is_container as bool = is_sw or is_sl
+        var child_parent as String = (deref widget).html_id
+        if is_container:
+            child_parent = parent_key
+        self.diff_children_recursive(List[String](), (deref widget).children_keys, child_parent, new_id, result, previous_map)
+
+    public fn diff_children_recursive(self as ptr[Reconciler], old_children_keys as List[String], new_children_keys as List[String], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+        if old_children_keys.length() == 0 and new_children_keys.length() == 0:
+            return
+        var old_key_to_index as Dict[String, i64] = Dict[String, i64]()
+        var m as i64 = 0
+        let old_cnt as i64 = old_children_keys.length()
+        while m < old_cnt:
+            old_key_to_index[old_children_keys[m]] = m
+            m = m + 1
+        var new_key_to_index as Dict[String, i64] = Dict[String, i64]()
+        var n as i64 = 0
+        let new_cnt as i64 = new_children_keys.length()
+        while n < new_cnt:
+            new_key_to_index[new_children_keys[n]] = n
+            n = n + 1
+        var oi as i64 = 0
+        while oi < old_cnt:
+            let ok as String = old_children_keys[oi]
+            if not new_key_to_index.has(ok):
+                if previous_map.has(ok):
+                    let old_data as RenderedNode = previous_map[ok]
+                    (deref result).patches.append(Patch(action = String.make("REMOVE" to cstr), html_id = old_data.html_id, data = Dict[String, String]()))
+            oi = oi + 1
+        var last_placed_old_idx as i64 = -1
+        var ni as i64 = 0
+        while ni < new_cnt:
+            let nk as String = new_children_keys[ni]
+            if old_key_to_index.has(nk):
+                if previous_map.has(nk):
+                    let old_data2 as RenderedNode = previous_map[nk]
+                    let stub as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
+                    (deref stub).html_id = old_data2.html_id
+                    (deref stub).widget_type = old_data2.widget_type
+                    (deref stub).key = nk
+                    (deref stub).props = old_data2.props
+                    (deref stub).children_keys = old_data2.children_keys
+                    (deref stub).parent_html_id = parent_html_id
+                    (deref stub).parent_key = parent_key
+                    self.diff_node_recursive(nk, stub, parent_html_id, parent_key, result, previous_map)
+                let old_idx as i64 = old_key_to_index[nk]
+                if old_idx < last_placed_old_idx:
+                    if (deref result).new_rendered_map.has(nk):
+                        let moved_node as RenderedNode = (deref result).new_rendered_map[nk]
+                        let before_id as String = self.find_next_stable_html_id(ni + 1, new_children_keys, old_key_to_index, (deref result).new_rendered_map)
+                        var move_data as Dict[String, String] = Dict[String, String]()
+                        move_data[String.make("parent_html_id" to cstr)] = parent_html_id
+                        move_data[String.make("before_id" to cstr)] = before_id
+                        (deref result).patches.append(Patch(action = String.make("MOVE" to cstr), html_id = moved_node.html_id, data = move_data))
+                if old_idx > last_placed_old_idx:
+                    last_placed_old_idx = old_idx
+            else:
+                let before_id2 as String = self.find_next_stable_html_id(ni + 1, new_children_keys, old_key_to_index, (deref result).new_rendered_map)
+                let new_stub as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
+                (deref new_stub).html_id = self.fresh_html_id()
+                (deref new_stub).widget_type = String.make("Unknown" to cstr)
+                (deref new_stub).key = nk
+                (deref new_stub).props = Dict[String, String]()
+                (deref new_stub).children_keys = List[String]()
+                (deref new_stub).parent_html_id = parent_html_id
+                (deref new_stub).parent_key = parent_key
+                self.insert_node_recursive(new_stub, parent_html_id, parent_key, result, previous_map)
+            ni = ni + 1
+
+    public fn diff_node_recursive(self as ptr[Reconciler], old_node_key as String, new_widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+        if new_widget == None to ptr[RenderedNode]:
+            return
+        let new_key as String = (deref new_widget).html_id
+        if not previous_map.has(old_node_key):
+            self.insert_node_recursive(new_widget, parent_html_id, parent_key, result, previous_map)
+            return
+        let old_data as RenderedNode = previous_map[old_node_key]
+        let new_type as String = (deref new_widget).widget_type
+        let old_type as String = old_data.widget_type
+        let new_key_val as String = (deref new_widget).key
+        let old_key_val as String = old_data.key
+        let types_differ as bool = str_ne(old_type, new_type)
+        let keys_differ as bool = str_ne(new_key_val, old_key_val)
+        if types_differ or keys_differ:
+            let new_html_stub as String = self.generate_html_stub(new_widget)
+            var patch_data as Dict[String, String] = Dict[String, String]()
+            patch_data[String.make("new_html" to cstr)] = new_html_stub
+            (deref result).patches.append(Patch(action = String.make("REPLACE" to cstr), html_id = old_data.html_id, data = patch_data))
+            (deref result).new_rendered_map[(deref new_widget).html_id] = RenderedNode(html_id = old_data.html_id, widget_type = new_type, key = new_key_val, props = (deref new_widget).props, children_keys = (deref new_widget).children_keys, parent_html_id = parent_html_id, parent_key = parent_key)
+            return
+        let html_id as String = old_data.html_id
+        let new_props as Dict[String, String] = (deref new_widget).props
+        let old_props_from_map as Dict[String, String] = old_data.props
+        let prop_changes as Dict[String, String] = self.diff_props(old_props_from_map, new_props)
+        let is_sw2 as bool = str_eq(old_type, String.make("StatefulWidget" to cstr))
+        let is_sl2 as bool = str_eq(old_type, String.make("StatelessWidget" to cstr))
+        let is_container as bool = is_sw2 or is_sl2
+        if not is_container:
+            if self.has_changes(prop_changes):
+                (deref result).patches.append(Patch(action = String.make("UPDATE" to cstr), html_id = html_id, data = Dict[String, String]()))
+        var child_parent as String = html_id
+        if is_container:
+            child_parent = parent_key
+        self.diff_children_recursive(old_data.children_keys, (deref new_widget).children_keys, child_parent, (deref new_widget).html_id, result, previous_map)
+
+fn main() as i32:
+    printf("=== Nizam Reconciler Tests ===\n" to cstr)
+    var reconciler as ptr[Reconciler] = make[Reconciler](1 to usize) to ptr[Reconciler]
+    (deref reconciler).init()
+
+    // Test 1: Props diff — changed value
+    printf("\n--- Test 1: Props Diff (changed value) ---\n" to cstr)
+    var old_p as Dict[String, String] = Dict[String, String]()
+    old_p[String.make("label" to cstr)] = String.make("Hello" to cstr)
+    old_p[String.make("disabled" to cstr)] = String.make("true" to cstr)
+    var new_p as Dict[String, String] = Dict[String, String]()
+    new_p[String.make("label" to cstr)] = String.make("World" to cstr)
+    new_p[String.make("disabled" to cstr)] = String.make("true" to cstr)
+    let changes1 as Dict[String, String] = (deref reconciler).diff_props(old_p, new_p)
+    if changes1.length() == 1 and changes1.has(String.make("label" to cstr)):
+        let val as String = changes1[String.make("label" to cstr)]
+        if str_eq(val, String.make("World" to cstr)):
+            printf("Test 1 (Props Diff): PASSED!\n" to cstr)
+        else:
+            printf("Test 1 (Props Diff): FAILED! wrong value\n" to cstr)
+    else:
+        printf("Test 1 (Props Diff): FAILED! expected 1, got %ld\n" to cstr, changes1.length())
+
+    // Test 2: Props diff — no changes
+    printf("\n--- Test 2: Props Diff (no changes) ---\n" to cstr)
+    let changes2 as Dict[String, String] = (deref reconciler).diff_props(new_p, new_p)
+    if changes2.length() == 0:
+        printf("Test 2 (No Changes): PASSED!\n" to cstr)
+    else:
+        printf("Test 2 (No Changes): FAILED! expected 0, got %ld\n" to cstr, changes2.length())
+
+    // Test 3: Props diff — new key added
+    printf("\n--- Test 3: Props Diff (new key added) ---\n" to cstr)
+    var new_p3 as Dict[String, String] = Dict[String, String]()
+    new_p3[String.make("label" to cstr)] = String.make("World" to cstr)
+    new_p3[String.make("disabled" to cstr)] = String.make("true" to cstr)
+    new_p3[String.make("color" to cstr)] = String.make("red" to cstr)
+    let changes3 as Dict[String, String] = (deref reconciler).diff_props(old_p, new_p3)
+    if changes3.length() == 2:
+        printf("Test 3 (Key Added): PASSED!\n" to cstr)
+    else:
+        printf("Test 3 (Key Added): FAILED! expected 2, got %ld\n" to cstr, changes3.length())
+
+    // Test 4: Props diff — key removed
+    printf("\n--- Test 4: Props Diff (key removed) ---\n" to cstr)
+    var new_p4 as Dict[String, String] = Dict[String, String]()
+    new_p4[String.make("label" to cstr)] = String.make("Hello" to cstr)
+    let changes4 as Dict[String, String] = (deref reconciler).diff_props(old_p, new_p4)
+    if changes4.length() == 1 and changes4.has(String.make("disabled" to cstr)):
+        printf("Test 4 (Key Removed): PASSED!\n" to cstr)
+    else:
+        printf("Test 4 (Key Removed): FAILED! expected 1, got %ld\n" to cstr, changes4.length())
+
+    // Test 5: Node diff — type mismatch triggers REPLACE
+    printf("\n--- Test 5: Node Diff (type mismatch -> REPLACE) ---\n" to cstr)
+    var r1 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
+    (deref r1).patches = List[Patch]()
+    (deref r1).new_rendered_map = Dict[String, RenderedNode]()
+    var prev_map as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
+    prev_map[String.make("k1" to cstr)] = RenderedNode(html_id = String.make("el_0" to cstr), widget_type = String.make("Button" to cstr), key = String.make("k1" to cstr), props = Dict[String, String](), children_keys = List[String](), parent_html_id = String.make("root" to cstr), parent_key = String.make("root_k" to cstr))
+    var new_w as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
+    (deref new_w).html_id = String.make("el_5" to cstr)
+    (deref new_w).widget_type = String.make("Input" to cstr)
+    (deref new_w).key = String.make("k1" to cstr)
+    (deref new_w).props = Dict[String, String]()
+    (deref new_w).children_keys = List[String]()
+    (deref new_w).parent_html_id = String.make("root" to cstr)
+    (deref new_w).parent_key = String.make("root_k" to cstr)
+    (deref reconciler).diff_node_recursive(String.make("k1" to cstr), new_w, String.make("root" to cstr), String.make("root_k" to cstr), r1, prev_map)
+    if (deref r1).patches.length() == 1:
+        let p as Patch = (deref r1).patches[0]
+        if str_eq(p.action, String.make("REPLACE" to cstr)) and str_eq(p.html_id, String.make("el_0" to cstr)):
+            printf("Test 5 (Node Diff REPLACE): PASSED!\n" to cstr)
+        else:
+            printf("Test 5 (Node Diff REPLACE): FAILED! wrong patch\n" to cstr)
+    else:
+        printf("Test 5 (Node Diff REPLACE): FAILED! expected 1, got %ld\n" to cstr, (deref r1).patches.length())
+
+    // Test 6: Node diff — same type triggers UPDATE
+    printf("\n--- Test 6: Node Diff (same type -> UPDATE) ---\n" to cstr)
+    var r2 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
+    (deref r2).patches = List[Patch]()
+    (deref r2).new_rendered_map = Dict[String, RenderedNode]()
+    var prev_map2 as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
+    prev_map2[String.make("k2" to cstr)] = RenderedNode(html_id = String.make("el_10" to cstr), widget_type = String.make("Label" to cstr), key = String.make("k2" to cstr), props = old_p, children_keys = List[String](), parent_html_id = String.make("root" to cstr), parent_key = String.make("root_k" to cstr))
+    var new_w2 as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
+    (deref new_w2).html_id = String.make("el_10" to cstr)
+    (deref new_w2).widget_type = String.make("Label" to cstr)
+    (deref new_w2).key = String.make("k2" to cstr)
+    (deref new_w2).props = new_p
+    (deref new_w2).children_keys = List[String]()
+    (deref new_w2).parent_html_id = String.make("root" to cstr)
+    (deref new_w2).parent_key = String.make("root_k" to cstr)
+    (deref reconciler).diff_node_recursive(String.make("k2" to cstr), new_w2, String.make("root" to cstr), String.make("root_k" to cstr), r2, prev_map2)
+    if (deref r2).patches.length() == 1:
+        let p2 as Patch = (deref r2).patches[0]
+        if str_eq(p2.action, String.make("UPDATE" to cstr)) and str_eq(p2.html_id, String.make("el_10" to cstr)):
+            printf("Test 6 (Node Diff UPDATE): PASSED!\n" to cstr)
+        else:
+            printf("Test 6 (Node Diff UPDATE): FAILED! action=%s\n" to cstr, p2.action.data to cstr)
+    else:
+        printf("Test 6 (Node Diff UPDATE): FAILED! expected 1, got %ld\n" to cstr, (deref r2).patches.length())
+
+    // Test 7: Children diff — removal
+    printf("\n--- Test 7: Children Diff (removal) ---\n" to cstr)
+    var r3 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
+    (deref r3).patches = List[Patch]()
+    (deref r3).new_rendered_map = Dict[String, RenderedNode]()
+    var prev_map3 as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
+    prev_map3[String.make("ck1" to cstr)] = RenderedNode(html_id = String.make("el_20" to cstr), widget_type = String.make("Label" to cstr), key = String.make("ck1" to cstr), props = Dict[String, String](), children_keys = List[String](), parent_html_id = String.make("el_20" to cstr), parent_key = String.make("ck1" to cstr))
+    var old_children as List[String] = [String.make("ck1" to cstr)]
+    var new_children_empty as List[String] = List[String]()
+    (deref reconciler).diff_children_recursive(old_children, new_children_empty, String.make("root" to cstr), String.make("root_k" to cstr), r3, prev_map3)
+    if (deref r3).patches.length() == 1:
+        let p3 as Patch = (deref r3).patches[0]
+        if str_eq(p3.action, String.make("REMOVE" to cstr)) and str_eq(p3.html_id, String.make("el_20" to cstr)):
+            printf("Test 7 (Children Removal): PASSED!\n" to cstr)
+        else:
+            printf("Test 7 (Children Removal): FAILED! wrong patch\n" to cstr)
+    else:
+        printf("Test 7 (Children Removal): FAILED! expected 1, got %ld\n" to cstr, (deref r3).patches.length())
+
+    // Test 8: Children diff — insertion
+    printf("\n--- Test 8: Children Diff (insertion) ---\n" to cstr)
+    var r4 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
+    (deref r4).patches = List[Patch]()
+    (deref r4).new_rendered_map = Dict[String, RenderedNode]()
+    var prev_map4 as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
+    var empty_old as List[String] = List[String]()
+    var new_children_single as List[String] = [String.make("new_ck" to cstr)]
+    (deref reconciler).diff_children_recursive(empty_old, new_children_single, String.make("root" to cstr), String.make("root_k" to cstr), r4, prev_map4)
+    if (deref r4).patches.length() == 1:
+        let p4 as Patch = (deref r4).patches[0]
+        if str_eq(p4.action, String.make("INSERT" to cstr)):
+            printf("Test 8 (Children Insertion): PASSED!\n" to cstr)
+        else:
+            printf("Test 8 (Children Insertion): FAILED! action=%s\n" to cstr, p4.action.data to cstr)
+    else:
+        printf("Test 8 (Children Insertion): FAILED! expected 1, got %ld\n" to cstr, (deref r4).patches.length())
+
+    // Test 9: Full pipeline — parent with new child
+    printf("\n--- Test 9: Full Pipeline ---\n" to cstr)
+    var r5 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
+    (deref r5).patches = List[Patch]()
+    (deref r5).new_rendered_map = Dict[String, RenderedNode]()
+    var prev_map5 as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
+    prev_map5[String.make("parent_k" to cstr)] = RenderedNode(html_id = String.make("el_30" to cstr), widget_type = String.make("Column" to cstr), key = String.make("parent_k" to cstr), props = Dict[String, String](), children_keys = List[String](), parent_html_id = String.make("root" to cstr), parent_key = String.make("root_k" to cstr))
+    var new_parent as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
+    (deref new_parent).html_id = String.make("el_30" to cstr)
+    (deref new_parent).widget_type = String.make("Column" to cstr)
+    (deref new_parent).key = String.make("parent_k" to cstr)
+    (deref new_parent).props = Dict[String, String]()
+    (deref new_parent).children_keys = [String.make("child_k" to cstr)]
+    (deref new_parent).parent_html_id = String.make("root" to cstr)
+    (deref new_parent).parent_key = String.make("root_k" to cstr)
+    (deref reconciler).diff_node_recursive(String.make("parent_k" to cstr), new_parent, String.make("root" to cstr), String.make("root_k" to cstr), r5, prev_map5)
+    if (deref r5).patches.length() == 1:
+        let p5 as Patch = (deref r5).patches[0]
+        if str_eq(p5.action, String.make("INSERT" to cstr)):
+            printf("Test 9 (Full Pipeline): PASSED!\n" to cstr)
+        else:
+            printf("Test 9 (Full Pipeline): FAILED! action=%s\n" to cstr, p5.action.data to cstr)
+    else:
+        printf("Test 9 (Full Pipeline): FAILED! expected 1, got %ld\n" to cstr, (deref r5).patches.length())
+
+    printf("\n=== All Reconciler Tests Complete ===\n" to cstr)
+    return 0

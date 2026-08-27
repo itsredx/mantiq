@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 
 // ── C FFI ───────────────────────────────────────────────────────────────
@@ -495,6 +495,8 @@ fn type_to_llvm(t as ptr[Type]) as String:
     if k == TypeKind.Class or k == TypeKind.Task or k == TypeKind.Channel:
         return String.make("ptr" to cstr)
     if k == TypeKind.Interface:
+        return String.make("{ ptr, ptr }" to cstr)
+    if k == TypeKind.Closure or k == TypeKind.Function:
         return String.make("{ ptr, ptr }" to cstr)
     if k == TypeKind.Struct:
         let t_name as cstr = (deref t).name.data to cstr
@@ -1062,7 +1064,7 @@ struct LLVMCodegen:
         self.register_builtin_struct("BooleanLiteralData", "{ double }")
         self.register_builtin_struct("AwaitExprData", "{ ptr }")
         self.register_builtin_struct("SpawnStmtData", "{ ptr }")
-        self.register_builtin_struct("ClosureExprData", "{ { ptr, i64, i64 }, ptr, ptr }")
+        self.register_builtin_struct("ClosureExprData", "{ { ptr, i64, i64 }, ptr, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("StructDeclData", "{ { ptr, i64, i64 }, ptr, { ptr, i64, i64 } }")
         self.register_builtin_struct("EnumDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 } }")
         self.register_builtin_struct("UnionDeclData", "{ { ptr, i64, i64 }, ptr }")
@@ -1180,6 +1182,7 @@ struct LLVMCodegen:
         self.register_field_idx("ClosureExprData" to cstr, "params" to cstr, 0 to i32)
         self.register_field_idx("ClosureExprData" to cstr, "body" to cstr, 1 to i32)
         self.register_field_idx("ClosureExprData" to cstr, "type_annots" to cstr, 2 to i32)
+        self.register_field_idx("ClosureExprData" to cstr, "captured_vars" to cstr, 3 to i32)
         self.register_field_idx("StructDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("StructDeclData" to cstr, "body" to cstr, 1 to i32)
         self.register_field_idx("StructDeclData" to cstr, "access_modifier" to cstr, 2 to i32)
@@ -4261,7 +4264,11 @@ struct LLVMCodegen:
         if ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0:
             if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Function and (deref callee_t).return_type != None to ptr[Type]:
                 ret_type = type_to_llvm((deref callee_t).return_type)
-        if strcmp(ret_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(ret_type.data to cstr, "ptr" to cstr) == 0:
+        if ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0:
+            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Closure:
+                if (deref callee_t).return_type != None to ptr[Type]:
+                    ret_type = type_to_llvm((deref callee_t).return_type)
+        if strcmp(ret_type.data to cstr, "ptr" to cstr) == 0:
             var is_dict_list as bool = False
             var c_n as cstr = None to cstr
             if callee_name_ptr != None to ptr[String]:
@@ -5342,8 +5349,10 @@ struct LLVMCodegen:
                             arg_type = String.make("i32" to cstr)
                         elif strncmp(c_n, "has" to cstr, 3 to usize) == 0 or strncmp(c_n, "is" to cstr, 2 to usize) == 0 or strcmp(c_n, "ts_parser_set_language" to cstr) == 0:
                             arg_type = String.make("i8" to cstr)
-            if strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
-                arg_type = String.make("ptr" to cstr)
+            if strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 and node_kind(arg_node) != NodeType.ClosureExpr:
+                let arg_inf_t as ptr[Type] = node_inferred_type(arg_node)
+                if arg_inf_t == None to ptr[Type] or ((deref arg_inf_t).kind != TypeKind.Closure and (deref arg_inf_t).kind != TypeKind.Function):
+                    arg_type = String.make("ptr" to cstr)
             if node_kind(arg_node) == NodeType.IndexExpr:
                 arg_type = self.index_value_llvm(arg_node)
             if node_kind(arg_node) == NodeType.MemberExpr:
@@ -5486,6 +5495,67 @@ struct LLVMCodegen:
             if a_idx < a_count - 1 to i64:
                 append_cstr(ref arg_buf, ", ")
             a_idx = a_idx + 1 to i64
+
+        // Closure call: if callee is a local variable/parameter holding a closure OR a ClosureExpr
+        var is_closure_call as bool = False
+        if callee != None to ptr[Node] and node_kind(callee) == NodeType.ClosureExpr:
+            is_closure_call = True
+        elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+            let c_vname as String = node_name(callee)
+            if (deref self).var_slots.has(c_vname):
+                if (deref self).var_types.has(c_vname):
+                    let vt as String = (deref self).var_types[c_vname]
+                    if strcmp(vt.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                        is_closure_call = True
+                if callee_t != None to ptr[Type] and ((deref callee_t).kind == TypeKind.Closure or (deref callee_t).kind == TypeKind.Function):
+                    is_closure_call = True
+        elif callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Closure:
+            is_closure_call = True
+        if is_closure_call:
+            let closure_val as ptr[u8] = self.emit_expr(callee)
+            // extractvalue { ptr, ptr } %closure_val, 0  -> fn_ptr
+            let fn_ptr_ex as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, fn_ptr_ex to cstr)
+            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, ptr } ")
+            append_cstr(ref (deref self).main_out, closure_val to cstr)
+            append_cstr(ref (deref self).main_out, ", 0\n")
+            // extractvalue { ptr, ptr } %closure_val, 1  -> env_ptr
+            let env_ptr_ex as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, env_ptr_ex to cstr)
+            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, ptr } ")
+            append_cstr(ref (deref self).main_out, closure_val to cstr)
+            append_cstr(ref (deref self).main_out, ", 1\n")
+            // Build call: call <ret_type> <fn_ptr>(ptr %env, <args>)
+            let is_void_closure as bool = str_eq(ret_type, String.make("void" to cstr))
+            if not is_void_closure:
+                let cret_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, cret_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = call ")
+                append_str(ref (deref self).main_out, ret_type)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, fn_ptr_ex to cstr)
+                append_cstr(ref (deref self).main_out, "(ptr ")
+                append_cstr(ref (deref self).main_out, env_ptr_ex to cstr)
+                if arg_buf.buffer != None to ptr[u8] and arg_buf.len > 0 to i64:
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, arg_buf.buffer to cstr)
+                arg_buf.deinit()
+                append_cstr(ref (deref self).main_out, ")\n")
+                return cret_reg
+            else:
+                append_cstr(ref (deref self).main_out, "  call void ")
+                append_cstr(ref (deref self).main_out, fn_ptr_ex to cstr)
+                append_cstr(ref (deref self).main_out, "(ptr ")
+                append_cstr(ref (deref self).main_out, env_ptr_ex to cstr)
+                if arg_buf.buffer != None to ptr[u8] and arg_buf.len > 0 to i64:
+                    append_cstr(ref (deref self).main_out, ", ")
+                    append_cstr(ref (deref self).main_out, arg_buf.buffer to cstr)
+                arg_buf.deinit()
+                append_cstr(ref (deref self).main_out, ")\n")
+                return "0" to ptr[u8]
 
         var fn_target_name as String = String.make("" to cstr)
         if callee_name_ptr != None to ptr[String]:
@@ -9932,20 +10002,27 @@ struct LLVMCodegen:
         let fn_name as ptr[u8] = self.fresh_closure_name()
         let params as List[ptr[Node]] = node_params(node)
         let body as ptr[Node] = node_body(node)
+        let captured as List[String] = node_captured_vars(node)
+        let capture_count as i64 = captured.length()
 
-        var ret_type as String = type_to_llvm(node_inferred_type(node))
-        if str_eq(ret_type, String.make("void" to cstr)):
-            if body != None to ptr[Node] and node_kind(body) != NodeType.BlockStmt:
-                let body_t as String = type_to_llvm(node_inferred_type(body))
-                if str_eq(body_t, String.make("void" to cstr)) == False:
-                    ret_type = body_t
-                else:
-                    ret_type = String.make("i64" to cstr)
-            else:
-                ret_type = String.make("i64" to cstr)
+        var ret_type as String = String.make("i64" to cstr)
+        let cl_inferred as ptr[Type] = node_inferred_type(node)
+        if cl_inferred != None to ptr[Type] and (deref cl_inferred).kind == TypeKind.Closure and (deref cl_inferred).return_type != None to ptr[Type]:
+            let rt_str as String = type_to_llvm((deref cl_inferred).return_type)
+            if rt_str.len > 0 to usize:
+                ret_type = rt_str
+        elif body != None to ptr[Node] and node_kind(body) != NodeType.BlockStmt:
+            let body_t as String = type_to_llvm(node_inferred_type(body))
+            if body_t.len > 0 to usize and str_eq(body_t, String.make("void" to cstr)) == False:
+                ret_type = body_t
 
         let temp_main as StringBuilder = (deref self).main_out
-        (deref self).main_out = (deref self).outlined_out
+        // Save var_slots and var_types for outlined function (restore after)
+        let saved_var_slots as Dict[String, String] = (deref self).var_slots
+        let saved_var_types as Dict[String, String] = (deref self).var_types
+        (deref self).var_slots = Dict[String, String]()
+        (deref self).var_types = Dict[String, String]()
+        (deref self).main_out = StringBuilder.make()
 
         append_cstr(ref (deref self).main_out, "define ")
         append_str(ref (deref self).main_out, ret_type)
@@ -9968,6 +10045,89 @@ struct LLVMCodegen:
 
         append_cstr(ref (deref self).main_out, ") {\nentry:\n")
 
+        // Register closure parameters in var_slots and var_types, with alloca+store
+        var rp_idx as i64 = 0 to i64
+        while rp_idx < p_count:
+            let rp as ptr[Node] = get_node_decl(ref params, rp_idx)
+            let rp_name_ptr as ptr[String] = node_name_ptr(rp)
+            let rp_type as String = type_to_llvm(node_inferred_type(rp))
+            if rp_name_ptr != None to ptr[String]:
+                let rp_nm as String = deref rp_name_ptr
+                let rp_slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                let _rps as i32 = sprintf(rp_slot_buf, "%s_0" to cstr, rp_nm.data to cstr)
+                let rp_slot as String = String.make(rp_slot_buf to cstr)
+                append_cstr(ref (deref self).main_out, "  %")
+                append_str(ref (deref self).main_out, rp_slot)
+                append_cstr(ref (deref self).main_out, " = alloca ")
+                append_str(ref (deref self).main_out, rp_type)
+                append_cstr(ref (deref self).main_out, "\n")
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, rp_type)
+                append_cstr(ref (deref self).main_out, " %")
+                append_str(ref (deref self).main_out, rp_nm)
+                append_cstr(ref (deref self).main_out, ", ptr %")
+                append_str(ref (deref self).main_out, rp_slot)
+                append_cstr(ref (deref self).main_out, "\n")
+                set_dict_str(ref (deref self).var_slots, rp_nm, rp_slot)
+                set_dict_str(ref (deref self).var_types, rp_nm, rp_type)
+            rp_idx = rp_idx + 1 to i64
+
+        // Unpack captured variables from env
+        if capture_count > 0 to i64:
+            var ci as i64 = 0 to i64
+            while ci < capture_count:
+                let cap_name as String = captured[ci]
+                let cap_offset as i64 = ci * 8 to i64
+                // Get type for this capture from parent's var_types
+                var cap_type as String = String.make("i64" to cstr)
+                if saved_var_types.has(cap_name):
+                    cap_type = saved_var_types[cap_name]
+
+                // getelementptr i8, ptr %env, i64 <offset>
+                let slot_ptr_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, slot_ptr_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr %env, i64 ")
+                let offset_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                let _ as i32 = sprintf(offset_buf, "%ld" to cstr, cap_offset)
+                append_cstr(ref (deref self).main_out, offset_buf to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // load <type>, ptr %slot_ptr_reg
+                let load_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = load ")
+                append_str(ref (deref self).main_out, cap_type)
+                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, slot_ptr_reg to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // alloca for the captured var
+                let cap_slot_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                let _cs as i32 = sprintf(cap_slot_buf, "%s_0" to cstr, cap_name.data to cstr)
+                let cap_slot as String = String.make(cap_slot_buf to cstr)
+                append_cstr(ref (deref self).main_out, "  %")
+                append_str(ref (deref self).main_out, cap_slot)
+                append_cstr(ref (deref self).main_out, " = alloca ")
+                append_str(ref (deref self).main_out, cap_type)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // store loaded value
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, cap_type)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, ", ptr %")
+                append_str(ref (deref self).main_out, cap_slot)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // Register in var_slots with alloca register name
+                set_dict_str(ref (deref self).var_slots, cap_name, cap_slot)
+                set_dict_str(ref (deref self).var_types, cap_name, cap_type)
+
+                ci = ci + 1 to i64
+
         if body != None to ptr[Node]:
             if node_kind(body) != NodeType.BlockStmt:
                 let ret_reg as ptr[u8] = self.emit_expr(body)
@@ -9981,8 +10141,70 @@ struct LLVMCodegen:
 
         append_cstr(ref (deref self).main_out, "}\n\n")
 
-        (deref self).outlined_out = (deref self).main_out
+        let fn_code as String = (deref self).main_out.to_string()
+        (deref self).main_out.deinit()
         (deref self).main_out = temp_main
+        append_str(ref (deref self).outlined_out, fn_code)
+        // Restore parent var_slots and var_types
+        (deref self).var_slots = saved_var_slots
+        (deref self).var_types = saved_var_types
+
+        // Allocate env and pack captures at creation site
+        var env_alloc_reg as ptr[u8] = "null" to ptr[u8]
+        if capture_count > 0 to i64:
+            let env_size as i64 = capture_count * 8 to i64
+            env_alloc_reg = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, env_alloc_reg to cstr)
+            append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 ")
+            let size_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+            let _3 as i32 = sprintf(size_buf, "%ld" to cstr, env_size)
+            append_cstr(ref (deref self).main_out, size_buf to cstr)
+            append_cstr(ref (deref self).main_out, ")\n")
+
+            var ci2 as i64 = 0 to i64
+            while ci2 < capture_count:
+                let cap_name2 as String = captured[ci2]
+                let cap_offset2 as i64 = ci2 * 8 to i64
+                var cap_type2 as String = String.make("i64" to cstr)
+                if (deref self).var_types.has(cap_name2):
+                    cap_type2 = (deref self).var_types[cap_name2]
+
+                // Load the captured variable's value from its alloca
+                var var_slot as String = cap_name2
+                if (deref self).var_slots.has(cap_name2):
+                    var_slot = (deref self).var_slots[cap_name2]
+                let load_val_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, load_val_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = load ")
+                append_str(ref (deref self).main_out, cap_type2)
+                append_cstr(ref (deref self).main_out, ", ptr %")
+                append_str(ref (deref self).main_out, var_slot)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // getelementptr into env at offset
+                let slot_ptr2 as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, slot_ptr2 to cstr)
+                append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
+                append_cstr(ref (deref self).main_out, env_alloc_reg to cstr)
+                append_cstr(ref (deref self).main_out, ", i64 ")
+                let offset_buf2 as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                let _4 as i32 = sprintf(offset_buf2, "%ld" to cstr, cap_offset2)
+                append_cstr(ref (deref self).main_out, offset_buf2 to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                // store into env slot
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, cap_type2)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, load_val_reg to cstr)
+                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, slot_ptr2 to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+
+                ci2 = ci2 + 1 to i64
 
         let closure_reg as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
@@ -10007,11 +10229,23 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, " = getelementptr inbounds { ptr, ptr }, ptr ")
         append_cstr(ref (deref self).main_out, closure_reg to cstr)
         append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n")
-        append_cstr(ref (deref self).main_out, "  store ptr null, ptr ")
+        if capture_count > 0 to i64:
+            append_cstr(ref (deref self).main_out, "  store ptr ")
+            append_cstr(ref (deref self).main_out, env_alloc_reg to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+        else:
+            append_cstr(ref (deref self).main_out, "  store ptr null, ptr ")
         append_cstr(ref (deref self).main_out, env_ptr_reg to cstr)
         append_cstr(ref (deref self).main_out, "\n")
 
-        return closure_reg
+        // Load and return the closure struct value
+        let ret_reg as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, ret_reg to cstr)
+        append_cstr(ref (deref self).main_out, " = load { ptr, ptr }, ptr ")
+        append_cstr(ref (deref self).main_out, closure_reg to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+        return ret_reg
 
     public fn emit_auto_drops(self as ptr[LLVMCodegen], drops as List[String]):
         let count as i64 = drops.length()

@@ -128,6 +128,8 @@ struct Lowerer:
         (deref annot).generics = Empty
         (deref annot).params = Empty
         (deref annot).return_type = None to ptr[TypeAnnotation]
+        (deref annot).is_ref = False
+        (deref annot).is_mut = False
         
         let count as u32 = ts_node_child_count_ptr(ts_node)
         var first_name_start as usize = 0 to usize
@@ -159,7 +161,7 @@ struct Lowerer:
                     let lt_slice as ptr[String] = self.slice_string_from_node(ref child)
                     (deref annot).lifetime = Some(deref lt_slice)
                     drop(lt_slice to ptr)
-            elif strcmp(child_kind, "identifier" to cstr) == 0:
+            elif strcmp(child_kind, "identifier" to cstr) == 0 or strcmp(child_kind, "type_identifier" to cstr) == 0 or strcmp(child_kind, "primitive_type" to cstr) == 0 or strcmp(child_kind, "fn" to cstr) == 0 or strcmp(child_kind, "function_type" to cstr) == 0:
                 if first_name_start == 0 to usize:
                     first_name_start = ts_node_start_byte_ptr(ref child) to usize
                 last_name_end = ts_node_end_byte_ptr(ref child) to usize
@@ -366,6 +368,12 @@ struct Lowerer:
             return self.lower_spread_expr(ts_node)
         elif strcmp(kind, "index_expression" to cstr) == 0:
             return self.lower_index_expr(ts_node)
+        elif strcmp(kind, "lambda_expr" to cstr) == 0:
+            return self.lower_lambda_expr(ts_node)
+        elif strcmp(kind, "fun_expr" to cstr) == 0:
+            return self.lower_fun_expr(ts_node)
+        elif strcmp(kind, "anonymous_function" to cstr) == 0:
+            return self.lower_fun_expr(ts_node)
         elif strcmp(kind, "comment" to cstr) == 0:
             return None to ptr[Node]
 
@@ -1723,6 +1731,214 @@ struct Lowerer:
         let data as ptr[CastExprData] = make[CastExprData](1 to usize) to ptr[CastExprData]
         (deref data).op = target_name
         (deref data).left = operand_node
+        (deref n).data = data to ptr[u8]
+        return n
+
+    public fn lower_lambda_expr(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        let params as List[ptr[Node]] = List[ptr[Node]]()
+        var body_ast as ptr[Node] = None to ptr[Node]
+        let type_annots_list as List[Option[ptr[TypeAnnotation]]] = List[Option[ptr[TypeAnnotation]]]()
+
+        // lambda_expr: ( lambda_typed_params ) => expression
+        // lambda_typed_params children: ident, type_annot, ',', ident, type_annot, ',', ...
+        let count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref child)
+            let c_kind as cstr = ts_node_type_ptr(ref child)
+            if strcmp(c_kind, "lambda_typed_params" to cstr) == 0:
+                let lp_count as u32 = ts_node_child_count_ptr(ref child)
+                var cur_name as String = String.make("" to cstr)
+                var cur_annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+                var j as u32 = 0 to u32
+                while j < lp_count:
+                    var lp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                    ts_node_child_ptr(ref child, j, ref lp_child)
+                    let lp_kind as cstr = ts_node_type_ptr(ref lp_child)
+                    if strcmp(lp_kind, "identifier" to cstr) == 0:
+                        let name_slice as ptr[String] = self.slice_string_from_node(ref lp_child)
+                        cur_name = deref name_slice
+                        drop(name_slice to ptr)
+                    elif strcmp(lp_kind, "type_annotation" to cstr) == 0:
+                        cur_annot = self.lower_type_annotation(ref lp_child)
+                    elif strcmp(lp_kind, "," to cstr) == 0:
+                        // End of one param — create VarDecl
+                        if cur_name.len > 0 to usize:
+                            let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref lp_child))
+                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                            (deref p_data).name = cur_name
+                            (deref p_data).left = None to ptr[Node]
+                            (deref p_data).is_mut = False
+                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                            (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+                            if cur_annot != None to ptr[TypeAnnotation]:
+                                (deref p_wrapper).list.append(Some(cur_annot))
+                                type_annots_list.append(Some(cur_annot))
+                            else:
+                                (deref p_wrapper).list.append(Empty)
+                                type_annots_list.append(Empty)
+                            let p_annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
+                            (deref p_data).type_annots = p_annots_list_ptr
+                            (deref p_node).data = p_data to ptr[u8]
+                            params.append(p_node)
+                            cur_name = String.make("" to cstr)
+                            cur_annot = None to ptr[TypeAnnotation]
+                    j = j + 1 to u32
+                // Handle last param (no trailing comma)
+                if cur_name.len > 0 to usize:
+                    let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref child))
+                    let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                    (deref p_data).name = cur_name
+                    (deref p_data).left = None to ptr[Node]
+                    (deref p_data).is_mut = False
+                    let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                    (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+                    if cur_annot != None to ptr[TypeAnnotation]:
+                        (deref p_wrapper).list.append(Some(cur_annot))
+                        type_annots_list.append(Some(cur_annot))
+                    else:
+                        (deref p_wrapper).list.append(Empty)
+                        type_annots_list.append(Empty)
+                    let p_annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
+                    (deref p_data).type_annots = p_annots_list_ptr
+                    (deref p_node).data = p_data to ptr[u8]
+                    params.append(p_node)
+            elif strcmp(c_kind, "expression" to cstr) == 0 or (ts_node_is_named_ptr(ref child) and strcmp(c_kind, "lambda_typed_params" to cstr) != 0):
+                // The body expression (after =>)
+                if body_ast == None to ptr[Node]:
+                    body_ast = self.lower_node(ref child)
+            i = i + 1 to u32
+
+        let n as ptr[Node] = make_node(NodeType.ClosureExpr, span)
+        let data as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]
+        (deref data).params = params
+        (deref data).body = body_ast
+        let annots_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        (deref annots_wrapper).list = type_annots_list
+        (deref data).type_annots = ref (deref annots_wrapper).list
+        (deref data).captured_vars = List[String]()
+        (deref n).data = data to ptr[u8]
+        return n
+
+    public fn lower_fun_expr(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let span as Span = self.get_span(ts_node)
+        let params as List[ptr[Node]] = List[ptr[Node]]()
+        var body_ast as ptr[Node] = None to ptr[Node]
+        var ret_type_annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+        let type_annots_list as List[Option[ptr[TypeAnnotation]]] = List[Option[ptr[TypeAnnotation]]]()
+
+        // fun_expr: fn anonymous_function
+        // anonymous_function: ( typed_params ) return_annotation? (=> expr | : block)
+        // We need to find the anonymous_function child
+        var anon_node as TSNode = deref ts_node
+        let outer_count as u32 = ts_node_child_count_ptr(ts_node)
+        var oi as u32 = 0 to u32
+        while oi < outer_count:
+            var oc as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, oi, ref oc)
+            let oc_kind as cstr = ts_node_type_ptr(ref oc)
+            if strcmp(oc_kind, "anonymous_function" to cstr) == 0:
+                anon_node = oc
+                break
+            oi = oi + 1 to u32
+
+        let count as u32 = ts_node_child_count_ptr(ref anon_node)
+        var i as u32 = 0 to u32
+        while i < count:
+            var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ref anon_node, i, ref child)
+            if ts_node_is_named_ptr(ref child):
+                let c_kind as cstr = ts_node_type_ptr(ref child)
+                if strcmp(c_kind, "typed_params" to cstr) == 0:
+                    // Reuse the same param parsing logic as lower_fun_decl
+                    let tp_count as u32 = ts_node_child_count_ptr(ref child)
+                    var j as u32 = 0 to u32
+                    while j < tp_count:
+                        var tp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, j, ref tp_child)
+                        if ts_node_is_named_ptr(ref tp_child):
+                            let tp_kind as cstr = ts_node_type_ptr(ref tp_child)
+                            if strcmp(tp_kind, "param_decl" to cstr) == 0 or strcmp(tp_kind, "typed_var" to cstr) == 0 or strcmp(tp_kind, "parameter" to cstr) == 0 or strcmp(tp_kind, "param" to cstr) == 0 or strcmp(tp_kind, "typed_param" to cstr) == 0:
+                                let pd_count as u32 = ts_node_child_count_ptr(ref tp_child)
+                                var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
+                                var annot_idx as u32 = 0 to u32
+                                while annot_idx < pd_count:
+                                    var pd_child_annot as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                    ts_node_child_ptr(ref tp_child, annot_idx, ref pd_child_annot)
+                                    if ts_node_is_named_ptr(ref pd_child_annot):
+                                        let pd_kind as cstr = ts_node_type_ptr(ref pd_child_annot)
+                                        if strcmp(pd_kind, "type_annotation" to cstr) == 0:
+                                            annot = self.lower_type_annotation(ref pd_child_annot)
+                                    annot_idx = annot_idx + 1 to u32
+                                var k as u32 = 0 to u32
+                                while k < pd_count:
+                                    var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                    ts_node_child_ptr(ref tp_child, k, ref pd_child)
+                                    if ts_node_is_named_ptr(ref pd_child):
+                                        let pd_kind2 as cstr = ts_node_type_ptr(ref pd_child)
+                                        if strcmp(pd_kind2, "identifier" to cstr) == 0:
+                                            let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref pd_child) to usize, ts_node_end_byte_ptr(ref pd_child) to usize) to ptr[String]
+                                            let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
+                                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                            (deref p_data).name = deref p_slice
+                                            (deref p_data).left = None to ptr[Node]
+                                            (deref p_data).is_mut = False
+                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                            (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+                                            if annot != None to ptr[TypeAnnotation]:
+                                                (deref p_wrapper).list.append(Some(annot))
+                                                type_annots_list.append(Some(annot))
+                                            else:
+                                                (deref p_wrapper).list.append(Empty)
+                                                type_annots_list.append(Empty)
+                                            let p_annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
+                                            (deref p_data).type_annots = p_annots_list_ptr
+                                            (deref p_node).data = p_data to ptr[u8]
+                                            params.append(p_node)
+                                            drop(p_slice to ptr)
+                                    k = k + 1 to u32
+                        j = j + 1 to u32
+                elif strcmp(c_kind, "return_annotation" to cstr) == 0:
+                    let ra_count as u32 = ts_node_child_count_ptr(ref child)
+                    var ra_idx as u32 = 0 to u32
+                    var ra_name_start as usize = 0 to usize
+                    var ra_name_end as usize = 0 to usize
+                    while ra_idx < ra_count:
+                        var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, ra_idx, ref ra_child)
+                        if ts_node_is_named_ptr(ref ra_child):
+                            if ra_name_start == 0 to usize:
+                                ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
+                            ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
+                        ra_idx = ra_idx + 1 to u32
+                    if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
+                        let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
+                        ret_type_annot = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                        (deref ret_type_annot).name = deref ra_slice
+                        drop(ra_slice to ptr)
+                        (deref ret_type_annot).lifetime = Empty
+                        (deref ret_type_annot).generics = Empty
+                        (deref ret_type_annot).params = Empty
+                        (deref ret_type_annot).return_type = None to ptr[TypeAnnotation]
+                        (deref ret_type_annot).is_ref = False
+                        (deref ret_type_annot).is_mut = False
+                elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
+                    body_ast = self.lower_node(ref child)
+                elif strcmp(c_kind, "expression" to cstr) == 0:
+                    // expression body after =>
+                    body_ast = self.lower_node(ref child)
+            i = i + 1 to u32
+
+        let n as ptr[Node] = make_node(NodeType.ClosureExpr, span)
+        let data as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]
+        (deref data).params = params
+        (deref data).body = body_ast
+        let annots_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        (deref annots_wrapper).list = type_annots_list
+        (deref data).type_annots = ref (deref annots_wrapper).list
+        (deref data).captured_vars = List[String]()
         (deref n).data = data to ptr[u8]
         return n
 
