@@ -1,0 +1,63 @@
+// ── WASM Cooperative Concurrency Test ─────────────────────────────────
+
+extern fn printf(fmt as cstr, ...) as i32
+
+async fn compute_square(x as i32) as i32:
+    return x * x
+
+async fn compute_sum(n as i32) as i32:
+    var s as i32 = 0
+    var i as i32 = 1
+    while i <= n:
+        s = s + i
+        i = i + 1
+    return s
+
+fn main() as i32:
+    let _ = printf("=== Testing WASM Cooperative Concurrency ===\n" to cstr)
+
+    // Test 1: spawn & await
+    let t1 = spawn compute_square(7 to i32)
+    let t2 = spawn compute_sum(10 to i32)
+
+    let r1 as i32 = await t1
+    let r2 as i32 = await t2
+
+    if r1 == 49 and r2 == 55:
+        let _ = printf("Test 1 (Async Spawn & Await): PASSED! sq(7)=%d, sum(10)=%d\n" to cstr, r1, r2)
+    else:
+        let _ = printf("Test 1 (Async Spawn & Await): FAILED! sq(7)=%d, sum(10)=%d\n" to cstr, r1, r2)
+        return 1
+
+    // Test 2: Channel send and recv
+    let ch as Channel[i32] = channel[i32](4 to i64)
+    ch.send(100 to i32)
+    ch.send(200 to i32)
+    ch.send(300 to i32)
+
+    let v1 as i32 = ch.recv()
+    let v2 as i32 = ch.recv()
+    let v3 as i32 = ch.recv()
+
+    if v1 == 100 and v2 == 200 and v3 == 300:
+        let _ = printf("Test 2 (Channel Send & Recv): PASSED!\n" to cstr)
+    else:
+        let _ = printf("Test 2 (Channel Send & Recv): FAILED!\n" to cstr)
+        return 1
+
+    // Test 3: Channel capacity, len, close
+    ch.send(400 to i32)
+    ch.close()
+    if ch.is_closed() and ch.len() == 1 to i64:
+        let v4 as i32 = ch.recv()
+        if v4 == 400 and ch.len() == 0 to i64:
+            let _ = printf("Test 3 (Channel Lifecycle & Close): PASSED!\n" to cstr)
+        else:
+            let _ = printf("Test 3 (Channel Lifecycle & Close): FAILED!\n" to cstr)
+            return 1
+    else:
+        let _ = printf("Test 3 (Channel Lifecycle & Close): FAILED!\n" to cstr)
+        return 1
+
+    let _ = printf("\n[PASS] All WASM Concurrency tests passed!\n" to cstr)
+    return 0

@@ -1,0 +1,64 @@
+// ── WASM Collections Test ──────────────────────────────────────────────
+
+from std.string import String
+from std.collections import List, Dict
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+fn test_string_ops() as bool:
+    var s1 as String = String.make("Hello " to cstr)
+    let s2 as String = String.make("WASI!" to cstr)
+    s1.append(ref s2)
+    if strcmp(s1.data to cstr, "Hello WASI!" to cstr) == 0 and s1.len == 11 to usize:
+        let _ = printf("  [PASS] String append & length\n" to cstr)
+        return True
+    let _ = printf("  [FAIL] String append failed\n" to cstr)
+    return False
+
+fn test_list_ops() as bool:
+    var lst as List[i32] = List[i32]()
+    lst.append(10)
+    lst.append(20)
+    lst.append(30)
+    lst.append(40)
+
+    let len as i64 = lst.length()
+    let _ = printf("  List length: %lld\n" to cstr, len)
+    if len > 0 to i64:
+        let v0 as i32 = lst[0 to i64]
+        let _ = printf("  List[0]: %d\n" to cstr, v0)
+    if lst.length() == 4 to i64 and lst[0 to i64] == 10 and lst[1 to i64] == 20 and lst[2 to i64] == 30 and lst[3 to i64] == 40:
+        let _ = printf("  [PASS] List[i32] append and indexing\n" to cstr)
+        return True
+    let _ = printf("  [FAIL] List operations failed\n" to cstr)
+    return False
+
+fn test_dict_ops() as bool:
+    var d as Dict[String, i32] = Dict[String, i32]()
+    d[String.make("alpha" to cstr)] = 100
+    d[String.make("beta" to cstr)] = 200
+    d[String.make("gamma" to cstr)] = 300
+
+    if d.has(String.make("alpha" to cstr)) and d.has(String.make("beta" to cstr)) and d.has(String.make("gamma" to cstr)):
+        let v1 as i32 = d[String.make("alpha" to cstr)]
+        let v2 as i32 = d[String.make("beta" to cstr)]
+        let v3 as i32 = d[String.make("gamma" to cstr)]
+        if v1 == 100 and v2 == 200 and v3 == 300:
+            let _ = printf("  [PASS] Dict[String, i32] insertion and lookup\n" to cstr)
+            return True
+    let _ = printf("  [FAIL] Dict operations failed\n" to cstr)
+    return False
+
+fn main() as i32:
+    let _ = printf("=== Testing WASM 32-bit Collections ===\n" to cstr)
+
+    if not test_string_ops():
+        return 1
+    if not test_list_ops():
+        return 1
+    if not test_dict_ops():
+        return 1
+
+    let _ = printf("\n[PASS] All WASM Collections tests passed!\n" to cstr)
+    return 0

@@ -71,7 +71,7 @@ fn main() -> i32:
         let _r as i32 = printf("Test 4 (Argument ABI Classification): FAILED!\n" to cstr)
         return 1 to i32
 
-    // ── Test 5: Return ABI Classification ─────────────────────────────────
+    // ── Test 5 (Return ABI Classification) ─────────────────────────────────
     let ret_f64 as ABISignature = get_ret_abi(t_f64, target)
     let ret_opt as ABISignature = get_ret_abi(t_opt, target)
     let ret_res as ABISignature = get_ret_abi(t_res, target)
@@ -80,6 +80,33 @@ fn main() -> i32:
         let _r as i32 = printf("Test 5 (Return ABI Classification): PASSED!\n" to cstr)
     else:
         let _r as i32 = printf("Test 5 (Return ABI Classification): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 6: WASM32 Target Constants & Sizing ──────────────────────────
+    let wasm_t as Target = Target.wasm32_wasi()
+    let t_usize as ptr[Type] = make_type(TypeKind.USize)
+    let t_isize as ptr[Type] = make_type(TypeKind.ISize)
+
+    let w_sz_ptr as usize = get_size(t_ptr, wasm_t)
+    let w_sz_usize as usize = get_size(t_usize, wasm_t)
+    let w_sz_isize as usize = get_size(t_isize, wasm_t)
+    let w_sz_str as usize = get_size(t_str, wasm_t)
+    let w_sz_opt as usize = get_size(t_opt, wasm_t)
+    let w_sz_res as usize = get_size(t_res, wasm_t)
+
+    if wasm_t.pointer_size == 4 to usize and w_sz_ptr == 4 to usize and w_sz_usize == 4 to usize and w_sz_isize == 4 to usize and w_sz_str == 12 to usize and w_sz_opt == 8 to usize and w_sz_res == 12 to usize:
+        let _r as i32 = printf("Test 6 (WASM32 Target Constants and 32-bit Sizing): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 6 (WASM32 Target Constants and 32-bit Sizing): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 7: Target Triple Parser & Query Helpers ──────────────────────
+    let parsed_wasm as Target = Target.from_triple("wasm32-unknown-wasi" to cstr)
+    let parsed_linux as Target = Target.from_triple("x86_64-unknown-linux-gnu" to cstr)
+    if parsed_wasm.pointer_size == 4 to usize and parsed_linux.pointer_size == 8 to usize:
+        let _r as i32 = printf("Test 7 (Target Triple Parser and Helpers): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 7 (Target Triple Parser and Helpers): FAILED!\n" to cstr)
         return 1 to i32
 
     let _done as i32 = printf("\n[PASS] All test_abi.nz tests passed successfully!\n" to cstr)

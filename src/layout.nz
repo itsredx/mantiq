@@ -1,6 +1,13 @@
+// ── Imports ─────────────────────────────────────────────────────────────
 import std.string
+from std.string import String
 from types import Type, TypeKind
 
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Endianness & Target ─────────────────────────────────────────────────
 enum Endianness:
     Little
     Big
@@ -9,15 +16,57 @@ struct Target:
     public var arch as String
     public var os as String
     public var env as String
+    public var abi as String
     public var pointer_size as usize
     public var endianness as Endianness
     public var data_layout as String
     public var triple as String
 
     public fn x86_64_linux() -> Target:
-        return Target(arch = String.make("x86_64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to cstr), triple = String.make("x86_64-unknown-linux-gnu" to cstr))
-    
+        return Target(arch = String.make("x86_64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), abi = String.make("sysv" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to cstr), triple = String.make("x86_64-unknown-linux-gnu" to cstr))
 
+    public fn wasm32_wasi() -> Target:
+        return Target(arch = String.make("wasm32" to cstr), os = String.make("wasi" to cstr), env = String.make("none" to cstr), abi = String.make("preview1" to cstr), pointer_size = 4 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20" to cstr), triple = String.make("wasm32-unknown-wasi-musl" to cstr))
+
+    public fn wasm32_freestanding() -> Target:
+        return Target(arch = String.make("wasm32" to cstr), os = String.make("unknown" to cstr), env = String.make("none" to cstr), abi = String.make("none" to cstr), pointer_size = 4 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20" to cstr), triple = String.make("wasm32-unknown-unknown" to cstr))
+
+    public fn from_triple(triple_cstr as cstr) -> Target:
+        if triple_cstr == None to cstr:
+            return Target.x86_64_linux()
+        if strstr(triple_cstr, "wasm32" to cstr) != None to cstr:
+            if strstr(triple_cstr, "unknown" to cstr) != None to cstr or strstr(triple_cstr, "freestanding" to cstr) != None to cstr:
+                return Target.wasm32_freestanding()
+            return Target.wasm32_wasi()
+        return Target.x86_64_linux()
+
+    public fn is_wasm(self as ptr[Target]) -> bool:
+        return (deref self).pointer_size == 4 to usize
+
+    public fn llvm_size_type(self as ptr[Target]) -> String:
+        if (deref self).pointer_size == 4 to usize:
+            return String.make("i32" to cstr)
+        return String.make("i64" to cstr)
+
+    public fn llvm_ptr_int(self as ptr[Target]) -> String:
+        if (deref self).pointer_size == 4 to usize:
+            return String.make("i32" to cstr)
+        return String.make("i64" to cstr)
+
+fn target_llvm_size_type(t as Target) as String:
+    if t.pointer_size == 4 to usize:
+        return String.make("i32" to cstr)
+    return String.make("i64" to cstr)
+
+fn target_llvm_ptr_int(t as Target) as String:
+    if t.pointer_size == 4 to usize:
+        return String.make("i32" to cstr)
+    return String.make("i64" to cstr)
+
+fn target_is_wasm(t as Target) as bool:
+    return t.pointer_size == 4 to usize
+
+// ── Sizing & Alignment ───────────────────────────────────────────────────
 fn get_align(t as ptr[Type], target as Target) as usize:
     if t == None to ptr[Type]:
         return target.pointer_size
@@ -28,8 +77,10 @@ fn get_align(t as ptr[Type], target as Target) as usize:
         return 2 to usize
     elif k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.QBit:
         return 4 to usize
-    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.Enum:
+    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.Enum:
         return 8 to usize
+    elif k == TypeKind.ISize or k == TypeKind.USize:
+        return target.pointer_size
     elif k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
         return 16 to usize
     return target.pointer_size
@@ -46,8 +97,10 @@ fn get_size(t as ptr[Type], target as Target) as usize:
         return 2 to usize
     elif k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.F32 or k == TypeKind.QBit:
         return 4 to usize
-    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64 or k == TypeKind.ISize or k == TypeKind.USize:
+    elif k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64:
         return 8 to usize
+    elif k == TypeKind.ISize or k == TypeKind.USize:
+        return target.pointer_size
     elif k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
         return 16 to usize
     elif k == TypeKind.Enum:

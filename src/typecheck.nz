@@ -619,7 +619,7 @@ struct TypeChecker:
                 skip = True
             elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "bf16" to cstr) == 0 or strcmp(name, "BFloat16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
                 skip = True
-            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "Channel" to cstr) == 0 or strcmp(name, "channel" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
                 skip = True
                 
             let name_ptr as ptr[u8] = name to ptr[u8]
@@ -1276,7 +1276,7 @@ struct TypeChecker:
                 if (c_len == 4 to usize and strncmp(c_data, "size" to cstr, 4 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "size_of" to cstr, 7 to usize) == 0) or (c_len == 6 to usize and strncmp(c_data, "sizeof" to cstr, 6 to usize) == 0) or (c_len == 7 to usize and strncmp(c_data, "alignof" to cstr, 7 to usize) == 0) or (c_len == 8 to usize and strncmp(c_data, "align_of" to cstr, 8 to usize) == 0):
                     is_type_intrinsic = True
             if is_type_intrinsic:
-                ret_type = make_type(TypeKind.I64)
+                ret_type = make_type(TypeKind.USize)
                 set_node_inferred_type(node, ret_type)
                 return ret_type
             let callee_t as ptr[Type] = self.typecheck_node(callee)
@@ -1347,7 +1347,7 @@ struct TypeChecker:
                                 if strcmp(coll_mname.data to cstr, "has") == 0 or strcmp(coll_mname.data to cstr, "remove") == 0:
                                     ret_type = make_type(TypeKind.Boolean)
                                 elif strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
-                                    ret_type = make_type(TypeKind.I64)
+                                    ret_type = make_type(TypeKind.USize)
                                 elif strcmp(coll_mname.data to cstr, "clear") == 0:
                                     ret_type = make_type(TypeKind.Void)
                                 elif strcmp(coll_mname.data to cstr, "keys") == 0:
@@ -1358,7 +1358,7 @@ struct TypeChecker:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.List:
                                 if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
-                                    ret_type = make_type(TypeKind.I64)
+                                    ret_type = make_type(TypeKind.USize)
                                 elif strcmp(coll_mname.data to cstr, "clear") == 0:
                                     ret_type = make_type(TypeKind.Void)
                                 elif strcmp(coll_mname.data to cstr, "get") == 0:
@@ -1388,12 +1388,12 @@ struct TypeChecker:
                                         (deref opt_t).payload = make_type(TypeKind.Any)
                                     ret_type = opt_t
                                 elif strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0 or strcmp(coll_mname.data to cstr, "capacity") == 0 or strcmp(coll_mname.data to cstr, "cap") == 0:
-                                    ret_type = make_type(TypeKind.I64)
+                                    ret_type = make_type(TypeKind.USize)
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.String:
                                 if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
-                                    ret_type = make_type(TypeKind.I64)
+                                    ret_type = make_type(TypeKind.USize)
                                 else:
                                     coll_handled = False
                             else:
@@ -1425,7 +1425,7 @@ struct TypeChecker:
                         (deref some_t).payload = some_arg_t
                 ret_type = some_t
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "size" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "size_of" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "sizeof" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "alignof" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "align_of" to cstr) == 0):
-                ret_type = make_type(TypeKind.I64)
+                ret_type = make_type(TypeKind.USize)
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "H" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "X" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "Y" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "Z" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "CNOT" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "qbit" to cstr) == 0):
                 ret_type = make_type(TypeKind.QBit)
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "measure" to cstr) == 0:
@@ -1511,7 +1511,7 @@ struct TypeChecker:
                     if strcmp(prop_n.data to cstr, "data" to cstr) == 0:
                         ret_type = make_ptr_type(make_type(TypeKind.U8))
                     elif strcmp(prop_n.data to cstr, "len" to cstr) == 0 or strcmp(prop_n.data to cstr, "capacity" to cstr) == 0:
-                        ret_type = make_type(TypeKind.I64)
+                        ret_type = make_type(TypeKind.USize)
                     else:
                         ret_type = make_type(TypeKind.Any)
             elif obj_kind == TypeKind.Enum:
@@ -1696,7 +1696,7 @@ struct TypeChecker:
         elif nt == NodeType.UnaryExpr:
             let op as String = node_op(node)
             if op.data != None to ptr[u8] and strcmp(op.data to cstr, "size" to cstr) == 0:
-                ret_type = make_type(TypeKind.I64)
+                ret_type = make_type(TypeKind.USize)
                 set_node_inferred_type(node, ret_type)
                 return ret_type
             let operand_t as ptr[Type] = self.typecheck_node(node_left(node))

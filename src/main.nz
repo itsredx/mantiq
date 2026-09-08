@@ -18,6 +18,8 @@ import dce
 from dce import DeadCodeEliminator
 import codegen
 from codegen import LLVMCodegen
+import layout
+from layout import Target
 import error
 from error import DiagnosticEngine
 
@@ -31,8 +33,8 @@ extern fn fclose(stream as ptr) as i32
 extern fn fflush(stream as ptr) as i32
 extern fn fread(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
 extern fn fwrite(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
-extern fn fseek(stream as ptr, offset as i64, origin as i32) as i32
-extern fn ftell(stream as ptr) as i64
+extern fn fseek(stream as ptr, offset as isize, origin as i32) as i32
+extern fn ftell(stream as ptr) as isize
 extern fn malloc(size as usize) as ptr
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn getpid() as i32
@@ -72,11 +74,16 @@ fn perf_init() as PerfState:
     return PerfState(phase_buf = make[PerfPhase](16 to usize) to ptr[PerfPhase], phase_count = 0 to i64, wall_start = perf_now_ns(), rss_start = perf_rss_bytes(), enabled = False, allocs_start = mantiq_alloc_count(), bytes_start = mantiq_alloc_bytes(), frees_start = mantiq_free_count())
 
 fn perf_begin(p as ptr[PerfState], name as cstr) as i64:
+    if (deref p).enabled:
+        let _pb as i32 = printf(">>> Phase: %s\n" to cstr, name)
+        let _pbf as i32 = fflush(None to ptr)
     return perf_now_ns()
 
 fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
     if not (deref p).enabled:
         return
+    let _pe as i32 = printf("<<< Phase done: %s\n" to cstr, name)
+    let _pef as i32 = fflush(None to ptr)
     let t1 as i64 = perf_now_ns()
     let rss_now as i64 = perf_rss_bytes()
     let idx as i64 = (deref p).phase_count
@@ -160,9 +167,9 @@ fn read_file_to_cstr(path as cstr) as cstr:
     let f as ptr = fopen(path, "rb" to cstr)
     if f == None to ptr:
         return None to cstr
-    let _s1 as i32 = fseek(f, 0 to i64, 2 to i32)
-    let len as i64 = ftell(f)
-    let _s2 as i32 = fseek(f, 0 to i64, 0 to i32)
+    let _s1 as i32 = fseek(f, 0 to isize, 2 to i32)
+    let len as isize = ftell(f)
+    let _s2 as i32 = fseek(f, 0 to isize, 0 to i32)
     let buf as ptr = malloc(len to usize + 1 to usize)
     if buf == None to ptr:
         fclose(f)
@@ -202,10 +209,12 @@ fn compiler_name(mode as i32) as cstr:
     return "Mantiq" to cstr
 
 // ── Compiler Pipeline ───────────────────────────────────────────────────
-fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, perf as ptr[PerfState]) as bool:
+fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, target_str as cstr, perf as ptr[PerfState]) as bool:
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make(path_cstr), String.make(source_cstr))
+
+    let target as Target = Target.from_triple(target_str)
 
     // ── Phase 1: Parse / Lower ──
     let t0 as i64 = perf_begin(perf, "parse")
@@ -265,6 +274,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let t4 as i64 = perf_begin(perf, "codegen")
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()
+    (deref cg).target = target
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
     let ir_str as String = (deref cg).generate(root)
     perf_end(perf, "codegen", t4)
@@ -300,10 +310,26 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let extra_flags_c as cstr = extra_flags_str.data to cstr
 
     var _sp as i32 = 0
-    if lib_dir == None to cstr:
-        _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
+    if target.is_wasm():
+        if lib_dir == None to cstr:
+            _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. ../mantiqz/mantiq-compiler/src/runtime.c -o %s %s 2>&1" to cstr, ll_path, out_file, extra_flags_c)
+        else:
+            let ts_a_path as StringBuilder = StringBuilder.make()
+            ts_a_path.append(lib_dir)
+            ts_a_path.append("/libtree-sitter-mantiq.a" to cstr)
+            extern fn access(path as cstr, mode as i32) as i32
+            let ts_a_str as String = ts_a_path.to_string()
+            let has_ts_a as bool = access(ts_a_str.data to cstr, 0 to i32) == 0 to i32
+            ts_a_path.deinit()
+            if has_ts_a:
+                _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c %s/libtree-sitter-mantiq.a -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+            else:
+                _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
     else:
-        _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+        if lib_dir == None to cstr:
+            _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
+        else:
+            _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
     let res as i32 = system(cmd_buf to cstr)
     perf_end(perf, "link", t6)
 
@@ -311,15 +337,12 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
 
 // ── CLI Driver ──────────────────────────────────────────────────────────
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
-    let base as usize = argv to usize
-    let offset as usize = idx to usize * 8 to usize
-    let ptr_addr as ptr[cstr] = (base + offset) to ptr[cstr]
-    return deref ptr_addr
+    return argv[idx]
 
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     var default_mode as i32 = LanguageMode.Mantiq to i32
     var bin_name as cstr = "mantiq" to cstr
-    if argc >= 1 and str_contains(get_arg(argv, 0), "nizam" to cstr):
+    if argc >= 1 and str_contains(get_arg(argv, 0 to i32), "nizam" to cstr):
         default_mode = LanguageMode.Nizam to i32
         bin_name = "nizam" to cstr
     let self_name as cstr = compiler_name(default_mode)
@@ -333,11 +356,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         ai = ai + 1 to i32
 
     if argc < 2:
-        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--profile]\n  run <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
+        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--profile]\n  run <file.nz> [--target <triple>] [--profile]\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
 
-    let cmd as cstr = get_arg(argv, 1)
+    let cmd as cstr = get_arg(argv, 1 to i32)
     if strcmp(cmd, "version" to cstr) == 0 or strcmp(cmd, "--version" to cstr) == 0:
         let _p4 as i32 = printf("%s Self-Hosting Compiler v0.1.0\n" to cstr, self_name)
         let _f2 as i32 = fflush(None to ptr)
@@ -345,15 +368,31 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:
-            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--profile]\n" to cstr, bin_name)
+            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--target <triple>] [--profile]\n" to cstr, bin_name)
             return 1 to i32
-        let input_path as cstr = get_arg(argv, 2)
+        let input_path as cstr = get_arg(argv, 2 to i32)
         var out_path as cstr = "a.out" to cstr
+        var out_specified as bool = False
+        var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
+        var target_specified as bool = False
         var arg_i as i32 = 3 to i32
-        while arg_i < argc - 1:
-            if strcmp(get_arg(argv, arg_i), "-o" to cstr) == 0:
+        while arg_i < argc:
+            if strcmp(get_arg(argv, arg_i), "-o" to cstr) == 0 and arg_i + 1 to i32 < argc:
                 out_path = get_arg(argv, arg_i + 1 to i32)
+                out_specified = True
+                arg_i = arg_i + 1 to i32
+            elif strcmp(get_arg(argv, arg_i), "--target" to cstr) == 0 and arg_i + 1 to i32 < argc:
+                target_triple = get_arg(argv, arg_i + 1 to i32)
+                target_specified = True
+                arg_i = arg_i + 1 to i32
+            elif strcmp(get_arg(argv, arg_i), "--lib-dir" to cstr) == 0 and arg_i + 1 to i32 < argc:
+                extern fn set_compiler_lib_dir(dir as cstr)
+                set_compiler_lib_dir(get_arg(argv, arg_i + 1 to i32))
+                arg_i = arg_i + 1 to i32
             arg_i = arg_i + 1 to i32
+
+        if target_specified and strstr(target_triple, "wasm" to cstr) != None to cstr and not out_specified:
+            out_path = "a.wasm" to cstr
 
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
@@ -363,7 +402,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, ref perf)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf)
         perf_print(ref perf)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
@@ -376,12 +415,28 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "run" to cstr) == 0:
         if argc < 3:
-            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--profile]\n" to cstr, bin_name)
+            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--target <triple>] [--profile]\n" to cstr, bin_name)
             return 1 to i32
-        let input_path as cstr = get_arg(argv, 2)
+        let input_path as cstr = get_arg(argv, 2 to i32)
+        var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
+        var r_arg_i as i32 = 3 to i32
+        while r_arg_i < argc:
+            if strcmp(get_arg(argv, r_arg_i), "--target" to cstr) == 0 and r_arg_i + 1 to i32 < argc:
+                target_triple = get_arg(argv, r_arg_i + 1 to i32)
+                r_arg_i = r_arg_i + 1 to i32
+            elif strcmp(get_arg(argv, r_arg_i), "--lib-dir" to cstr) == 0 and r_arg_i + 1 to i32 < argc:
+                extern fn set_compiler_lib_dir(dir as cstr)
+                set_compiler_lib_dir(get_arg(argv, r_arg_i + 1 to i32))
+                r_arg_i = r_arg_i + 1 to i32
+            r_arg_i = r_arg_i + 1 to i32
+
         let pidv as i32 = getpid()
         let rt_buf as ptr[u8] = malloc(256 to usize) to ptr[u8]
-        let _rt0 as i32 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d" to cstr, pidv)
+        var _rt0 as i32 = 0
+        if strstr(target_triple, "wasm" to cstr) != None to cstr:
+            _rt0 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d.wasm" to cstr, pidv)
+        else:
+            _rt0 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d" to cstr, pidv)
         let out_path as cstr = rt_buf to cstr
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
@@ -391,11 +446,17 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, ref perf)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf)
         perf_print(ref perf)
         if ok:
-            let res as i32 = system(out_path)
-            return res
+            if strstr(target_triple, "wasm" to cstr) != None to cstr:
+                let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
+                let _rc0 as i32 = sprintf(run_cmd, "node --experimental-wasi-unstable-preview1 -e 'const { WASI } = require(\"wasi\"); const fs = require(\"fs\"); const wasi = new WASI({ version: \"preview1\", args: [\"%s\"] }); const wasm = new WebAssembly.Module(fs.readFileSync(\"%s\")); const inst = new WebAssembly.Instance(wasm, wasi.getImportObject()); const code = wasi.start(inst); process.exit(code || 0);'" to cstr, out_path, out_path)
+                let res as i32 = system(run_cmd to cstr)
+                return res
+            else:
+                let res as i32 = system(out_path)
+                return res
         else:
             let _p11 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
             return 1 to i32

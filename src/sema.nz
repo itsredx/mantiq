@@ -48,8 +48,8 @@ fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as pt
 
 fn read_file_to_str(path as cstr) as String:
     extern fn fopen(path as cstr, mode as cstr) as ptr
-    extern fn fseek(stream as ptr, offset as i64, whence as i32) as i32
-    extern fn ftell(stream as ptr) as i64
+    extern fn fseek(stream as ptr, offset as isize, whence as i32) as i32
+    extern fn ftell(stream as ptr) as isize
     extern fn rewind(stream as ptr)
     extern fn fread(ptr as ptr, size as usize, nmemb as usize, stream as ptr) as usize
     extern fn fclose(stream as ptr) as i32
@@ -59,8 +59,8 @@ fn read_file_to_str(path as cstr) as String:
         return String.make("" to cstr)
         
     let SEEK_END as i32 = 2
-    let dummy1 as i32 = fseek(f, 0 to i64, SEEK_END)
-    let file_size as i64 = ftell(f)
+    let dummy1 as i32 = fseek(f, 0 to isize, SEEK_END)
+    let file_size as isize = ftell(f)
     rewind(f)
     
     let cap as usize = file_size to usize + 1 to usize

@@ -1,0 +1,7 @@
+// ── WASM Hello Test ───────────────────────────────────────────────────
+
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    let _ = printf("Hello from WebAssembly WASI!\n" to cstr)
+    return 0

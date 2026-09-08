@@ -1,0 +1,81 @@
+// ── WASM Core Features Test ──────────────────────────────────────────
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn malloc(sz as usize) as ptr[u8]
+extern fn free(p as ptr[u8])
+
+struct Point:
+    public var x as i32
+    public var y as i32
+
+struct NodeData:
+    public var id as i32
+    public var next as ptr[NodeData]
+
+fn add(a as i32, b as i32) as i32:
+    return a + b
+
+fn fib(n as i32) as i32:
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+fn main() as i32:
+    let _ = printf("=== Testing WASM Core Features ===\n" to cstr)
+
+    // Test 1: Function calls & Recursion
+    let f10 as i32 = fib(10)
+    if f10 == 55:
+        let _ = printf("Test 1 (Recursion & Arithmetic): PASSED! fib(10)=%d\n" to cstr, f10)
+    else:
+        let _ = printf("Test 1 (Recursion & Arithmetic): FAILED! expected 55, got %d\n" to cstr, f10)
+        return 1
+
+    // Test 2: Struct creation & field access
+    var pt as Point = Point(x = 12 to i32, y = 34 to i32)
+    if pt.x == 12 and pt.y == 34:
+        let _ = printf("Test 2 (Struct Stack Layout): PASSED!\n" to cstr)
+    else:
+        let _ = printf("Test 2 (Struct Stack Layout): FAILED!\n" to cstr)
+        return 1
+
+    // Test 3: Pointer & Dynamic Allocation (32-bit heap)
+    let p_mem as ptr[u8] = malloc(64 to usize)
+    if p_mem != None to ptr[u8]:
+        let _ = printf("Test 3 (Heap Allocation): PASSED!\n" to cstr)
+        free(p_mem)
+    else:
+        let _ = printf("Test 3 (Heap Allocation): FAILED!\n" to cstr)
+        return 1
+
+    // Test 4: Linked structures (pointer width)
+    let n1 as ptr[NodeData] = malloc(size(NodeData)) to ptr[NodeData]
+    let n2 as ptr[NodeData] = malloc(size(NodeData)) to ptr[NodeData]
+    (deref n1).id = 101
+    (deref n1).next = n2
+    (deref n2).id = 202
+    (deref n2).next = None to ptr[NodeData]
+
+    if (deref n1).id == 101 and (deref (deref n1).next).id == 202:
+        let _ = printf("Test 4 (Linked Structs): PASSED!\n" to cstr)
+    else:
+        let _ = printf("Test 4 (Linked Structs): FAILED!\n" to cstr)
+        return 1
+
+    free(n2 to ptr[u8])
+    free(n1 to ptr[u8])
+
+    // Test 5: 32-bit Sizes
+    let sz_ptr as usize = size(ptr[i32])
+    let sz_usize as usize = size(usize)
+    let sz_node as usize = size(NodeData)
+
+    // On wasm32: ptr is 4, usize is 4, NodeData (i32 + ptr) is 8
+    if sz_ptr == 4 to usize and sz_usize == 4 to usize and sz_node == 8 to usize:
+        let _ = printf("Test 5 (32-bit Type Sizes): PASSED! ptr=%d, usize=%d, NodeData=%d\n" to cstr, sz_ptr to i32, sz_usize to i32, sz_node to i32)
+    else:
+        let _ = printf("Test 5 (32-bit Type Sizes): FAILED! ptr=%d, usize=%d, NodeData=%d\n" to cstr, sz_ptr to i32, sz_usize to i32, sz_node to i32)
+        return 1
+
+    let _ = printf("\n[PASS] All WASM Core Features tests passed!\n" to cstr)
+    return 0

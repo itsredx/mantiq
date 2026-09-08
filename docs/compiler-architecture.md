@@ -69,6 +69,7 @@ Source text (*.nz, *.mq)
 | :--- | :--- | :--- | :--- |
 | **AST & Symbols** | `src/symbols.nz` | ~1,200 | `Node`, `Span`, `Symbol`, `Scope`, `NodeType` definitions, accessors, and setters |
 | **Type System** | `src/types.nz` | ~180 | `Type`, `TypeKind`, primitive/composite types, copy vs move classification |
+| **Target & Layout** | `src/layout.nz` | ~250 | Target abstraction (`Target`), pointer widths (32-bit vs 64-bit), struct alignment & layout |
 | **Tree-Sitter FFI** | `src/tree_sitter.nz` | ~100 | C FFI bindings to Tree-sitter parser, node navigation, and cursor API |
 | **CST Lowering** | `src/lower.nz` | ~1,700 | Transforms Tree-sitter CST to typed AST, macro definition/invocation handling |
 | **Semantic Analysis** | `src/sema.nz` | ~800 | Two-pass symbol declaration and resolution, module import loading, closure detection |

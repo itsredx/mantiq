@@ -1,6 +1,7 @@
 # Nizam compiled binaries and objects
 *.o
 *.so
+*.a
 *.ll
 mantiq
 nizam

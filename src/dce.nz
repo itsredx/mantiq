@@ -7,6 +7,22 @@ from symbols import Node, NodeType, Span, TypeAnnotation, make_node, node_kind, 
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
+struct OptionLayout:
+    public var has_val as u8
+    public var val_ptr as ptr[u8]
+
+fn option_has_value(opt as ptr[u8]) as bool:
+    if opt == None to ptr[u8]:
+        return False
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).has_val == 1 to u8
+
+fn option_value(opt as ptr[u8]) as ptr[u8]:
+    if opt == None to ptr[u8]:
+        return None to ptr[u8]
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).val_ptr
+
 // ── Dead Code Eliminator ───────────────────────────────────────────────
 struct DeadCodeEliminator:
     public var quantum_used as bool
@@ -52,8 +68,8 @@ struct DeadCodeEliminator:
                 while ai < a_count:
                     let opt_a as Option[ptr[TypeAnnotation]] = annots[ai]
                     let opt_ref as ptr[u8] = (ref opt_a) to ptr[u8]
-                    if (deref (opt_ref to ptr[u8])) != 0 to u8:
-                        let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                    if option_has_value(opt_ref):
+                        let val_p as ptr[u8] = option_value(opt_ref)
                         let ta as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
                         if ta != None to ptr[TypeAnnotation] and (deref ta).name.data != None to ptr[u8]:
                             let t_name as cstr = (deref ta).name.data to cstr
@@ -80,8 +96,8 @@ struct DeadCodeEliminator:
             if take_else:
                 let opt_eb as Option[ptr[Node]] = node_else_branch(node)
                 let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
-                if (deref (opt_ref to ptr[u8])) != 0 to u8:
-                    let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                if option_has_value(opt_ref):
+                    let val_p as ptr[u8] = option_value(opt_ref)
                     self.mark_node(val_p to ptr[Node])
 
         elif k == NodeType.WhileStmt:
@@ -226,8 +242,8 @@ struct DeadCodeEliminator:
                             // Constant False: replace IfStmt with else_branch if it exists
                             let opt_eb as Option[ptr[Node]] = node_else_branch(stmt)
                             let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
-                            if (deref (opt_ref to ptr[u8])) != 0 to u8:
-                                let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+                            if option_has_value(opt_ref):
+                                let val_p as ptr[u8] = option_value(opt_ref)
                                 let eb as ptr[Node] = val_p to ptr[Node]
                                 if eb != None to ptr[Node]:
                                     self.sweep_node(eb)
@@ -260,6 +276,6 @@ struct DeadCodeEliminator:
             self.sweep_node(node_then_branch(node))
             let opt_eb as Option[ptr[Node]] = node_else_branch(node)
             let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
-            if (deref (opt_ref to ptr[u8])) != 0 to u8:
-                let val_p as ptr[u8] = (deref ((opt_ref to usize + 8 to usize) to ptr[ptr[u8]]))
+            if option_has_value(opt_ref):
+                let val_p as ptr[u8] = option_value(opt_ref)
                 self.sweep_node(val_p to ptr[Node])

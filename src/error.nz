@@ -13,13 +13,13 @@ extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
 extern fn malloc(size as usize) as ptr
 extern fn free(ptr as ptr)
 extern fn strlen(str as cstr) as usize
-extern fn ioctl(fd as i32, request as u64, ...) as i32
+extern fn nizam_get_terminal_width() as i32
 extern fn getenv(name as cstr) as cstr
 extern fn atoi(nptr as cstr) as i32
 extern fn fopen(filename as cstr, mode as cstr) as ptr
 extern fn fclose(stream as ptr) as i32
-extern fn fseek(stream as ptr, offset as i64, origin as i32) as i32
-extern fn ftell(stream as ptr) as i64
+extern fn fseek(stream as ptr, offset as isize, origin as i32) as i32
+extern fn ftell(stream as ptr) as isize
 extern fn fread(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
 
 // ── Standard Error Code Catalog ──────────────────────────────────────────
@@ -88,9 +88,9 @@ fn read_file_content(path as cstr) as cstr:
     if path != None to cstr:
         let f as ptr = fopen(path, "rb" to cstr)
         if f != None to ptr:
-            let _s1 as i32 = fseek(f, 0 to i64, 2 to i32)
-            let len as i64 = ftell(f)
-            let _s2 as i32 = fseek(f, 0 to i64, 0 to i32)
+            let _s1 as i32 = fseek(f, 0 to isize, 2 to i32)
+            let len as isize = ftell(f)
+            let _s2 as i32 = fseek(f, 0 to isize, 0 to i32)
             let buf as ptr = malloc(len to usize + 1 to usize)
             if buf != None to ptr:
                 let read_count as usize = fread(buf, 1 to usize, len to usize, f)
@@ -109,30 +109,7 @@ struct WinSize:
     public var ws_ypixel as u16
 
 fn get_terminal_width() as i32:
-    let env_cols as cstr = getenv("COLUMNS" to cstr)
-    if env_cols != None to cstr:
-        let parsed_w as i32 = atoi(env_cols)
-        if parsed_w > 20 to i32:
-            var w as i32 = parsed_w - 4 to i32
-            if w < 70 to i32:
-                return 70 to i32
-            if w > 120 to i32:
-                return 120 to i32
-            return w
-
-    var ws as WinSize = WinSize(ws_row = 0 to u16, ws_col = 0 to u16, ws_xpixel = 0 to u16, ws_ypixel = 0 to u16)
-    let ret as i32 = ioctl(1 to i32, 21523 to u64, ref ws)
-    let col_u16 as u16 = ws.ws_col
-    if ret == 0 and col_u16 > 20 to u16:
-        let col_i32 as i32 = col_u16 to i32
-        var w as i32 = col_i32 - 4 to i32
-        if w < 70 to i32:
-            return 70 to i32
-        if w > 120 to i32:
-            return 120 to i32
-        return w
-
-    return 84 to i32
+    return nizam_get_terminal_width()
 
 fn visible_len(s as cstr) as i32:
     if s == None to cstr:
