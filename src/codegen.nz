@@ -9257,10 +9257,13 @@ struct LLVMCodegen:
                 elem_byte_size = self.type_llvm_byte_size(start_t)
         else:
             let iter_val as ptr[u8] = self.emit_expr(iterable)
+            let slice_t_iter as cstr = if (deref self).target.pointer_size == 4 to usize: "{ ptr, i32, i32 }" to cstr else: "{ ptr, i64, i64 }" to cstr
             let s_ptr_temp as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, s_ptr_temp to cstr)
-            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, " = extractvalue ")
+            append_cstr(ref (deref self).main_out, slice_t_iter)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, iter_val to cstr)
             append_cstr(ref (deref self).main_out, ", 0\n")
             src_ptr = s_ptr_temp
@@ -9268,10 +9271,21 @@ struct LLVMCodegen:
             let s_len_temp as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, s_len_temp to cstr)
-            append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+            append_cstr(ref (deref self).main_out, " = extractvalue ")
+            append_cstr(ref (deref self).main_out, slice_t_iter)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, iter_val to cstr)
             append_cstr(ref (deref self).main_out, ", 1\n")
-            total_count_temp = s_len_temp
+            if (deref self).target.pointer_size == 4 to usize:
+                let s_len_ext as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, s_len_ext to cstr)
+                append_cstr(ref (deref self).main_out, " = zext i32 ")
+                append_cstr(ref (deref self).main_out, s_len_temp to cstr)
+                append_cstr(ref (deref self).main_out, " to i64\n")
+                total_count_temp = s_len_ext
+            else:
+                total_count_temp = s_len_temp
 
             let iter_t_desc as ptr[Type] = node_inferred_type(iterable)
             if iter_t_desc != None to ptr[Type] and (deref iter_t_desc).payload != None to ptr[Type]:
@@ -9574,29 +9588,51 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, acc_len_slot to cstr)
         append_cstr(ref (deref self).main_out, "\n")
 
+        let slice_t_ret as cstr = if (deref self).target.pointer_size == 4 to usize: "{ ptr, i32, i32 }" to cstr else: "{ ptr, i64, i64 }" to cstr
+        let sz_t_ret as cstr = if (deref self).target.pointer_size == 4 to usize: "i32" to cstr else: "i64" to cstr
+        var len_val_ret as ptr[u8] = final_len
+        if (deref self).target.pointer_size == 4 to usize:
+            let tr_len as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, tr_len to cstr)
+            append_cstr(ref (deref self).main_out, " = trunc i64 ")
+            append_cstr(ref (deref self).main_out, final_len to cstr)
+            append_cstr(ref (deref self).main_out, " to i32\n")
+            len_val_ret = tr_len
+
         let fat1 as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, fat1 to cstr)
-        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } undef, ptr ")
+        append_cstr(ref (deref self).main_out, " = insertvalue ")
+        append_cstr(ref (deref self).main_out, slice_t_ret)
+        append_cstr(ref (deref self).main_out, " undef, ptr ")
         append_cstr(ref (deref self).main_out, final_buf to cstr)
         append_cstr(ref (deref self).main_out, ", 0\n")
 
         let fat2 as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, fat2 to cstr)
-        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+        append_cstr(ref (deref self).main_out, " = insertvalue ")
+        append_cstr(ref (deref self).main_out, slice_t_ret)
+        append_cstr(ref (deref self).main_out, " ")
         append_cstr(ref (deref self).main_out, fat1 to cstr)
-        append_cstr(ref (deref self).main_out, ", i64 ")
-        append_cstr(ref (deref self).main_out, final_len to cstr)
+        append_cstr(ref (deref self).main_out, ", ")
+        append_cstr(ref (deref self).main_out, sz_t_ret)
+        append_cstr(ref (deref self).main_out, " ")
+        append_cstr(ref (deref self).main_out, len_val_ret to cstr)
         append_cstr(ref (deref self).main_out, ", 1\n")
 
         let fat3 as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, fat3 to cstr)
-        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+        append_cstr(ref (deref self).main_out, " = insertvalue ")
+        append_cstr(ref (deref self).main_out, slice_t_ret)
+        append_cstr(ref (deref self).main_out, " ")
         append_cstr(ref (deref self).main_out, fat2 to cstr)
-        append_cstr(ref (deref self).main_out, ", i64 ")
-        append_cstr(ref (deref self).main_out, final_len to cstr)
+        append_cstr(ref (deref self).main_out, ", ")
+        append_cstr(ref (deref self).main_out, sz_t_ret)
+        append_cstr(ref (deref self).main_out, " ")
+        append_cstr(ref (deref self).main_out, len_val_ret to cstr)
         append_cstr(ref (deref self).main_out, ", 2\n")
 
         return fat3
