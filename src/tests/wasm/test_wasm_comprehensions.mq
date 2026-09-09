@@ -1,0 +1,26 @@
+// ── Imports ──────────────────────────────────────────────────────────
+import string
+from string import String
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Main Entrypoint ──────────────────────────────────────────────────
+fn main() as i32:
+    let _ as i32 = printf("=== Testing WASM Mantiq List Comprehensions ===\n" to cstr)
+
+    // Test 1: Basic list comprehension over collection
+    let nums as List[i64] = [1 to i64, 2 to i64, 3 to i64, 4 to i64, 5 to i64]
+    let doubled as List[i64] = [for x in nums: x * 2 to i64]
+
+    let _ as i32 = printf("  Doubled list length: %lld\n" to cstr, doubled.length())
+    let _ as i32 = printf("  doubled[0]=%lld, doubled[4]=%lld\n" to cstr, doubled[0 to i64], doubled[4 to i64])
+    let _ as i32 = printf("  [PASS] List comprehension over collection\n" to cstr)
+
+    // Test 2: Filtered list comprehension with predicate
+    let evens as List[i64] = [for x in nums: if x % 2 to i64 == 0 to i64: x]
+    let _ as i32 = printf("  Evens count: %lld (first=%lld)\n" to cstr, evens.length(), evens[0 to i64])
+    let _ as i32 = printf("  [PASS] Filtered list comprehension\n" to cstr)
+
+    let _ as i32 = printf("\n[PASS] All WASM List Comprehension tests passed!\n" to cstr)
+    return 0

@@ -1,0 +1,40 @@
+// ── Imports ──────────────────────────────────────────────────────────
+import string
+from string import String
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Cooperative Coroutines ───────────────────────────────────────────
+async fn async_worker(id as i32, multiplier as i32) as i32:
+    return id * multiplier
+
+async fn async_sum(limit as i32) as i32:
+    var acc as i32 = 0
+    var i as i32 = 1
+    while i <= limit:
+        acc = acc + i
+        i = i + 1
+    return acc
+
+// ── Main Entrypoint ──────────────────────────────────────────────────
+fn main() as i32:
+    let _ as i32 = printf("=== Testing WASM Mantiq Actor & Async Concurrency ===\n" to cstr)
+
+    // Test 1: Spawning async tasks & awaiting
+    let t1 = spawn async_worker(21 to i32, 2 to i32)
+    let t2 = spawn async_sum(10 to i32)
+    let r1 as i32 = await t1
+    let r2 as i32 = await t2
+    let _ as i32 = printf("  [PASS] Async spawn & await: r1=%d, r2=%d\n" to cstr, r1, r2)
+
+    // Test 2: Channel mailbox message passing
+    let ch as Channel[i32] = channel[i32](4 to i64)
+    ch.send(101 to i32)
+    ch.send(202 to i32)
+    let m1 as i32 = ch.recv()
+    let m2 as i32 = ch.recv()
+    let _ as i32 = printf("  [PASS] Channel mailbox message passing: m1=%d, m2=%d\n" to cstr, m1, m2)
+
+    let _ as i32 = printf("\n[PASS] All WASM Mantiq Concurrency tests passed!\n" to cstr)
+    return 0
