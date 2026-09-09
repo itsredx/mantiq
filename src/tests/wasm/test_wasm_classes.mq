@@ -1,0 +1,77 @@
+// ── Extern Declarations ──────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+
+// ── Test Assertions ──────────────────────────────────────────────────
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1)
+
+// ── Interface & Class Hierarchy ──────────────────────────────────────
+interface Shape:
+    fn area(self) as f64
+    fn perimeter(self) as f64
+
+class Circle:
+    public var radius as f64
+
+    public fn area(self) as f64:
+        return 3.14159 * (deref self).radius * (deref self).radius
+
+    public fn perimeter(self) as f64:
+        return 2.0 * 3.14159 * (deref self).radius
+
+class Rectangle:
+    public var width as f64
+    public var height as f64
+
+    public fn area(self) as f64:
+        return (deref self).width * (deref self).height
+
+    public fn perimeter(self) as f64:
+        return 2.0 * ((deref self).width + (deref self).height)
+
+class BaseEntity:
+    public var id as i32
+
+    public fn compute(self) as i32:
+        return (deref self).id * 10
+
+class Player(BaseEntity):
+    public var score as i32
+
+    public fn compute(self) as i32:
+        let base_res as i32 = super().compute()
+        return base_res + (deref self).score
+
+// ── Main Entrypoint ──────────────────────────────────────────────────
+fn main() as i32:
+    let _ as i32 = printf("=== Testing WASM Mantiq Classes & Interfaces ===\n" to cstr)
+
+    // Test 1: Class Instantiation and Methods
+    var c as Circle = Circle(10.0)
+    let c_area as f64 = c.area()
+    let c_perim as f64 = c.perimeter()
+    let _ as i32 = printf("Circle(10.0) -> area=%f, perim=%f\n" to cstr, c_area, c_perim)
+    assert_true(c_area > 314.0 and c_area < 315.0, "Circle area" to cstr)
+    assert_true(c_perim > 62.0 and c_perim < 63.0, "Circle perim" to cstr)
+    let _ as i32 = printf("  [PASS] Class instantiation and method dispatch\n" to cstr)
+
+    // Test 2: Rectangle and multiple methods
+    var r as Rectangle = Rectangle(5.0, 8.0)
+    let r_area as f64 = r.area()
+    let r_perim as f64 = r.perimeter()
+    assert_true(r_area > 39.9 and r_area < 40.1, "Rectangle area" to cstr)
+    assert_true(r_perim > 25.9 and r_perim < 26.1, "Rectangle perim" to cstr)
+    let _ as i32 = printf("  [PASS] Secondary class verification\n" to cstr)
+
+    // Test 3: Inheritance & super() delegation
+    var p as Player = Player(42, 100)
+    let val as i32 = p.compute()
+    let _ as i32 = printf("Player(42, 100).compute() = %d\n" to cstr, val)
+    assert_true(val == 520, "Inheritance super delegation" to cstr)
+    let _ as i32 = printf("  [PASS] Inheritance & super() delegation\n" to cstr)
+
+    let _ as i32 = printf("\n[PASS] All WASM Mantiq Class & Interface tests passed!\n" to cstr)
+    return 0

@@ -1,0 +1,58 @@
+// ── Higher-Order Functions ───────────────────────────────────────────
+fn apply_op(f as fn(i32) as i32, val as i32) as i32:
+    return f(val)
+
+fn apply_binary(f as fn(i32, i32) as i32, a as i32, b as i32) as i32:
+    return f(a, b)
+
+// ── Main Entrypoint ──────────────────────────────────────────────────
+fn main() as i32:
+    print("=== Testing WASM Mantiq Closures & Lambdas ===")
+
+    // Test 1: Basic Expression Lambda
+    let double_it = (x as i32) => x * 2
+    let res1 as i32 = double_it(21)
+    if res1 != 42:
+        print("  FAIL: Basic lambda double_it(21) expected 42")
+        return 1
+    print("  [PASS] Basic Expression Lambda: double_it(21) = 42")
+
+    // Test 2: Multi-Parameter Lambda
+    let add_fn = (a as i32, b as i32) => a + b
+    let res2 as i32 = add_fn(17, 25)
+    if res2 != 42:
+        print("  FAIL: Multi-param lambda add_fn(17, 25) expected 42")
+        return 1
+    print("  [PASS] Multi-Parameter Lambda: add_fn(17, 25) = 42")
+
+    // Test 3: Lexical Environment Heap Capture
+    let factor as i32 = 10
+    let offset as i32 = 5
+    let scale_and_offset = (x as i32) => x * factor + offset
+    let res3 as i32 = scale_and_offset(4)
+    if res3 != 45:
+        print("  FAIL: Lexical capture expected 45")
+        return 1
+    print("  [PASS] Lexical Environment Heap Capture: scale(4) = 45")
+
+    // Test 4: Higher-Order Function Passing
+    let multiplier as i32 = 3
+    let triple_with_cap = (n as i32) => n * multiplier
+    let res4 as i32 = apply_op(triple_with_cap, 14)
+    if res4 != 42:
+        print("  FAIL: Higher-order function expected 42")
+        return 1
+    print("  [PASS] Higher-Order Function Application: apply_op(14) = 42")
+
+    // Test 5: Currying & Nested Closures
+    let base as i32 = 100
+    let make_adder = (a as i32) => (b as i32) => base + a + b
+    let add50 = make_adder(50)
+    let res5 as i32 = add50(25)
+    if res5 != 175:
+        print("  FAIL: Nested closures / currying expected 175")
+        return 1
+    print("  [PASS] Nested Closures & Currying: add50(25) = 175")
+
+    print("\n[PASS] All WASM Mantiq Closures & Lambdas tests passed!")
+    return 0

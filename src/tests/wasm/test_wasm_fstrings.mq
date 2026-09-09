@@ -1,0 +1,62 @@
+// ── Imports ──────────────────────────────────────────────────────────
+import string
+from string import String
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn exit(code as i32)
+
+// ── Assertions ───────────────────────────────────────────────────────
+fn assert_str_eq(actual as String, expected as cstr, msg as cstr):
+    if strcmp(actual.data to cstr, expected) != 0:
+        let _ as i32 = printf("FAIL: %s (got '%s', expected '%s')\n" to cstr, msg, actual.data to cstr, expected)
+        exit(1 to i32)
+
+// ── Main Entrypoint ──────────────────────────────────────────────────
+fn main() as i32:
+    let _ as i32 = printf("=== Testing WASM Mantiq String Interpolation (F-Strings) ===\n" to cstr)
+
+    // Test 1: Basic Variable Interpolation
+    let name as String = String.make("World" to cstr)
+    let greeting as String = f"Hello, {name}!"
+    assert_str_eq(greeting, "Hello, World!" to cstr, "Basic string interpolation" to cstr)
+    let _ as i32 = printf("  [PASS] Basic F-String variable interpolation: '%s'\n" to cstr, greeting.data to cstr)
+
+    // Test 2: Integer and Boolean Interpolation
+    let i as i32 = 100 to i32
+    let s_int as String = f"Value: {i}"
+    assert_str_eq(s_int, "Value: 100" to cstr, "i32 interpolation" to cstr)
+
+    let b_true as bool = True
+    let b_false as bool = False
+    let s_bool as String = f"Flag: {b_true}, Other: {b_false}"
+    assert_str_eq(s_bool, "Flag: True, Other: False" to cstr, "bool interpolation" to cstr)
+    let _ as i32 = printf("  [PASS] Integer and Boolean interpolation\n" to cstr)
+
+    // Test 3: Binary Expression Interpolation
+    let a as i32 = 20 to i32
+    let b as i32 = 30 to i32
+    let s_expr as String = f"Sum: {a + b}"
+    assert_str_eq(s_expr, "Sum: 50" to cstr, "Binary expression interpolation" to cstr)
+    let _ as i32 = printf("  [PASS] Binary expression inside interpolation: '%s'\n" to cstr, s_expr.data to cstr)
+
+    // Test 4: Backtick Template and Escaped Braces
+    let item as String = String.make("apple" to cstr)
+    let price as i32 = 5 to i32
+    let receipt as String = `Item: {item}, Price: ${price}`
+    assert_str_eq(receipt, "Item: apple, Price: $5" to cstr, "Backtick template string" to cstr)
+
+    let braces as String = f"{{literal braces}} and {item}"
+    assert_str_eq(braces, "{literal braces} and apple" to cstr, "Escaped braces in f-string" to cstr)
+    let _ as i32 = printf("  [PASS] Backtick template strings & escaped braces\n" to cstr)
+
+    // Test 5: Multi-Part Interpolation
+    let x as i32 = 1 to i32
+    let y as i32 = 2 to i32
+    let z as i32 = 3 to i32
+    let multi as String = f"{x} + {y} = {z}"
+    assert_str_eq(multi, "1 + 2 = 3" to cstr, "Multi-part interpolation" to cstr)
+    let _ as i32 = printf("  [PASS] Multi-part interpolation: '%s'\n" to cstr, multi.data to cstr)
+
+    let _ as i32 = printf("\n[PASS] All WASM Mantiq String Interpolation tests passed!\n" to cstr)
+    return 0

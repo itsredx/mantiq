@@ -21,6 +21,9 @@ TEST_FILES=(
     "mantiq/src/tests/wasm/test_wasm_features.nz"
     "mantiq/src/tests/wasm/test_wasm_concurrency.nz"
     "mantiq/src/tests/wasm/test_wasm_collections.nz"
+    "mantiq/src/tests/wasm/test_wasm_classes.mq"
+    "mantiq/src/tests/wasm/test_wasm_closures.mq"
+    "mantiq/src/tests/wasm/test_wasm_fstrings.mq"
 )
 
 PASSED=0
