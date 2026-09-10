@@ -29,7 +29,14 @@ const wasmModule = new WebAssembly.Module(wasmBytes);
 
 // ── Host System Bridge ────────────────────────────────────────────────
 let instance;
-const importObject = wasi.getImportObject();
+let importObject;
+if (typeof wasi.getImportObject === "function") {
+  importObject = wasi.getImportObject();
+} else if (wasi.wasiImport) {
+  importObject = { wasi_snapshot_preview1: wasi.wasiImport };
+} else {
+  importObject = { wasi_snapshot_preview1: {} };
+}
 importObject.env = importObject.env || {};
 importObject.env.host_system = (cmdPtr) => {
   const mem = new Uint8Array(instance.exports.memory.buffer);
