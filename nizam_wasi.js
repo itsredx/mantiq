@@ -4,6 +4,7 @@ const { WASI } = require("wasi");
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
+const os = require("os");
 
 // ── Environment & Arguments Setup ──────────────────────────────────────
 let wasmPath = process.env.NIZAM_WASM || path.resolve(__dirname, "../stage3/nizam.wasm");
@@ -14,14 +15,19 @@ if (rawArgs.length > 0 && rawArgs[0].endsWith(".wasm")) {
 }
 const args = [path.basename(wasmPath), ...rawArgs];
 
+const tmpDir = os.tmpdir();
+const preopens = {
+  [tmpDir]: tmpDir,
+  "/tmp": "/tmp",
+  ".": ".",
+  "/": "/"
+};
+
 const wasi = new WASI({
   version: "preview1",
   args,
   env: process.env,
-  preopens: {
-    "/": "/",
-    ".": "."
-  }
+  preopens
 });
 
 const wasmBytes = fs.readFileSync(wasmPath);
