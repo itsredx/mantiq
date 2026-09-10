@@ -135,25 +135,25 @@ The Nizam compiler achieves recursive self-compilation targeting WebAssembly:
                   └─────────────────────────────────────┘
 ```
 
-### V8 Engine GC Tuning for Node.js WASI
+### V8 Engine GC Tuning for Node.js WASI (Development CLI)
 
 In Node.js v20 (V8 v11.3+), concurrent garbage collection triggers an assertion crash (`unreachable code`) inside `MarkCompactCollector::CollectGarbage` during dynamic linear memory growth (`memory.grow`). 
 
-To execute the compiler reliably inside Node.js WASI, `nizam_wasi.js` configures the V8 flags:
+To execute the compiler reliably inside Node.js WASI for local testing, `nizam_wasi.js` configures:
 
 ```bash
-node --no-incremental-marking --stack-size=65536 --max-old-space-size=4096 nizam_wasi.js stage4/nizam.wasm [args...]
+node --no-incremental-marking --stack-size=16384 --max-old-space-size=384 nizam_wasi.js stage4/nizam.wasm [args...]
 ```
 
 ### Compiling with `nizam_wasi.js`
 
-The runner script `./nizam_wasi.js` acts as a universal binary launcher:
+The runner script `./nizam_wasi.js` acts as a universal binary launcher for WASM binaries:
 
 ```bash
 # Display compiler version
 ./nizam_wasi.js stage4/nizam.wasm version
 
-# Compile a user program to WebAssembly
+# Compile a user program to WebAssembly under WASI
 ./nizam_wasi.js stage4/nizam.wasm build program.nz -o program.wasm --target wasm32-wasi --lib-dir mantiq
 
 # Run the compiled WebAssembly binary
@@ -162,33 +162,66 @@ The runner script `./nizam_wasi.js` acts as a universal binary launcher:
 
 ---
 
-## 6. In-Browser WebAssembly Studio (`playground/`)
+## 6. WebAssembly Studio & Cloud Compiler Architecture
 
-The repository includes a modern, zero-dependency browser execution studio located in `playground/`.
+The project features a dual-layer production architecture combining an in-browser studio with a containerized cloud compilation microservice.
 
-### Architecture
+```
+Browser (Playground UI)
+       │
+       ├─► Vercel Edge CDN (100% Pure Static Site)
+       │     ├─ index.html
+       │     ├─ studio.js (UI state & editor engine)
+       │     ├─ highlighter.js (Dual-syntax tokenizer)
+       │     ├─ wasi_browser.js (In-browser WASI Preview 1 VM)
+       │     └─ wasm/*.wasm (12 precompiled demo binaries)
+       │
+       ├─► Client-Side WASI Execution (0ms compilation, zero server required)
+       │     └─ Instant execution of precompiled demos in WebAssembly VM
+       │
+       └─► Live Compilation (POST /api/compile)
+             └─ Proxied by Vercel Edge to external Compiler Worker (Render / Cloud Run)
+                 └─ Native Linux 'nizam' binary compiles code in ~0.4s (Peak RAM: ~41MB)
+```
 
-1. **Pure JavaScript WASI Engine (`playground/wasi_browser.js`)**:
-   - Implements WASI Preview 1 directly in vanilla JavaScript without heavy third-party bundles.
-   - Handles `fd_write` to capture `stdout` and `stderr` streams and forward them into the terminal DOM.
-   - Provides mock/real implementations for `clock_time_get`, `random_get`, `args_sizes_get`, `args_get`, and `proc_exit`.
-2. **Terminal with Catppuccin 24-bit TrueColor ANSI Parser (`playground/app.js`)**:
-   - Parses 24-bit TrueColor (`\x1b[38;2;R;G;Bm`), 256 colors, and 16 standard ANSI colors mapped to the Catppuccin Macchiato palette.
-   - Renders Unicode box graphics (`╭─`, `│`, `├─`, `╰─`) and source pointer arrows with strict monospace alignment and line preservation (`white-space: pre-wrap`).
-3. **Linear Memory Hex Inspector**:
-   - Directly inspects WebAssembly `instance.exports.memory.buffer`.
-   - Displays 64KB memory pages with hex offset addresses, raw bytes, and ASCII character decode.
-4. **Live Compiler Bridge (`playground/server.js`)**:
-   - Exposes `POST /api/compile` to compile in-browser code edits using the self-hosted `stage4/nizam.wasm` compiler.
+### 1. In-Browser WASI Engine (`playground/wasi_browser.js`)
+- Implements WASI Preview 1 directly in vanilla JavaScript without external dependencies.
+- Intercepts `fd_write` to forward `stdout` and `stderr` directly to the terminal DOM.
+- Implements `clock_time_get`, `random_get`, `args_sizes_get`, `args_get`, and `proc_exit`.
+
+### 2. Vercel Static Edge Migration
+In default zero-config Node setups, Vercel automatically treats root files named `app.js`, `index.js`, or `server.js` as Express serverless functions (`/var/task/app.cjs`). Because browser DOM globals (`document`, `window`) do not exist in Node, this caused `ReferenceError: document is not defined` crashes.
+
+**Resolution:**
+- Renamed `playground/app.js` to `playground/studio.js`.
+- Removed `playground/package.json` to inform Vercel that the repository is a pure static asset site.
+- Added `playground/.vercelignore` to exclude development scripts (`dev_server.js`).
+- Configured `playground/vercel.json` with `"framework": null` and edge rewrites.
+
+### 3. Native Compiler Microservice & 96% Memory Reduction (`compiler-service/`)
+When hosting on 512MB RAM free container tiers (Render, Cloud Run), running `stage4/nizam.wasm` inside Node WASI allocated 444MB of V8 arenas, which doubled to **1,007 MB** during `child_process.execSync` fork operations—crashing containers with `OOMKilled`.
+
+**Resolution:**
+- **Native Binary Execution:** Bundled the native Linux x86-64 ELF `nizam` binary and `libtree-sitter-mantiq.so` in `compiler-service/bin/`.
+- **System Dynamic Linker:** Installed `nizam` to `/usr/local/bin` and registered the shared library via `ldconfig`.
+- **Pre-warmed Toolchain:** Pre-compiled the Zig WASI libc, compiler-rt, and `runtime.c` during the Docker image build stage into `/opt/zig_cache`.
+- **Direct Child Process Execution:** `server.js` invokes `nizam` directly via `execFile()`, dropping peak memory from **1,007MB to 41MB** (**96% memory reduction**) and latency from **6.0s to 0.4s**.
+
+### Memory & Performance Comparison
+
+| Execution Model | Peak RAM (RSS) | Compile Latency | 512MB Tier Status |
+| :--- | :--- | :--- | :--- |
+| **Node WASI (`stage4/nizam.wasm`)** | **1,007 MB** | ~6.0s | ❌ OOM Crashes (SIGKILL) |
+| **Native Nizam Binary (`bin/nizam`)** | **41 MB** | **~0.4s** | ✅ 100% Stable (< 10% RAM) |
 
 ---
 
-## 7. CLI & Build Commands Reference
+## 7. CLI & Development Commands Reference
 
 ### Building Programs for WebAssembly
 
 ```bash
-# Using the native compiler:
+# Using the native compiler (Recommended, fast, <50MB RAM):
 ./mantiq/nizam build hello.nz --target wasm32-wasi -o hello.wasm --lib-dir mantiq
 
 # Using the self-hosted WASM compiler under Node WASI:
@@ -199,21 +232,16 @@ The repository includes a modern, zero-dependency browser execution studio locat
 
 ```bash
 # Run all dedicated WebAssembly test suites:
-./nizam_wasi.js stage4/test_hello.wasm
-./nizam_wasi.js stage4/test_abi.wasm
-./nizam_wasi.js stage4/test_features.wasm
-./nizam_wasi.js stage4/test_collections.wasm
-./nizam_wasi.js stage4/test_concurrency.wasm
+./mantiq/src/tests/wasm/run_wasm_tests.sh
 ```
 
-### Launching the In-Browser Studio
+### Launching the In-Browser Studio Locally
 
 ```bash
 # Start the local development server:
-node playground/server.js
+node playground/dev_server.js
 
 # Open in browser:
 google-chrome http://127.0.0.1:8080/
-# or
-firefox http://127.0.0.1:8080/
 ```
+
