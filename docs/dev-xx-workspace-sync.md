@@ -47,7 +47,8 @@ Every replicated asset belongs to exactly one canonical root. Edits must be made
 │ • compiler-service/bin/nizam, mantiq/nizam, mantiq/mantiq   │
 │ • ~/.local/bin/nizam, ~/.local/lib/mantiq/                  │
 │ • compiler-service/nizam_wasi.js, mantiq/nizam_wasi.js      │
-│ • stage3/std, compiler-service/mantiq/std, mantiqz/std      │
+│ • stage3/std, compiler-service/mantiq/std, compiler-service/std │
+│ • mantiqz/std, ~/.local/lib/mantiq/std                      │
 │ • compiler-service/stage4/nizam.wasm                        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -61,7 +62,7 @@ Every replicated asset belongs to exactly one canonical root. Edits must be made
 | **Tree-Sitter Shared Library** | `stage3/libtree-sitter-mantiq.so` | • `mantiq/libtree-sitter-mantiq.so`<br>• `compiler-service/bin/libtree-sitter-mantiq.so`<br>• `~/.local/lib/mantiq/libtree-sitter-mantiq.so`<br>• `/usr/local/lib/mantiq/libtree-sitter-mantiq.so` *(system)*<br>• `/usr/local/lib/libtree-sitter-mantiq.so` *(system)* | MD5 Checksum |
 | **Tree-Sitter Static Library** | `mantiq/libtree-sitter-mantiq.a` | • `stage3/libtree-sitter-mantiq.a`<br>• `compiler-service/mantiq/libtree-sitter-mantiq.a` | MD5 Checksum |
 | **WASI Node Runner** | `./nizam_wasi.js` | • `mantiq/nizam_wasi.js`<br>• `compiler-service/nizam_wasi.js` | MD5 Checksum |
-| **Standard Library** | `mantiq/std/` | • `stage3/std/`<br>• `compiler-service/mantiq/std/`<br>• `mantiqz/std/`<br>• `~/.local/lib/mantiq/std/`<br>• `/usr/local/lib/mantiq/std/` *(system)* | Directory Content MD5 |
+| **Standard Library** | `mantiq/std/` | • `stage3/std/`<br>• `compiler-service/mantiq/std/`<br>• `compiler-service/std/`<br>• `mantiqz/std/`<br>• `~/.local/lib/mantiq/std/`<br>• `/usr/local/lib/mantiq/std/` *(system)* | Directory Content MD5 |
 | **Native Compiler Executables** | `stage3/mantiq` *(built via `./build.sh`)* | • `mantiq/nizam`<br>• `mantiq/mantiq`<br>• `compiler-service/bin/nizam`<br>• `~/.local/bin/nizam`<br>• `~/.local/bin/mantiq`<br>• `/usr/local/bin/nizam` *(system)*<br>• `/usr/local/bin/mantiq` *(system)* | MD5 (repo) & mtime/RPATH (user/system) |
 | **WASM Compiler Module** | `stage4/nizam.wasm` | • `compiler-service/stage4/nizam.wasm` | MD5 Checksum |
 
