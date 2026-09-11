@@ -7,7 +7,16 @@ const { execSync } = require("child_process");
 const os = require("os");
 
 // ── Environment & Arguments Setup ──────────────────────────────────────
-let wasmPath = process.env.NIZAM_WASM || path.resolve(__dirname, "../stage3/nizam.wasm");
+let wasmPath = process.env.NIZAM_WASM;
+if (!wasmPath) {
+  const candidates = [
+    path.resolve(__dirname, "stage3/nizam.wasm"),
+    path.resolve(__dirname, "stage4/nizam.wasm"),
+    path.resolve(__dirname, "../stage3/nizam.wasm"),
+    path.resolve(__dirname, "../stage4/nizam.wasm")
+  ];
+  wasmPath = candidates.find(c => fs.existsSync(c)) || candidates[0];
+}
 let rawArgs = process.argv.slice(2);
 if (rawArgs.length > 0 && rawArgs[0].endsWith(".wasm")) {
   wasmPath = path.resolve(rawArgs[0]);
