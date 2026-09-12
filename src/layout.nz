@@ -31,9 +31,14 @@ struct Target:
     public fn wasm32_freestanding() -> Target:
         return Target(arch = String.make("wasm32" to cstr), os = String.make("unknown" to cstr), env = String.make("none" to cstr), abi = String.make("none" to cstr), pointer_size = 4 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20" to cstr), triple = String.make("wasm32-unknown-unknown" to cstr))
 
+    public fn python_ext() -> Target:
+        return Target(arch = String.make("x86_64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), abi = String.make("abi3" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to cstr), triple = String.make("x86_64-unknown-linux-gnu" to cstr))
+
     public fn from_triple(triple_cstr as cstr) -> Target:
         if triple_cstr == None to cstr:
             return Target.x86_64_linux()
+        if strstr(triple_cstr, "python-ext" to cstr) != None to cstr or strcmp(triple_cstr, "python-ext" to cstr) == 0:
+            return Target.python_ext()
         if strstr(triple_cstr, "wasm32" to cstr) != None to cstr:
             if strstr(triple_cstr, "unknown" to cstr) != None to cstr or strstr(triple_cstr, "freestanding" to cstr) != None to cstr:
                 return Target.wasm32_freestanding()
@@ -42,6 +47,12 @@ struct Target:
 
     public fn is_wasm(self as ptr[Target]) -> bool:
         return (deref self).pointer_size == 4 to usize
+
+    public fn is_python_ext(self as ptr[Target]) -> bool:
+        if (deref self).abi.data == None to ptr[u8]:
+            return False
+        return strcmp((deref self).abi.data to cstr, "abi3" to cstr) == 0
+
 
     public fn llvm_size_type(self as ptr[Target]) -> String:
         if (deref self).pointer_size == 4 to usize:
@@ -65,6 +76,11 @@ fn target_llvm_ptr_int(t as Target) as String:
 
 fn target_is_wasm(t as Target) as bool:
     return t.pointer_size == 4 to usize
+
+fn target_is_python_ext(t as Target) as bool:
+    if t.abi.data == None to ptr[u8]:
+        return False
+    return strcmp(t.abi.data to cstr, "abi3" to cstr) == 0
 
 // ── Sizing & Alignment ───────────────────────────────────────────────────
 fn get_align(t as ptr[Type], target as Target) as usize:

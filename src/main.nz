@@ -36,6 +36,7 @@ extern fn fwrite(ptr as ptr, size as usize, count as usize, stream as ptr) as us
 extern fn fseek(stream as ptr, offset as isize, origin as i32) as i32
 extern fn ftell(stream as ptr) as isize
 extern fn malloc(size as usize) as ptr
+extern fn free(ptr as ptr)
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
@@ -208,6 +209,46 @@ fn compiler_name(mode as i32) as cstr:
         return "Nizam" to cstr
     return "Mantiq" to cstr
 
+fn get_module_name_from_path(path as cstr) as String:
+    if path == None to cstr:
+        return String.make("nizam_ext" to cstr)
+    let p_len as usize = strlen(path)
+    if p_len == 0 to usize:
+        return String.make("nizam_ext" to cstr)
+    var start as usize = 0 to usize
+    var i as usize = p_len
+    let path_u8 as ptr[u8] = path to ptr[u8]
+    while i > 0 to usize:
+        let ch as u8 = path_u8[i - 1 to usize]
+        if ch == 47 to u8:
+            start = i
+            break
+        i = i - 1 to usize
+    let base_ptr as cstr = ((path to usize) + start) to cstr
+    let base_len as usize = strlen(base_ptr)
+    var end as usize = base_len
+    if strstr(base_ptr, ".abi3.so" to cstr) != None to cstr:
+        end = base_len - 8 to usize
+    elif strstr(base_ptr, ".so" to cstr) != None to cstr:
+        end = base_len - 3 to usize
+    elif strstr(base_ptr, ".nz" to cstr) != None to cstr:
+        end = base_len - 3 to usize
+    elif strstr(base_ptr, ".mq" to cstr) != None to cstr:
+        end = base_len - 3 to usize
+    let buf as ptr[u8] = malloc(end + 1 to usize) to ptr[u8]
+    let base_u8 as ptr[u8] = base_ptr to ptr[u8]
+    var bi as usize = 0 to usize
+    while bi < end:
+        var bch as u8 = base_u8[bi]
+        if bch == 45 to u8 or bch == 46 to u8:
+            bch = 95 to u8
+        buf[bi] = bch
+        bi = bi + 1 to usize
+    buf[end] = 0 to u8
+    let res as String = String.make(buf to cstr)
+    free(buf to ptr)
+    return res
+
 // ── Compiler Pipeline ───────────────────────────────────────────────────
 fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, target_str as cstr, perf as ptr[PerfState]) as bool:
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
@@ -275,6 +316,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()
     (deref cg).target = target
+    if target.is_python_ext():
+        (deref cg).python_ext_module_name = get_module_name_from_path(out_file)
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
     let ir_str as String = (deref cg).generate(root)
     perf_end(perf, "codegen", t4)
@@ -325,6 +368,11 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c %s/libtree-sitter-mantiq.a -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
             else:
                 _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
+    elif target.is_python_ext():
+        if lib_dir == None to cstr:
+            _sp = sprintf(cmd_buf, "clang -shared -fPIC %s ../mantiqz/mantiq-compiler/src/runtime.c -o %s -lm %s 2>&1 || zig cc -shared -fPIC %s ../mantiqz/mantiq-compiler/src/runtime.c -o %s -lm %s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
+        else:
+            _sp = sprintf(cmd_buf, "clang -shared -fPIC %s %s/runtime.c -o %s -lm %s 2>&1 || zig cc -shared -fPIC %s %s/runtime.c -o %s -lm %s 2>&1" to cstr, ll_path, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, out_file, extra_flags_c)
     else:
         if lib_dir == None to cstr:
             _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
@@ -393,6 +441,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
         if target_specified and strstr(target_triple, "wasm" to cstr) != None to cstr and not out_specified:
             out_path = "a.wasm" to cstr
+        elif target_specified and strstr(target_triple, "python-ext" to cstr) != None to cstr and not out_specified:
+            let mod_name_str as String = get_module_name_from_path(input_path)
+            let def_out_buf as ptr[u8] = malloc(128 to usize) to ptr[u8]
+            let _sp_def as i32 = sprintf(def_out_buf, "%s.abi3.so" to cstr, mod_name_str.data to cstr)
+            out_path = def_out_buf to cstr
 
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
@@ -435,6 +488,9 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         var _rt0 as i32 = 0
         if strstr(target_triple, "wasm" to cstr) != None to cstr:
             _rt0 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d.wasm" to cstr, pidv)
+        elif strstr(target_triple, "python-ext" to cstr) != None to cstr:
+            let mod_name_str as String = get_module_name_from_path(input_path)
+            _rt0 = sprintf(rt_buf, "/tmp/%s.abi3.so" to cstr, mod_name_str.data to cstr)
         else:
             _rt0 = sprintf(rt_buf, "/tmp/mantiq_run_tmp_%d" to cstr, pidv)
         let out_path as cstr = rt_buf to cstr
@@ -452,6 +508,12 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             if strstr(target_triple, "wasm" to cstr) != None to cstr:
                 let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
                 let _rc0 as i32 = sprintf(run_cmd, "node --experimental-wasi-unstable-preview1 -e 'const { WASI } = require(\"wasi\"); const fs = require(\"fs\"); const wasi = new WASI({ version: \"preview1\", args: [\"%s\"] }); const wasm = new WebAssembly.Module(fs.readFileSync(\"%s\")); const inst = new WebAssembly.Instance(wasm, wasi.getImportObject()); const code = wasi.start(inst); process.exit(code || 0);'" to cstr, out_path, out_path)
+                let res as i32 = system(run_cmd to cstr)
+                return res
+            elif strstr(target_triple, "python-ext" to cstr) != None to cstr:
+                let mod_name_str as String = get_module_name_from_path(input_path)
+                let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
+                let _rc0 as i32 = sprintf(run_cmd, "python3 -c 'import sys; sys.path.insert(0, \"/tmp\"); import %s; print(\"Extension loaded successfully: %s\"); print(\"Available exports:\", [m for m in dir(%s) if not m.startswith(\"__\")])'" to cstr, mod_name_str.data to cstr, mod_name_str.data to cstr, mod_name_str.data to cstr)
                 let res as i32 = system(run_cmd to cstr)
                 return res
             else:

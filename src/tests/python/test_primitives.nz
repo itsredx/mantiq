@@ -1,0 +1,44 @@
+from std.string import String
+
+// ── Exported Functions (Primitives) ──────────────────────────────────────
+
+fn add_i64(a as i64, b as i64) as i64:
+    return a + b
+
+fn multiply_i32(a as i32, b as i32) as i32:
+    return a * b
+
+fn scale_f64(val as f64, factor as f64) as f64:
+    return val * factor
+
+fn add_f32(a as f32, b as f32) as f32:
+    return a + b
+
+fn negate_bool(val as bool) as bool:
+    return not val
+
+fn logical_and(a as bool, b as bool) as bool:
+    return a and b
+
+fn get_version() as i64:
+    return 42 to i64
+
+fn echo_cstr(s as cstr) as cstr:
+    return s
+
+fn echo_string(s as String) as String:
+    return s
+
+fn string_len(s as String) as i64:
+    return s.len to i64
+
+fn do_nothing() as void:
+    let _v as i64 = 0 to i64
+
+// ── Internal / Hidden Functions (Should NOT be Exported) ─────────────────
+
+fn _hidden_fn() as i64:
+    return 888 to i64
+
+fn _internal_secret() as i64:
+    return 999 to i64
