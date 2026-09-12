@@ -1131,6 +1131,7 @@ struct Lowerer:
         var found_equal as bool = False
         var annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
         var access_mod as String = String.make("public" to cstr)
+        var is_mut as bool = True
         
         let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
@@ -1177,6 +1178,10 @@ struct Lowerer:
                         left = self.lower_node(ref child)
             elif strcmp(child_kind, "=" to cstr) == 0:
                 found_equal = True
+            elif strcmp(child_kind, "let" to cstr) == 0:
+                is_mut = False
+            elif strcmp(child_kind, "var" to cstr) == 0:
+                is_mut = True
             i = i + 1 to u32
 
         if name.len > 0 to usize:
@@ -1189,7 +1194,7 @@ struct Lowerer:
         let data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
         (deref data).name = name
         (deref data).left = left
-        (deref data).is_mut = False
+        (deref data).is_mut = is_mut
         (deref data).type_annots = annots_list_ptr
         (deref data).access_modifier = access_mod
         (deref n).data = data to ptr[u8]

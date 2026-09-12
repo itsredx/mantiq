@@ -1,0 +1,33 @@
+// ── Nizam Python FFI Phase 2: Struct & Class Test Fixture ───────────
+
+import std.string
+from std.string import String
+
+struct Vector2:
+    public var x as f64
+    public var y as f64
+
+    public fn length_squared(self as ptr[Vector2]) as f64:
+        return (deref self).x * (deref self).x + (deref self).y * (deref self).y
+
+    public fn scale(self as ptr[Vector2], factor as f64) as f64:
+        (deref self).x = (deref self).x * factor
+        (deref self).y = (deref self).y * factor
+        return (deref self).x + (deref self).y
+
+struct ImmutablePoint:
+    public let x as f64
+    public let y as f64
+
+    public fn sum(self as ptr[ImmutablePoint]) as f64:
+        return (deref self).x + (deref self).y
+
+struct Person:
+    public var name as String
+    public var age as i64
+
+    public fn get_age(self as ptr[Person]) as i64:
+        return (deref self).age
+
+fn add_vectors(v1 as ptr[Vector2], v2 as ptr[Vector2]) as f64:
+    return (deref v1).x + (deref v2).x + (deref v1).y + (deref v2).y

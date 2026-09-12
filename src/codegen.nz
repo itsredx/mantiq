@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 from layout import Target
 
@@ -18,6 +18,7 @@ extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn strchr(s as cstr, c as i32) as cstr
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
 extern fn free(p as ptr)
+extern fn strlen(s as cstr) as usize
 extern fn fflush(stream as ptr) as i32
 
 // ── Free Helpers ────────────────────────────────────────────────────────
@@ -152,7 +153,7 @@ fn get_struct_field_type(s_cstr as cstr, f_cstr as cstr) as String:
         return String.make("%Target" to cstr)
     extern fn nizam_get_target_ptr_size() as i32
     let is_32 as bool = nizam_get_target_ptr_size() == 4 to i32
-    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "abi" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0 or strcmp(f_cstr, "active_block_exit" to cstr) == 0 or strcmp(f_cstr, "python_ext_module_name" to cstr) == 0 or strcmp(f_cstr, "python_exported_functions" to cstr) == 0:
+    if strcmp(f_cstr, "name" to cstr) == 0 or strcmp(f_cstr, "op" to cstr) == 0 or strcmp(f_cstr, "target" to cstr) == 0 or strcmp(f_cstr, "str_val" to cstr) == 0 or strcmp(f_cstr, "source_code" to cstr) == 0 or strcmp(f_cstr, "file_path" to cstr) == 0 or strcmp(f_cstr, "current_file" to cstr) == 0 or strcmp(f_cstr, "message" to cstr) == 0 or strcmp(f_cstr, "explanation" to cstr) == 0 or strcmp(f_cstr, "replacement" to cstr) == 0 or strcmp(f_cstr, "hint" to cstr) == 0 or strcmp(f_cstr, "note" to cstr) == 0 or strcmp(f_cstr, "arch" to cstr) == 0 or strcmp(f_cstr, "os" to cstr) == 0 or strcmp(f_cstr, "env" to cstr) == 0 or strcmp(f_cstr, "abi" to cstr) == 0 or strcmp(f_cstr, "data_layout" to cstr) == 0 or strcmp(f_cstr, "triple" to cstr) == 0 or strcmp(f_cstr, "llvm_type" to cstr) == 0 or strcmp(f_cstr, "active_block_exit" to cstr) == 0 or strcmp(f_cstr, "python_ext_module_name" to cstr) == 0 or strcmp(f_cstr, "python_exported_functions" to cstr) == 0 or strcmp(f_cstr, "python_exported_structs" to cstr) == 0:
         if is_32:
             return String.make("{ ptr, i32, i32 }" to cstr)
         return String.make("{ ptr, i64, i64 }" to cstr)
@@ -768,6 +769,7 @@ struct LLVMCodegen:
     public var target as Target
     public var python_ext_module_name as String
     public var python_exported_functions as List[ptr[Node]]
+    public var python_exported_structs as List[ptr[Node]]
 
     public fn init_cg(self as ptr[LLVMCodegen]):
         (deref self).type_out = StringBuilder.make()
@@ -801,6 +803,7 @@ struct LLVMCodegen:
         (deref self).target = Target.x86_64_linux()
         (deref self).python_ext_module_name = String.make("" to cstr)
         (deref self).python_exported_functions = List[ptr[Node]]()
+        (deref self).python_exported_structs = List[ptr[Node]]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make(32 to usize) to ptr[u8]
@@ -1107,7 +1110,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
-            self.register_builtin_struct("LLVMCodegen", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, { ptr, i32, i32 }, %Target, { ptr, i32, i32 }, { ptr, i32, i32 } }")
+            self.register_builtin_struct("LLVMCodegen", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, { ptr, i32, i32 }, %Target, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("ProgramData", "{ { ptr, i32, i32 } }")
             self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { i8, ptr } }")
@@ -1168,7 +1171,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
-            self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, { ptr, i64, i64 }, %Target, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+            self.register_builtin_struct("LLVMCodegen", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, i32, i32, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, { ptr, i64, i64 }, %Target, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
             self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
@@ -1698,6 +1701,12 @@ struct LLVMCodegen:
                     set_dict_bool(ref (deref self).program_functions, fn_nm, True)
             elif dk == NodeType.StructDecl:
                 let sn as String = node_name(decl)
+                if (deref self).target.is_python_ext():
+                    if sn.data != None to ptr[u8] and sn.len > 0 to usize:
+                        if (deref sn.data) != 95 to u8:
+                            let acc_mod as String = node_access_modifier(decl)
+                            if acc_mod.data == None to ptr[u8] or strcmp(acc_mod.data to cstr, "private" to cstr) != 0:
+                                (deref self).python_exported_structs.append(decl)
                 if node_body(decl) != None to ptr[Node]:
                     let s_body as ptr[Node] = node_body(decl)
                     let s_decls as List[ptr[Node]] = node_declarations(s_body)
@@ -1715,6 +1724,12 @@ struct LLVMCodegen:
                         s_i = s_i + 1 to i64
             elif dk == NodeType.ClassDecl:
                 let cn as String = node_name(decl)
+                if (deref self).target.is_python_ext():
+                    if cn.data != None to ptr[u8] and cn.len > 0 to usize:
+                        if (deref cn.data) != 95 to u8:
+                            let acc_mod as String = node_access_modifier(decl)
+                            if acc_mod.data == None to ptr[u8] or strcmp(acc_mod.data to cstr, "private" to cstr) != 0:
+                                (deref self).python_exported_structs.append(decl)
                 let target_base as String = node_target(decl)
                 if target_base.data != None to ptr[u8] and target_base.len > 0 to usize:
                     let base_k as StringBuilder = StringBuilder.make()
@@ -3267,6 +3282,8 @@ struct LLVMCodegen:
                         field_idx = 29 to i32
                     elif strcmp(f_cstr, "python_exported_functions" to cstr) == 0:
                         field_idx = 30 to i32
+                    elif strcmp(f_cstr, "python_exported_structs" to cstr) == 0:
+                        field_idx = 31 to i32
                 elif strcmp(s_cstr, "Scope" to cstr) == 0:
                     if strcmp(f_cstr, "parent" to cstr) == 0:
                         field_idx = 0 to i32
@@ -11762,16 +11779,35 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "%PyMethodDef = type { ptr, ptr, i32, i32, ptr }\n")
         append_cstr(ref (deref self).type_out, "%PyModuleDef_Base = type { i64, ptr, ptr, i64, ptr }\n")
         append_cstr(ref (deref self).type_out, "%PyModuleDef = type { %PyModuleDef_Base, ptr, ptr, i64, ptr, ptr, ptr, ptr, ptr }\n")
-        append_cstr(ref (deref self).type_out, "@_Py_NoneStruct = external global i8\n\n")
+        append_cstr(ref (deref self).type_out, "%PyGetSetDef = type { ptr, ptr, ptr, ptr, ptr }\n")
+        append_cstr(ref (deref self).type_out, "%PyType_Slot = type { i32, ptr }\n")
+        append_cstr(ref (deref self).type_out, "%PyType_Spec = type { ptr, i32, i32, i32, ptr }\n")
+        append_cstr(ref (deref self).type_out, "@_Py_NoneStruct = external global i8\n")
+        append_cstr(ref (deref self).type_out, "@PyExc_AttributeError = external global ptr\n")
+        append_cstr(ref (deref self).type_out, "@PyExc_TypeError = external global ptr\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_str_readonly = private unnamed_addr constant [23 x i8] c\"attribute is read-only\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_str_cannot_del = private unnamed_addr constant [24 x i8] c\"cannot delete attribute\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_str_empty = private unnamed_addr constant [1 x i8] c\"\\00\"\n\n")
 
         append_cstr(ref (deref self).type_out, "declare ptr @PyModule_Create2(ptr, i32)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @PyModule_AddObject(ptr, ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyType_FromSpec(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyType_GenericNew(ptr, ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @PyObject_Free(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @PyArg_ParseTuple(ptr, ptr, ...)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @PyArg_ParseTupleAndKeywords(ptr, ptr, ptr, ptr, ...)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyLong_FromLongLong(i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyLong_FromUnsignedLongLong(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare i64 @PyLong_AsLongLong(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i64 @PyLong_AsUnsignedLongLong(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyFloat_FromDouble(double)\n")
+        append_cstr(ref (deref self).type_out, "declare double @PyFloat_AsDouble(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyBool_FromLong(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @PyObject_IsTrue(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_FromString(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_FromStringAndSize(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_AsUTF8AndSize(ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @PyErr_SetString(ptr, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @Py_IncRef(ptr)\n\n")
 
         // 2. Trampolines for each exported function
@@ -12087,9 +12123,689 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "  ptr null,\n")
         append_cstr(ref (deref self).type_out, "  ptr null\n}\n\n")
 
+        // ── Phase 2: Struct & Class Automatic Synthesis via PyType_FromSpec ──
+        let exp_structs as List[ptr[Node]] = (deref self).python_exported_structs
+        let struct_count as i64 = exp_structs.length()
+        var si as i64 = 0 to i64
+        while si < struct_count:
+            let s_node as ptr[Node] = exp_structs[si]
+            let s_name as String = node_name(s_node)
+
+            var s_body as ptr[Node] = node_body(s_node)
+            var s_decls as List[ptr[Node]] = List[ptr[Node]]()
+            if s_body != None to ptr[Node]:
+                s_decls = node_declarations(s_body)
+            else:
+                s_decls = node_declarations(s_node)
+
+            let s_fields as List[ptr[Node]] = List[ptr[Node]]()
+            let s_methods as List[ptr[Node]] = List[ptr[Node]]()
+            let d_cnt as i64 = s_decls.length()
+            var di as i64 = 0 to i64
+            while di < d_cnt:
+                let d as ptr[Node] = s_decls[di]
+                let dk as NodeType = node_kind(d)
+                if dk == NodeType.VarDecl or dk == NodeType.FieldDecl:
+                    s_fields.append(d)
+                elif dk == NodeType.FunDecl:
+                    let m_nm as String = node_name(d)
+                    if m_nm.data != None to ptr[u8] and m_nm.len > 0 to usize:
+                        let acc as String = node_access_modifier(d)
+                        if (deref m_nm.data) != 95 to u8 and (acc.data == None to ptr[u8] or strcmp(acc.data to cstr, "private" to cstr) != 0):
+                            s_methods.append(d)
+                di = di + 1 to i64
+
+            let fld_cnt as i64 = s_fields.length()
+            let meth_cnt as i64 = s_methods.length()
+
+            // 1. Field strings, getters and setters
+            var fi as i64 = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let f_t as String = self.resolve_py_param_type(f_node)
+                let f_is_mut as bool = node_is_mut(f_node)
+
+                let f_key as StringBuilder = StringBuilder.make()
+                append_str(ref f_key, s_name)
+                append_cstr(ref f_key, "." to cstr)
+                append_str(ref f_key, f_name)
+                var f_idx as i32 = fi to i32
+                let f_ks as String = f_key.to_string()
+                if (deref self).struct_field_indices.has(f_ks):
+                    f_idx = (deref self).struct_field_indices[f_ks]
+                f_key.deinit()
+
+                // Field name string constant
+                let fld_str_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                _sp = sprintf(fld_str_buf, "@__nizam_py_str_fld_%s_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n", s_name.data to cstr, f_name.data to cstr, (f_name.len to i64) + 1 to i64, f_name.data to cstr)
+                append_cstr(ref (deref self).type_out, fld_str_buf to cstr)
+                free(fld_str_buf to ptr)
+
+                // Getter trampoline
+                let get_hdr as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                _sp = sprintf(get_hdr, "define ptr @__nizam_py_get_%s_%s(ptr %%self, ptr %%closure) {\nentry:\n  %%inst_slot = getelementptr i8, ptr %%self, i64 16\n  %%inst = load ptr, ptr %%inst_slot\n  %%is_null = icmp eq ptr %%inst, null\n  br i1 %%is_null, label %%ret_none, label %%read_fld\nread_fld:\n  %%f_ptr = getelementptr inbounds %%%s, ptr %%inst, i32 0, i32 %d\n", s_name.data to cstr, f_name.data to cstr, s_name.data to cstr, f_idx)
+                append_cstr(ref (deref self).main_out, get_hdr to cstr)
+                free(get_hdr to ptr)
+
+                if strcmp(f_t.data to cstr, "f64" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load double, ptr %f_ptr\n  %py_res = call ptr @PyFloat_FromDouble(double %f_val)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "f32" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load float, ptr %f_ptr\n  %ext = fpext float %f_val to double\n  %py_res = call ptr @PyFloat_FromDouble(double %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "i64" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i64, ptr %f_ptr\n  %py_res = call ptr @PyLong_FromLongLong(i64 %f_val)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "u64" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i64, ptr %f_ptr\n  %py_res = call ptr @PyLong_FromUnsignedLongLong(i64 %f_val)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "i32" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i32, ptr %f_ptr\n  %ext = sext i32 %f_val to i64\n  %py_res = call ptr @PyLong_FromLongLong(i64 %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "u32" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i32, ptr %f_ptr\n  %ext = zext i32 %f_val to i64\n  %py_res = call ptr @PyLong_FromUnsignedLongLong(i64 %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "i8" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i8, ptr %f_ptr\n  %ext = sext i8 %f_val to i64\n  %py_res = call ptr @PyLong_FromLongLong(i64 %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "u8" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i8, ptr %f_ptr\n  %ext = zext i8 %f_val to i64\n  %py_res = call ptr @PyLong_FromUnsignedLongLong(i64 %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "bool" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i8, ptr %f_ptr\n  %ext = zext i8 %f_val to i64\n  %py_res = call ptr @PyBool_FromLong(i64 %ext)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "cstr" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load ptr, ptr %f_ptr\n  %s_null = icmp eq ptr %f_val, null\n  br i1 %s_null, label %ret_none, label %make_str\nmake_str:\n  %py_res = call ptr @PyUnicode_FromString(ptr %f_val)\n  ret ptr %py_res\n")
+                elif strcmp(f_t.data to cstr, "String" to cstr) == 0:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load { ptr, i64, i64 }, ptr %f_ptr\n  %s_data = extractvalue { ptr, i64, i64 } %f_val, 0\n  %s_len = extractvalue { ptr, i64, i64 } %f_val, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %s_data, i64 %s_len)\n  ret ptr %py_res\n")
+                else:
+                    append_cstr(ref (deref self).main_out, "  %f_val = load i64, ptr %f_ptr\n  %py_res = call ptr @PyLong_FromLongLong(i64 %f_val)\n  ret ptr %py_res\n")
+
+                append_cstr(ref (deref self).main_out, "ret_none:\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n}\n\n")
+
+                // Setter trampoline (only for mutable fields)
+                if f_is_mut:
+                    let set_hdr as ptr[u8] = make[u8](1024 to usize) to ptr[u8]
+                    _sp = sprintf(set_hdr, "define i32 @__nizam_py_set_%s_%s(ptr %%self, ptr %%val, ptr %%closure) {\nentry:\n  %%is_del = icmp eq ptr %%val, null\n  br i1 %%is_del, label %%err_del, label %%do_set\nerr_del:\n  %%t_err = load ptr, ptr @PyExc_TypeError\n  call void @PyErr_SetString(ptr %%t_err, ptr @__nizam_py_str_cannot_del)\n  ret i32 -1\ndo_set:\n  %%inst_slot = getelementptr i8, ptr %%self, i64 16\n  %%inst = load ptr, ptr %%inst_slot\n  %%is_null = icmp eq ptr %%inst, null\n  br i1 %%is_null, label %%err_inst, label %%write_fld\nerr_inst:\n  %%a_err = load ptr, ptr @PyExc_AttributeError\n  call void @PyErr_SetString(ptr %%a_err, ptr @__nizam_py_str_readonly)\n  ret i32 -1\nwrite_fld:\n  %%f_ptr = getelementptr inbounds %%%s, ptr %%inst, i32 0, i32 %d\n", s_name.data to cstr, f_name.data to cstr, s_name.data to cstr, f_idx)
+                    append_cstr(ref (deref self).main_out, set_hdr to cstr)
+                    free(set_hdr to ptr)
+
+                    if strcmp(f_t.data to cstr, "f64" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ub = call double @PyFloat_AsDouble(ptr %val)\n  store double %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "f32" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %dbl = call double @PyFloat_AsDouble(ptr %val)\n  %ub = fptrunc double %dbl to float\n  store float %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "i64" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ub = call i64 @PyLong_AsLongLong(ptr %val)\n  store i64 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "u64" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ub = call i64 @PyLong_AsUnsignedLongLong(ptr %val)\n  store i64 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "i32" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ll = call i64 @PyLong_AsLongLong(ptr %val)\n  %ub = trunc i64 %ll to i32\n  store i32 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "u32" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ll = call i64 @PyLong_AsUnsignedLongLong(ptr %val)\n  %ub = trunc i64 %ll to i32\n  store i32 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "i8" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ll = call i64 @PyLong_AsLongLong(ptr %val)\n  %ub = trunc i64 %ll to i8\n  store i8 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "u8" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ll = call i64 @PyLong_AsUnsignedLongLong(ptr %val)\n  %ub = trunc i64 %ll to i8\n  store i8 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "bool" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %b32 = call i32 @PyObject_IsTrue(ptr %val)\n  %ub = trunc i32 %b32 to i8\n  store i8 %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "cstr" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ub = call ptr @PyUnicode_AsUTF8AndSize(ptr %val, ptr null)\n  store ptr %ub, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    elif strcmp(f_t.data to cstr, "String" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %sz_slot = alloca i64\n  %u8_ptr = call ptr @PyUnicode_AsUTF8AndSize(ptr %val, ptr %sz_slot)\n  %u8_len = load i64, ptr %sz_slot\n  %ins0 = insertvalue { ptr, i64, i64 } undef, ptr %u8_ptr, 0\n  %ins1 = insertvalue { ptr, i64, i64 } %ins0, i64 %u8_len, 1\n  %ins2 = insertvalue { ptr, i64, i64 } %ins1, i64 %u8_len, 2\n  store { ptr, i64, i64 } %ins2, ptr %f_ptr\n  ret i32 0\n}\n\n")
+                    else:
+                        append_cstr(ref (deref self).main_out, "  %ll = call i64 @PyLong_AsLongLong(ptr %val)\n  store i64 %ll, ptr %f_ptr\n  ret i32 0\n}\n\n")
+
+                fi = fi + 1 to i64
+
+            // Emit PyGetSetDef table
+            let gs_tbl_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            _sp = sprintf(gs_tbl_buf, "@__nizam_py_getset_%s = internal global [%lld x %%PyGetSetDef] [\n", s_name.data to cstr, fld_cnt + 1 to i64)
+            append_cstr(ref (deref self).type_out, gs_tbl_buf to cstr)
+            free(gs_tbl_buf to ptr)
+
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let f_is_mut as bool = node_is_mut(f_node)
+                let gs_ent as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                if f_is_mut:
+                    _sp = sprintf(gs_ent, "  %%PyGetSetDef { ptr @__nizam_py_str_fld_%s_%s, ptr @__nizam_py_get_%s_%s, ptr @__nizam_py_set_%s_%s, ptr null, ptr null },\n", s_name.data to cstr, f_name.data to cstr, s_name.data to cstr, f_name.data to cstr, s_name.data to cstr, f_name.data to cstr)
+                else:
+                    _sp = sprintf(gs_ent, "  %%PyGetSetDef { ptr @__nizam_py_str_fld_%s_%s, ptr @__nizam_py_get_%s_%s, ptr null, ptr null, ptr null },\n", s_name.data to cstr, f_name.data to cstr, s_name.data to cstr, f_name.data to cstr)
+                append_cstr(ref (deref self).type_out, gs_ent to cstr)
+                free(gs_ent to ptr)
+                fi = fi + 1 to i64
+
+            append_cstr(ref (deref self).type_out, "  %PyGetSetDef { ptr null, ptr null, ptr null, ptr null, ptr null }\n]\n\n")
+
+            // 2. Member methods trampolines
+            var mi as i64 = 0 to i64
+            while mi < meth_cnt:
+                let m_node as ptr[Node] = s_methods[mi]
+                let m_name as String = node_name(m_node)
+                let m_params as List[ptr[Node]] = node_params(m_node)
+                let mp_cnt as i64 = m_params.length()
+
+                var has_self as bool = False
+                if mp_cnt > 0 to i64:
+                    let p0 as ptr[Node] = m_params[0]
+                    let p0_nm as String = node_name(p0)
+                    if p0_nm.data != None to ptr[u8] and strcmp(p0_nm.data to cstr, "self" to cstr) == 0:
+                        has_self = True
+
+                var start_p as i64 = 0 to i64
+                if has_self:
+                    start_p = 1 to i64
+
+                // Method format string
+                let m_fmt_builder as StringBuilder = StringBuilder.make()
+                var mpi as i64 = start_p
+                while mpi < mp_cnt:
+                    let mp_node as ptr[Node] = m_params[mpi]
+                    let mpt as String = self.resolve_py_param_type(mp_node)
+                    if strcmp(mpt.data to cstr, "i64" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "L")
+                    elif strcmp(mpt.data to cstr, "u64" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "K")
+                    elif strcmp(mpt.data to cstr, "i32" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "i")
+                    elif strcmp(mpt.data to cstr, "u32" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "I")
+                    elif strcmp(mpt.data to cstr, "i8" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "b")
+                    elif strcmp(mpt.data to cstr, "u8" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "B")
+                    elif strcmp(mpt.data to cstr, "bool" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "p")
+                    elif strcmp(mpt.data to cstr, "f64" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "d")
+                    elif strcmp(mpt.data to cstr, "f32" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "f")
+                    elif strcmp(mpt.data to cstr, "cstr" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "s")
+                    elif strcmp(mpt.data to cstr, "String" to cstr) == 0:
+                        append_cstr(ref m_fmt_builder, "s")
+                    else:
+                        append_cstr(ref m_fmt_builder, "L")
+                    mpi = mpi + 1 to i64
+
+                let m_fmt_str as String = m_fmt_builder.to_string()
+                m_fmt_builder.deinit()
+
+                let m_fmt_len as i64 = (m_fmt_str.len to i64) + 1 to i64
+                let m_fmt_c_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                _sp = sprintf(m_fmt_c_buf, "@__nizam_py_fmt_%s_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n", s_name.data to cstr, m_name.data to cstr, m_fmt_len, m_fmt_str.data to cstr)
+                append_cstr(ref (deref self).type_out, m_fmt_c_buf to cstr)
+                free(m_fmt_c_buf to ptr)
+
+                // Method trampoline definition
+                let m_tram_hdr as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                _sp = sprintf(m_tram_hdr, "define ptr @__nizam_py_method_%s_%s(ptr %%self, ptr %%args) {\nentry:\n  %%inst_slot = getelementptr i8, ptr %%self, i64 16\n  %%native_self = load ptr, ptr %%inst_slot\n  %%is_null = icmp eq ptr %%native_self, null\n  br i1 %%is_null, label %%error, label %%do_parse\ndo_parse:\n", s_name.data to cstr, m_name.data to cstr)
+                append_cstr(ref (deref self).main_out, m_tram_hdr to cstr)
+                free(m_tram_hdr to ptr)
+
+                // Allocas for non-self args
+                mpi = start_p
+                while mpi < mp_cnt:
+                    let mp_node as ptr[Node] = m_params[mpi]
+                    let mpt as String = self.resolve_py_param_type(mp_node)
+                    let p_alloca_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                    if strcmp(mpt.data to cstr, "i64" to cstr) == 0 or strcmp(mpt.data to cstr, "u64" to cstr) == 0:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca i64\n", mpi)
+                    elif strcmp(mpt.data to cstr, "i32" to cstr) == 0 or strcmp(mpt.data to cstr, "u32" to cstr) == 0 or strcmp(mpt.data to cstr, "bool" to cstr) == 0:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca i32\n", mpi)
+                    elif strcmp(mpt.data to cstr, "i8" to cstr) == 0 or strcmp(mpt.data to cstr, "u8" to cstr) == 0:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca i8\n", mpi)
+                    elif strcmp(mpt.data to cstr, "f64" to cstr) == 0:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca double\n", mpi)
+                    elif strcmp(mpt.data to cstr, "f32" to cstr) == 0:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca float\n", mpi)
+                    else:
+                        _sp = sprintf(p_alloca_buf, "  %%m_arg_%lld = alloca ptr\n", mpi)
+                    append_cstr(ref (deref self).main_out, p_alloca_buf to cstr)
+                    free(p_alloca_buf to ptr)
+                    mpi = mpi + 1 to i64
+
+                // Call PyArg_ParseTuple
+                let m_parse_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                _sp = sprintf(m_parse_buf, "  %%parse_ok = call i32 (ptr, ptr, ...) @PyArg_ParseTuple(ptr %%args, ptr @__nizam_py_fmt_%s_%s", s_name.data to cstr, m_name.data to cstr)
+                append_cstr(ref (deref self).main_out, m_parse_buf to cstr)
+                free(m_parse_buf to ptr)
+
+                mpi = start_p
+                while mpi < mp_cnt:
+                    let p_arg_ref as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                    _sp = sprintf(p_arg_ref, ", ptr %%m_arg_%lld", mpi)
+                    append_cstr(ref (deref self).main_out, p_arg_ref to cstr)
+                    free(p_arg_ref to ptr)
+                    mpi = mpi + 1 to i64
+                append_cstr(ref (deref self).main_out, ")\n  %ok = icmp ne i32 %parse_ok, 0\n  br i1 %ok, label %invoke, label %error\n\ninvoke:\n")
+
+                // Unpack arguments and prepare call
+                let m_invoke_args as StringBuilder = StringBuilder.make()
+                if has_self:
+                    append_cstr(ref m_invoke_args, "ptr %native_self")
+
+                mpi = start_p
+                while mpi < mp_cnt:
+                    let mp_node as ptr[Node] = m_params[mpi]
+                    let mpt as String = self.resolve_py_param_type(mp_node)
+                    let unp_buf as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                    if strcmp(mpt.data to cstr, "i64" to cstr) == 0 or strcmp(mpt.data to cstr, "u64" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load i64, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "i64 %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "i32" to cstr) == 0 or strcmp(mpt.data to cstr, "u32" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load i32, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "i32 %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "i8" to cstr) == 0 or strcmp(mpt.data to cstr, "u8" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load i8, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "i8 %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "bool" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_raw_bool_%lld = load i32, ptr %%m_arg_%lld\n  %%m_val_%lld = trunc i32 %%m_raw_bool_%lld to i8\n", mpi, mpi, mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "i8 %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "f64" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load double, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "double %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "f32" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load float, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "float %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "cstr" to cstr) == 0:
+                        _sp = sprintf(unp_buf, "  %%m_val_%lld = load ptr, ptr %%m_arg_%lld\n", mpi, mpi)
+                        append_cstr(ref (deref self).main_out, unp_buf to cstr)
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "ptr %m_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", mpi)
+                        append_cstr(ref m_invoke_args, num_b to cstr)
+                        free(num_b to ptr)
+                    elif strcmp(mpt.data to cstr, "String" to cstr) == 0:
+                        let p_id as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(p_id, "%lld", mpi)
+                        let pid_cstr as cstr = p_id to cstr
+                        append_cstr(ref (deref self).main_out, "  %m_raw_cstr_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = load ptr, ptr %m_arg_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, "\n  %m_len_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = call i64 @strlen(ptr %m_raw_cstr_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ")\n  %m_str_slot_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = alloca { ptr, i64, i64 }\n  %m_ins0_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } undef, ptr %m_raw_cstr_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", 0\n  %m_ins1_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } %m_ins0_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", i64 %m_len_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", 1\n  %m_ins2_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } %m_ins1_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", i64 %m_len_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", 2\n  store { ptr, i64, i64 } %m_ins2_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, ", ptr %m_str_slot_")
+                        append_cstr(ref (deref self).main_out, pid_cstr)
+                        append_cstr(ref (deref self).main_out, "\n")
+                        if m_invoke_args.len > 0 to i64:
+                            append_cstr(ref m_invoke_args, ", ")
+                        append_cstr(ref m_invoke_args, "ptr %m_str_slot_")
+                        append_cstr(ref m_invoke_args, pid_cstr)
+                        free(p_id to ptr)
+                    free(unp_buf to ptr)
+                    mpi = mpi + 1 to i64
+
+                // Invoke native method @<s_name>_<m_name>
+                let m_ret_t as String = self.resolve_py_return_type(m_node)
+                let m_is_void as bool = strcmp(m_ret_t.data to cstr, "void" to cstr) == 0
+
+                let m_inv_str as String = m_invoke_args.to_string()
+                m_invoke_args.deinit()
+
+                if m_is_void:
+                    let call_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                    _sp = sprintf(call_b, "  call void @%s_%s(%s)\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n", s_name.data to cstr, m_name.data to cstr, m_inv_str.data to cstr)
+                    append_cstr(ref (deref self).main_out, call_b to cstr)
+                    free(call_b to ptr)
+                else:
+                    let call_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                    _sp = sprintf(call_b, "  %%res = call %s @%s_%s(%s)\n", m_ret_t.data to cstr, s_name.data to cstr, m_name.data to cstr, m_inv_str.data to cstr)
+                    append_cstr(ref (deref self).main_out, call_b to cstr)
+                    free(call_b to ptr)
+
+                    if strcmp(m_ret_t.data to cstr, "i64" to cstr) == 0:
+                        let is_unsigned as bool = self.is_return_unsigned(m_node)
+                        if is_unsigned:
+                            append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyLong_FromUnsignedLongLong(i64 %res)\n  ret ptr %py_res\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyLong_FromLongLong(i64 %res)\n  ret ptr %py_res\n")
+                    elif strcmp(m_ret_t.data to cstr, "i32" to cstr) == 0:
+                        let is_unsigned as bool = self.is_return_unsigned(m_node)
+                        if is_unsigned:
+                            append_cstr(ref (deref self).main_out, "  %ext_res = zext i32 %res to i64\n  %py_res = call ptr @PyLong_FromUnsignedLongLong(i64 %ext_res)\n  ret ptr %py_res\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %ext_res = sext i32 %res to i64\n  %py_res = call ptr @PyLong_FromLongLong(i64 %ext_res)\n  ret ptr %py_res\n")
+                    elif strcmp(m_ret_t.data to cstr, "i8" to cstr) == 0:
+                        let is_b as bool = self.is_return_bool(m_node)
+                        if is_b:
+                            append_cstr(ref (deref self).main_out, "  %ext_b = zext i8 %res to i64\n  %py_res = call ptr @PyBool_FromLong(i64 %ext_b)\n  ret ptr %py_res\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %ext_res = sext i8 %res to i64\n  %py_res = call ptr @PyLong_FromLongLong(i64 %ext_res)\n  ret ptr %py_res\n")
+                    elif strcmp(m_ret_t.data to cstr, "double" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyFloat_FromDouble(double %res)\n  ret ptr %py_res\n")
+                    elif strcmp(m_ret_t.data to cstr, "float" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ext_f = fpext float %res to double\n  %py_res = call ptr @PyFloat_FromDouble(double %ext_f)\n  ret ptr %py_res\n")
+                    elif strcmp(m_ret_t.data to cstr, "ptr" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %is_null = icmp eq ptr %res, null\n  br i1 %is_null, label %ret_none, label %make_str\nmake_str:\n  %py_res = call ptr @PyUnicode_FromString(ptr %res)\n  ret ptr %py_res\nret_none:\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
+                    elif strcmp(m_ret_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %str_data = extractvalue { ptr, i64, i64 } %res, 0\n  %str_len = extractvalue { ptr, i64, i64 } %res, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %str_data, i64 %str_len)\n  ret ptr %py_res\n")
+                    else:
+                        append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyLong_FromLongLong(i64 0)\n  ret ptr %py_res\n")
+
+                append_cstr(ref (deref self).main_out, "error:\n  ret ptr null\n}\n\n")
+
+                // Method name constant string
+                let m_str_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                _sp = sprintf(m_str_buf, "@__nizam_py_str_meth_%s_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n", s_name.data to cstr, m_name.data to cstr, (m_name.len to i64) + 1 to i64, m_name.data to cstr)
+                append_cstr(ref (deref self).type_out, m_str_buf to cstr)
+                free(m_str_buf to ptr)
+
+                mi = mi + 1 to i64
+
+            // Emit PyMethodDef table for struct
+            let sm_tbl_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            _sp = sprintf(sm_tbl_buf, "@__nizam_py_methods_%s = internal global [%lld x %%PyMethodDef] [\n", s_name.data to cstr, meth_cnt + 1 to i64)
+            append_cstr(ref (deref self).type_out, sm_tbl_buf to cstr)
+            free(sm_tbl_buf to ptr)
+
+            mi = 0 to i64
+            while mi < meth_cnt:
+                let m_node as ptr[Node] = s_methods[mi]
+                let m_name as String = node_name(m_node)
+                let sm_ent as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                _sp = sprintf(sm_ent, "  %%PyMethodDef { ptr @__nizam_py_str_meth_%s_%s, ptr @__nizam_py_method_%s_%s, i32 1, i32 0, ptr null },\n", s_name.data to cstr, m_name.data to cstr, s_name.data to cstr, m_name.data to cstr)
+                append_cstr(ref (deref self).type_out, sm_ent to cstr)
+                free(sm_ent to ptr)
+                mi = mi + 1 to i64
+
+            append_cstr(ref (deref self).type_out, "  %PyMethodDef { ptr null, ptr null, i32 0, i32 0, ptr null }\n]\n\n")
+
+            // 3. Keyword list & init format string
+            let kw_tbl_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            _sp = sprintf(kw_tbl_buf, "@__nizam_py_kwlist_%s = private unnamed_addr constant [%lld x ptr] [\n", s_name.data to cstr, fld_cnt + 1 to i64)
+            append_cstr(ref (deref self).type_out, kw_tbl_buf to cstr)
+            free(kw_tbl_buf to ptr)
+
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let kw_ent as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+                _sp = sprintf(kw_ent, "  ptr @__nizam_py_str_fld_%s_%s,\n", s_name.data to cstr, f_name.data to cstr)
+                append_cstr(ref (deref self).type_out, kw_ent to cstr)
+                free(kw_ent to ptr)
+                fi = fi + 1 to i64
+
+            append_cstr(ref (deref self).type_out, "  ptr null\n]\n\n")
+
+            // Init format string
+            let ifmt_b as StringBuilder = StringBuilder.make()
+            append_cstr(ref ifmt_b, "|")
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let ft as String = self.resolve_py_param_type(f_node)
+                if strcmp(ft.data to cstr, "i64" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "L")
+                elif strcmp(ft.data to cstr, "u64" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "K")
+                elif strcmp(ft.data to cstr, "i32" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "i")
+                elif strcmp(ft.data to cstr, "u32" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "I")
+                elif strcmp(ft.data to cstr, "i8" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "b")
+                elif strcmp(ft.data to cstr, "u8" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "B")
+                elif strcmp(ft.data to cstr, "bool" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "p")
+                elif strcmp(ft.data to cstr, "f64" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "d")
+                elif strcmp(ft.data to cstr, "f32" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "f")
+                elif strcmp(ft.data to cstr, "cstr" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "s")
+                elif strcmp(ft.data to cstr, "String" to cstr) == 0:
+                    append_cstr(ref ifmt_b, "s")
+                else:
+                    append_cstr(ref ifmt_b, "L")
+                fi = fi + 1 to i64
+
+            let ifmt_str as String = ifmt_b.to_string()
+            ifmt_b.deinit()
+
+            let ifmt_c as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            _sp = sprintf(ifmt_c, "@__nizam_py_fmt_init_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n", s_name.data to cstr, (ifmt_str.len to i64) + 1 to i64, ifmt_str.data to cstr)
+            append_cstr(ref (deref self).type_out, ifmt_c to cstr)
+            free(ifmt_c to ptr)
+
+            // 4. tp_init implementation
+            let init_hdr as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(init_hdr, "define i32 @__nizam_py_tp_init_%s(ptr %%self, ptr %%args, ptr %%kwds) {\nentry:\n", s_name.data to cstr)
+            append_cstr(ref (deref self).main_out, init_hdr to cstr)
+            free(init_hdr to ptr)
+
+            // Allocas initialized to zero
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let ft as String = self.resolve_py_param_type(f_node)
+                let p_alloca_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                if strcmp(ft.data to cstr, "i64" to cstr) == 0 or strcmp(ft.data to cstr, "u64" to cstr) == 0:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca i64\n  store i64 0, ptr %%arg_%lld\n", fi, fi)
+                elif strcmp(ft.data to cstr, "i32" to cstr) == 0 or strcmp(ft.data to cstr, "u32" to cstr) == 0 or strcmp(ft.data to cstr, "bool" to cstr) == 0:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca i32\n  store i32 0, ptr %%arg_%lld\n", fi, fi)
+                elif strcmp(ft.data to cstr, "i8" to cstr) == 0 or strcmp(ft.data to cstr, "u8" to cstr) == 0:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca i8\n  store i8 0, ptr %%arg_%lld\n", fi, fi)
+                elif strcmp(ft.data to cstr, "f64" to cstr) == 0:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca double\n  store double 0.000000e+00, ptr %%arg_%lld\n", fi, fi)
+                elif strcmp(ft.data to cstr, "f32" to cstr) == 0:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca float\n  store float 0.000000e+00, ptr %%arg_%lld\n", fi, fi)
+                else:
+                    _sp = sprintf(p_alloca_buf, "  %%arg_%lld = alloca ptr\n  store ptr null, ptr %%arg_%lld\n", fi, fi)
+                append_cstr(ref (deref self).main_out, p_alloca_buf to cstr)
+                free(p_alloca_buf to ptr)
+                fi = fi + 1 to i64
+
+            // PyArg_ParseTupleAndKeywords
+            let init_p_call as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(init_p_call, "  %%parse_ok = call i32 (ptr, ptr, ptr, ptr, ...) @PyArg_ParseTupleAndKeywords(ptr %%args, ptr %%kwds, ptr @__nizam_py_fmt_init_%s, ptr @__nizam_py_kwlist_%s", s_name.data to cstr, s_name.data to cstr)
+            append_cstr(ref (deref self).main_out, init_p_call to cstr)
+            free(init_p_call to ptr)
+
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let p_ref as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                _sp = sprintf(p_ref, ", ptr %%arg_%lld", fi)
+                append_cstr(ref (deref self).main_out, p_ref to cstr)
+                free(p_ref to ptr)
+                fi = fi + 1 to i64
+            append_cstr(ref (deref self).main_out, ")\n  %ok = icmp ne i32 %parse_ok, 0\n  br i1 %ok, label %do_alloc, label %init_err\n\ninit_err:\n  ret i32 -1\n\ndo_alloc:\n")
+
+            // Free previous instance if re-initialized
+            append_cstr(ref (deref self).main_out, "  %inst_slot = getelementptr i8, ptr %self, i64 16\n  %old_inst = load ptr, ptr %inst_slot\n  %had_old = icmp ne ptr %old_inst, null\n  br i1 %had_old, label %free_old, label %alloc_new\nfree_old:\n  call void @mantiq_free(ptr %old_inst)\n  br label %alloc_new\nalloc_new:\n")
+
+            // Allocate native struct
+            var s_sz as i64 = 32 to i64
+            if (deref self).struct_sizes.has(s_name):
+                s_sz = (deref self).struct_sizes[s_name]
+            if s_sz <= 0 to i64:
+                s_sz = 32 to i64
+
+            let alloc_b as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+            _sp = sprintf(alloc_b, "  %%native_inst = call ptr @mantiq_malloc(i64 %lld)\n", s_sz)
+            append_cstr(ref (deref self).main_out, alloc_b to cstr)
+            free(alloc_b to ptr)
+
+            // Check if class with vtable
+            let is_cls_k as StringBuilder = StringBuilder.make()
+            append_cstr(ref is_cls_k, "__is_class_" to cstr)
+            append_str(ref is_cls_k, s_name)
+            let is_cls_s as String = is_cls_k.to_string()
+            is_cls_k.deinit()
+            if (deref self).struct_field_indices.has(is_cls_s):
+                let vt_store as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                _sp = sprintf(vt_store, "  %%vt_ptr = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 0\n  store ptr @__vtable_%s, ptr %%vt_ptr\n", s_name.data to cstr, s_name.data to cstr)
+                append_cstr(ref (deref self).main_out, vt_store to cstr)
+                free(vt_store to ptr)
+
+            // Store fields into native_inst
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let ft as String = self.resolve_py_param_type(f_node)
+
+                let f_key as StringBuilder = StringBuilder.make()
+                append_str(ref f_key, s_name)
+                append_cstr(ref f_key, "." to cstr)
+                append_str(ref f_key, f_name)
+                var f_idx as i32 = fi to i32
+                let f_ks as String = f_key.to_string()
+                if (deref self).struct_field_indices.has(f_ks):
+                    f_idx = (deref self).struct_field_indices[f_ks]
+                f_key.deinit()
+
+                if strcmp(ft.data to cstr, "String" to cstr) == 0:
+                    let raw_b as ptr[u8] = make[u8](1024 to usize) to ptr[u8]
+                    _sp = sprintf(raw_b, "  %%raw_s_%lld = load ptr, ptr %%arg_%lld\n  %%is_sn_%lld = icmp eq ptr %%raw_s_%lld, null\n  br i1 %%is_sn_%lld, label %%sempty_%lld, label %%scalc_%lld\nscalc_%lld:\n  %%slen_%lld = call i64 @strlen(ptr %%raw_s_%lld)\n  %%sins0_%lld = insertvalue { ptr, i64, i64 } undef, ptr %%raw_s_%lld, 0\n  %%sins1_%lld = insertvalue { ptr, i64, i64 } %%sins0_%lld, i64 %%slen_%lld, 1\n  %%sins2_%lld = insertvalue { ptr, i64, i64 } %%sins1_%lld, i64 %%slen_%lld, 2\n", fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi, fi)
+                    append_cstr(ref (deref self).main_out, raw_b to cstr)
+                    free(raw_b to ptr)
+
+                    let calc_b as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+                    _sp = sprintf(calc_b, "  %%sfld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store { ptr, i64, i64 } %%sins2_%lld, ptr %%sfld_ptr_%lld\n  br label %%scont_%lld\n", fi, s_name.data to cstr, f_idx, fi, fi, fi)
+                    append_cstr(ref (deref self).main_out, calc_b to cstr)
+                    free(calc_b to ptr)
+
+                    let empty_b as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+                    _sp = sprintf(empty_b, "sempty_%lld:\n  %%sfld_ptre_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store { ptr, i64, i64 } zeroinitializer, ptr %%sfld_ptre_%lld\n  br label %%scont_%lld\nscont_%lld:\n", fi, fi, s_name.data to cstr, f_idx, fi, fi, fi)
+                    append_cstr(ref (deref self).main_out, empty_b to cstr)
+                    free(empty_b to ptr)
+                else:
+                    let st_b as ptr[u8] = make[u8](1024 to usize) to ptr[u8]
+                    if strcmp(ft.data to cstr, "f64" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load double, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store double %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "f32" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load float, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store float %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "i64" to cstr) == 0 or strcmp(ft.data to cstr, "u64" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load i64, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store i64 %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "i32" to cstr) == 0 or strcmp(ft.data to cstr, "u32" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load i32, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store i32 %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "i8" to cstr) == 0 or strcmp(ft.data to cstr, "u8" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load i8, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store i8 %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "bool" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%raw_b_%lld = load i32, ptr %%arg_%lld\n  %%fld_val_%lld = trunc i32 %%raw_b_%lld to i8\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store i8 %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    elif strcmp(ft.data to cstr, "cstr" to cstr) == 0:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load ptr, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store ptr %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    else:
+                        _sp = sprintf(st_b, "  %%fld_val_%lld = load i64, ptr %%arg_%lld\n  %%fld_ptr_%lld = getelementptr inbounds %%%s, ptr %%native_inst, i32 0, i32 %d\n  store i64 %%fld_val_%lld, ptr %%fld_ptr_%lld\n", fi, fi, fi, s_name.data to cstr, f_idx, fi, fi)
+                    append_cstr(ref (deref self).main_out, st_b to cstr)
+                    free(st_b to ptr)
+                fi = fi + 1 to i64
+
+            // Bind native_inst to wrapper
+            append_cstr(ref (deref self).main_out, "  store ptr %native_inst, ptr %inst_slot\n  %owned_slot = getelementptr i8, ptr %self, i64 24\n  store i8 1, ptr %owned_slot\n  ret i32 0\n}\n\n")
+
+            // 5. tp_dealloc implementation
+            let dealloc_b as ptr[u8] = make[u8](1024 to usize) to ptr[u8]
+            _sp = sprintf(dealloc_b, "define void @__nizam_py_tp_dealloc_%s(ptr %%self) {\nentry:\n  %%owned_slot = getelementptr i8, ptr %%self, i64 24\n  %%owned = load i8, ptr %%owned_slot\n  %%is_owned = icmp eq i8 %%owned, 1\n  br i1 %%is_owned, label %%do_free, label %%free_py\ndo_free:\n  %%inst_slot = getelementptr i8, ptr %%self, i64 16\n  %%inst = load ptr, ptr %%inst_slot\n  %%not_null = icmp ne ptr %%inst, null\n  br i1 %%not_null, label %%free_inst, label %%free_py\nfree_inst:\n  call void @mantiq_free(ptr %%inst)\n  store ptr null, ptr %%inst_slot\n  br label %%free_py\nfree_py:\n  call void @PyObject_Free(ptr %%self)\n  ret void\n}\n\n", s_name.data to cstr)
+            append_cstr(ref (deref self).main_out, dealloc_b to cstr)
+            free(dealloc_b to ptr)
+
+            // 6. Slots array & Spec
+            let slots_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(slots_b, "@__nizam_py_slots_%s = internal global [6 x %%PyType_Slot] [\n  %%PyType_Slot { i32 65, ptr @PyType_GenericNew },\n  %%PyType_Slot { i32 60, ptr @__nizam_py_tp_init_%s },\n  %%PyType_Slot { i32 52, ptr @__nizam_py_tp_dealloc_%s },\n  %%PyType_Slot { i32 64, ptr @__nizam_py_methods_%s },\n  %%PyType_Slot { i32 73, ptr @__nizam_py_getset_%s },\n  %%PyType_Slot { i32 0, ptr null }\n]\n\n", s_name.data to cstr, s_name.data to cstr, s_name.data to cstr, s_name.data to cstr, s_name.data to cstr)
+            append_cstr(ref (deref self).type_out, slots_b to cstr)
+            free(slots_b to ptr)
+
+            // Type name strings
+            let full_t_name as StringBuilder = StringBuilder.make()
+            append_str(ref full_t_name, mod_name)
+            append_cstr(ref full_t_name, "." to cstr)
+            append_str(ref full_t_name, s_name)
+            let full_t_str as String = full_t_name.to_string()
+            full_t_name.deinit()
+
+            let t_name_c as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(t_name_c, "@__nizam_py_str_type_name_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n@__nizam_py_str_name_%s = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n", s_name.data to cstr, (full_t_str.len to i64) + 1 to i64, full_t_str.data to cstr, s_name.data to cstr, (s_name.len to i64) + 1 to i64, s_name.data to cstr)
+            append_cstr(ref (deref self).type_out, t_name_c to cstr)
+            free(t_name_c to ptr)
+
+            // Spec
+            let spec_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(spec_b, "@__nizam_py_spec_%s = internal global %%PyType_Spec {\n  ptr @__nizam_py_str_type_name_%s,\n  i32 32,\n  i32 0,\n  i32 0,\n  ptr @__nizam_py_slots_%s\n}\n\n", s_name.data to cstr, s_name.data to cstr, s_name.data to cstr)
+            append_cstr(ref (deref self).type_out, spec_b to cstr)
+            free(spec_b to ptr)
+
+            si = si + 1 to i64
+
         // 7. PyInit_<mod_name>
         append_cstr(ref (deref self).main_out, "define ptr @PyInit_")
         append_str(ref (deref self).main_out, mod_name)
         append_cstr(ref (deref self).main_out, "() {\nentry:\n")
         append_cstr(ref (deref self).main_out, "  %mod = call ptr @PyModule_Create2(ptr @__nizam_py_module_def, i32 1013)\n")
+
+        // Register each exported struct in PyInit_<mod_name>
+        si = 0 to i64
+        while si < struct_count:
+            let s_node as ptr[Node] = exp_structs[si]
+            let s_name as String = node_name(s_node)
+            let reg_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+            _sp = sprintf(reg_b, "  %%type_%s = call ptr @PyType_FromSpec(ptr @__nizam_py_spec_%s)\n  %%add_res_%s = call i32 @PyModule_AddObject(ptr %%mod, ptr @__nizam_py_str_name_%s, ptr %%type_%s)\n", s_name.data to cstr, s_name.data to cstr, s_name.data to cstr, s_name.data to cstr, s_name.data to cstr)
+            append_cstr(ref (deref self).main_out, reg_b to cstr)
+            free(reg_b to ptr)
+            si = si + 1 to i64
+
         append_cstr(ref (deref self).main_out, "  ret ptr %mod\n}\n\n")
