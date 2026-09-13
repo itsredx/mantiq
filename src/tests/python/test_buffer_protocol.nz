@@ -1,0 +1,42 @@
+// ── Python FFI Phase 3: Shared-Ownership PEP 3118 Buffer Protocol ─────
+
+from std.collections import List
+
+fn fill_range(n as usize) as List[f64]:
+    var buffer as List[f64] = List[f64]()
+    var i as usize = 0 to usize
+    while i < n:
+        buffer.append((i to f64) * 1.5)
+        i = i + 1 to usize
+    return buffer
+
+fn compute_sum_zerocopy(data as ptr[f64], count as usize) as f64:
+    var total as f64 = 0.0
+    var i as usize = 0 to usize
+    while i < count:
+        total = total + data[i]
+        i = i + 1 to usize
+    return total
+
+fn scale_in_place(data as ptr[f64], count as usize, factor as f64):
+    var i as usize = 0 to usize
+    while i < count:
+        data[i] = data[i] * factor
+        i = i + 1 to usize
+
+fn sum_list(buffer as List[f64]) as f64:
+    var total as f64 = 0.0
+    var i as i64 = 0 to i64
+    let cnt as i64 = buffer.length()
+    while i < cnt:
+        total = total + buffer[i]
+        i = i + 1 to i64
+    return total
+
+fn fill_integers(n as usize) as List[i64]:
+    var buffer as List[i64] = List[i64]()
+    var i as usize = 0 to usize
+    while i < n:
+        buffer.append((i to i64) * 10 to i64)
+        i = i + 1 to usize
+    return buffer

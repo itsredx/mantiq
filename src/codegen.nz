@@ -11738,7 +11738,7 @@ struct LLVMCodegen:
                 return String.make("float" to cstr)
             elif strcmp(rn, "cstr" to cstr) == 0 or strcmp(rn, "ptr" to cstr) == 0:
                 return String.make("ptr" to cstr)
-            elif strncmp(rn, "String" to cstr, 6 to usize) == 0:
+            elif strncmp(rn, "String" to cstr, 6 to usize) == 0 or strncmp(rn, "List" to cstr, 4 to usize) == 0 or strncmp(rn, "Slice" to cstr, 5 to usize) == 0:
                 return String.make("{ ptr, i64, i64 }" to cstr)
         let fn_t as ptr[Type] = node_inferred_type(fn_node)
         if fn_t != None to ptr[Type]:
@@ -11766,6 +11766,62 @@ struct LLVMCodegen:
             return rk == TypeKind.U64 or rk == TypeKind.U32 or rk == TypeKind.U8 or rk == TypeKind.USize
         return False
 
+    public fn get_param_annot_str(self as ptr[LLVMCodegen], param as ptr[Node]) as String:
+        let p_ann_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(param)
+        if p_ann_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            let p_anns as List[Option[ptr[TypeAnnotation]]] = deref p_ann_ptr
+            if p_anns.length() > 0 to i64:
+                let opt as Option[ptr[TypeAnnotation]] = p_anns[0 to i64]
+                let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                if option_has_value(opt_ref):
+                    let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
+                    if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
+                        return (deref pa).name
+        return String.make("" to cstr)
+
+    public fn is_list_or_slice_annot(self as ptr[LLVMCodegen], annot_str as cstr) as bool:
+        if annot_str == None to cstr:
+            return False
+        return strncmp(annot_str, "List" to cstr, 4 to usize) == 0 or strncmp(annot_str, "Slice" to cstr, 5 to usize) == 0
+
+    public fn get_buffer_elem_size(self as ptr[LLVMCodegen], annot_str as cstr) as i32:
+        if annot_str == None to cstr:
+            return 8 to i32
+        if strstr(annot_str, "f64" to cstr) != None to cstr or strstr(annot_str, "i64" to cstr) != None to cstr or strstr(annot_str, "u64" to cstr) != None to cstr or strstr(annot_str, "usize" to cstr) != None to cstr or strstr(annot_str, "isize" to cstr) != None to cstr:
+            return 8 to i32
+        if strstr(annot_str, "f32" to cstr) != None to cstr or strstr(annot_str, "i32" to cstr) != None to cstr or strstr(annot_str, "u32" to cstr) != None to cstr:
+            return 4 to i32
+        if strstr(annot_str, "i16" to cstr) != None to cstr or strstr(annot_str, "u16" to cstr) != None to cstr:
+            return 2 to i32
+        if strstr(annot_str, "u8" to cstr) != None to cstr or strstr(annot_str, "i8" to cstr) != None to cstr or strstr(annot_str, "bool" to cstr) != None to cstr:
+            return 1 to i32
+        return 8 to i32
+
+    public fn get_buffer_elem_fmt(self as ptr[LLVMCodegen], annot_str as cstr) as cstr:
+        if annot_str == None to cstr:
+            return "d" to cstr
+        if strstr(annot_str, "f64" to cstr) != None to cstr:
+            return "d" to cstr
+        if strstr(annot_str, "f32" to cstr) != None to cstr:
+            return "f" to cstr
+        if strstr(annot_str, "i64" to cstr) != None to cstr or strstr(annot_str, "isize" to cstr) != None to cstr:
+            return "q" to cstr
+        if strstr(annot_str, "u64" to cstr) != None to cstr or strstr(annot_str, "usize" to cstr) != None to cstr:
+            return "Q" to cstr
+        if strstr(annot_str, "i32" to cstr) != None to cstr:
+            return "i" to cstr
+        if strstr(annot_str, "u32" to cstr) != None to cstr:
+            return "I" to cstr
+        if strstr(annot_str, "i16" to cstr) != None to cstr:
+            return "h" to cstr
+        if strstr(annot_str, "u16" to cstr) != None to cstr:
+            return "H" to cstr
+        if strstr(annot_str, "i8" to cstr) != None to cstr:
+            return "b" to cstr
+        if strstr(annot_str, "u8" to cstr) != None to cstr or strstr(annot_str, "bool" to cstr) != None to cstr:
+            return "B" to cstr
+        return "d" to cstr
+
     public fn emit_python_extension_module(self as ptr[LLVMCodegen]):
         var mod_name as String = (deref self).python_ext_module_name
         if mod_name.len == 0 to usize:
@@ -11782,6 +11838,18 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "%PyGetSetDef = type { ptr, ptr, ptr, ptr, ptr }\n")
         append_cstr(ref (deref self).type_out, "%PyType_Slot = type { i32, ptr }\n")
         append_cstr(ref (deref self).type_out, "%PyType_Spec = type { ptr, i32, i32, i32, ptr }\n")
+        append_cstr(ref (deref self).type_out, "%Py_buffer = type { ptr, ptr, i64, i64, i32, i32, ptr, ptr, ptr, ptr, ptr }\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_type_MantiqBuffer = internal global ptr null\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_d = private unnamed_addr constant [2 x i8] c\"d\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_f = private unnamed_addr constant [2 x i8] c\"f\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_q = private unnamed_addr constant [2 x i8] c\"q\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_Q = private unnamed_addr constant [2 x i8] c\"Q\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_i = private unnamed_addr constant [2 x i8] c\"i\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_I = private unnamed_addr constant [2 x i8] c\"I\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_h = private unnamed_addr constant [2 x i8] c\"h\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_H = private unnamed_addr constant [2 x i8] c\"H\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_b = private unnamed_addr constant [2 x i8] c\"b\\00\"\n")
+        append_cstr(ref (deref self).type_out, "@__nizam_py_fmt_code_B = private unnamed_addr constant [2 x i8] c\"B\\00\"\n")
         append_cstr(ref (deref self).type_out, "@_Py_NoneStruct = external global i8\n")
         append_cstr(ref (deref self).type_out, "@PyExc_AttributeError = external global ptr\n")
         append_cstr(ref (deref self).type_out, "@PyExc_TypeError = external global ptr\n")
@@ -11808,7 +11876,38 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_FromStringAndSize(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_AsUTF8AndSize(ptr, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @PyErr_SetString(ptr, ptr)\n")
-        append_cstr(ref (deref self).type_out, "declare void @Py_IncRef(ptr)\n\n")
+        append_cstr(ref (deref self).type_out, "declare void @Py_IncRef(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @__mantiq_py_bf_getbuffer(ptr, ptr, i32)\n")
+        append_cstr(ref (deref self).type_out, "declare void @__mantiq_py_bf_releasebuffer(ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @__mantiq_py_tp_dealloc_buffer(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_py_wrap_buffer(ptr, i64, i32, ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @__mantiq_py_extract_buffer(ptr, ptr, ptr, ptr, i32, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i64 @PyTuple_Size(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyTuple_GetItem(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare void @PyBuffer_Release(ptr)\n\n")
+
+        // ── MantiqBuffer PEP 3118 Type Spec ──────────────────────────────────
+        append_cstr(ref (deref self).type_out, "@__nizam_py_slots_MantiqBuffer = internal global [5 x %PyType_Slot] [\n")
+        append_cstr(ref (deref self).type_out, "  %PyType_Slot { i32 65, ptr @PyType_GenericNew },\n")
+        append_cstr(ref (deref self).type_out, "  %PyType_Slot { i32 52, ptr @__mantiq_py_tp_dealloc_buffer },\n")
+        append_cstr(ref (deref self).type_out, "  %PyType_Slot { i32 1, ptr @__mantiq_py_bf_getbuffer },\n")
+        append_cstr(ref (deref self).type_out, "  %PyType_Slot { i32 2, ptr @__mantiq_py_bf_releasebuffer },\n")
+        append_cstr(ref (deref self).type_out, "  %PyType_Slot { i32 0, ptr null }\n]\n\n")
+
+        let full_buf_t_name as StringBuilder = StringBuilder.make()
+        append_str(ref full_buf_t_name, mod_name)
+        append_cstr(ref full_buf_t_name, ".MantiqBuffer" to cstr)
+        let full_buf_t_str as String = full_buf_t_name.to_string()
+        full_buf_t_name.deinit()
+
+        let buf_t_name_c as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+        _sp = sprintf(buf_t_name_c, "@__nizam_py_str_type_name_MantiqBuffer = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n@__nizam_py_str_name_MantiqBuffer = private unnamed_addr constant [13 x i8] c\"MantiqBuffer\\00\"\n@__nizam_py_str_name_Buffer = private unnamed_addr constant [7 x i8] c\"Buffer\\00\"\n", (full_buf_t_str.len to i64) + 1 to i64, full_buf_t_str.data to cstr)
+        append_cstr(ref (deref self).type_out, buf_t_name_c to cstr)
+        free(buf_t_name_c to ptr)
+
+        append_cstr(ref (deref self).type_out, "@__nizam_py_spec_MantiqBuffer = internal global %PyType_Spec {\n")
+        append_cstr(ref (deref self).type_out, "  ptr @__nizam_py_str_type_name_MantiqBuffer,\n")
+        append_cstr(ref (deref self).type_out, "  i32 32,\n  i32 0,\n  i32 0,\n  ptr @__nizam_py_slots_MantiqBuffer\n}\n\n")
 
         // 2. Trampolines for each exported function
         var fi as i64 = 0 to i64
@@ -11817,6 +11916,35 @@ struct LLVMCodegen:
             let fn_name as String = node_name(fn_node)
             let params as List[ptr[Node]] = node_params(fn_node)
             let p_count as i64 = params.length()
+
+            var has_buf_param as bool = False
+            var buf_param_kind as i32 = 0 to i32
+            var buf_elem_sz as i32 = 8 to i32
+            var buf_elem_fmt as cstr = "d" to cstr
+
+            if p_count >= 2 to i64:
+                let p0 as ptr[Node] = params[0 to i64]
+                let p1 as ptr[Node] = params[1 to i64]
+                let a0 as String = self.get_param_annot_str(p0)
+                let a1 as String = self.get_param_annot_str(p1)
+                if a0.data != None to ptr[u8] and a1.data != None to ptr[u8]:
+                    let c0 as cstr = a0.data to cstr
+                    let c1 as cstr = a1.data to cstr
+                    if (strncmp(c0, "ptr", 3 to usize) == 0 or strcmp(c0, "ptr" to cstr) == 0) and (strcmp(c1, "usize" to cstr) == 0 or strcmp(c1, "i64" to cstr) == 0 or strcmp(c1, "u64" to cstr) == 0):
+                        has_buf_param = True
+                        buf_param_kind = 1 to i32
+                        buf_elem_sz = self.get_buffer_elem_size(c0)
+                        buf_elem_fmt = self.get_buffer_elem_fmt(c0)
+            if not has_buf_param and p_count >= 1 to i64:
+                let p0 as ptr[Node] = params[0 to i64]
+                let a0 as String = self.get_param_annot_str(p0)
+                if a0.data != None to ptr[u8]:
+                    let c0 as cstr = a0.data to cstr
+                    if self.is_list_or_slice_annot(c0):
+                        has_buf_param = True
+                        buf_param_kind = 2 to i32
+                        buf_elem_sz = self.get_buffer_elem_size(c0)
+                        buf_elem_fmt = self.get_buffer_elem_fmt(c0)
 
             // Build format string
             let fmt_builder as StringBuilder = StringBuilder.make()
@@ -11885,6 +12013,128 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, p_alloca_buf to cstr)
                 free(p_alloca_buf to ptr)
                 pi = pi + 1 to i64
+
+            if has_buf_param:
+                var target_arg_cnt as i64 = p_count - 1 to i64
+                if buf_param_kind == 2 to i32:
+                    target_arg_cnt = p_count
+                let check_b as ptr[u8] = make[u8](1024 to usize) to ptr[u8]
+                _sp = sprintf(check_b, "  %%py_buf = alloca %%Py_buffer\n  %%out_data = alloca ptr\n  %%out_len = alloca i64\n  %%arg_count = call i64 @PyTuple_Size(ptr %%args)\n  %%is_buf_call = icmp eq i64 %%arg_count, %lld\n  br i1 %%is_buf_call, label %%buf_ingest, label %%std_parse\n\nbuf_ingest:\n  %%raw_arg0 = call ptr @PyTuple_GetItem(ptr %%args, i64 0)\n  %%ext_res = call i32 @__mantiq_py_extract_buffer(ptr %%raw_arg0, ptr %%py_buf, ptr %%out_data, ptr %%out_len, i32 %d, ptr @__nizam_py_fmt_code_%s)\n  %%ext_ok = icmp eq i32 %%ext_res, 0\n  br i1 %%ext_ok, label %%do_buf_call, label %%error\n\ndo_buf_call:\n  %%b_data = load ptr, ptr %%out_data\n  %%b_len = load i64, ptr %%out_len\n", target_arg_cnt, buf_elem_sz, buf_elem_fmt)
+                append_cstr(ref (deref self).main_out, check_b to cstr)
+                free(check_b to ptr)
+
+                let b_inv_args as StringBuilder = StringBuilder.make()
+                if buf_param_kind == 1 to i32:
+                    append_cstr(ref b_inv_args, "ptr %b_data, i64 %b_len")
+                    var extra_i as i64 = 2 to i64
+                    while extra_i < p_count:
+                        let extra_p as ptr[Node] = params[extra_i]
+                        let extra_pt as String = self.resolve_py_param_type(extra_p)
+                        let py_arg_idx as i64 = extra_i - 1 to i64
+                        let extra_buf as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                        _sp = sprintf(extra_buf, "  %%extra_py_%lld = call ptr @PyTuple_GetItem(ptr %%args, i64 %lld)\n", extra_i, py_arg_idx)
+                        append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                        if strcmp(extra_pt.data to cstr, "f64" to cstr) == 0:
+                            _sp = sprintf(extra_buf, "  %%extra_val_%lld = call double @PyFloat_AsDouble(ptr %%extra_py_%lld)\n", extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", double %extra_val_")
+                        elif strcmp(extra_pt.data to cstr, "f32" to cstr) == 0:
+                            _sp = sprintf(extra_buf, "  %%extra_dbl_%lld = call double @PyFloat_AsDouble(ptr %%extra_py_%lld)\n  %%extra_val_%lld = fptrunc double %%extra_dbl_%lld to float\n", extra_i, extra_i, extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", float %extra_val_")
+                        elif strcmp(extra_pt.data to cstr, "i64" to cstr) == 0 or strcmp(extra_pt.data to cstr, "u64" to cstr) == 0:
+                            _sp = sprintf(extra_buf, "  %%extra_val_%lld = call i64 @PyLong_AsLongLong(ptr %%extra_py_%lld)\n", extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", i64 %extra_val_")
+                        elif strcmp(extra_pt.data to cstr, "i32" to cstr) == 0 or strcmp(extra_pt.data to cstr, "u32" to cstr) == 0:
+                            _sp = sprintf(extra_buf, "  %%extra_ll_%lld = call i64 @PyLong_AsLongLong(ptr %%extra_py_%lld)\n  %%extra_val_%lld = trunc i64 %%extra_ll_%lld to i32\n", extra_i, extra_i, extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", i32 %extra_val_")
+                        elif strcmp(extra_pt.data to cstr, "bool" to cstr) == 0:
+                            _sp = sprintf(extra_buf, "  %%extra_b32_%lld = call i32 @PyObject_IsTrue(ptr %%extra_py_%lld)\n  %%extra_val_%lld = trunc i32 %%extra_b32_%lld to i8\n", extra_i, extra_i, extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", i8 %extra_val_")
+                        else:
+                            _sp = sprintf(extra_buf, "  %%extra_val_%lld = call i64 @PyLong_AsLongLong(ptr %%extra_py_%lld)\n", extra_i, extra_i)
+                            append_cstr(ref (deref self).main_out, extra_buf to cstr)
+                            append_cstr(ref b_inv_args, ", i64 %extra_val_")
+                        let num_b as ptr[u8] = make[u8](16 to usize) to ptr[u8]
+                        _sp = sprintf(num_b, "%lld", extra_i)
+                        append_cstr(ref b_inv_args, num_b to cstr)
+                        free(num_b to ptr)
+                        free(extra_buf to ptr)
+                        extra_i = extra_i + 1 to i64
+                elif buf_param_kind == 2 to i32:
+                    append_cstr(ref (deref self).main_out, "  %list_slot = alloca { ptr, i64, i64 }\n  %bins0 = insertvalue { ptr, i64, i64 } undef, ptr %b_data, 0\n  %bins1 = insertvalue { ptr, i64, i64 } %bins0, i64 %b_len, 1\n  %bins2 = insertvalue { ptr, i64, i64 } %bins1, i64 %b_len, 2\n  store { ptr, i64, i64 } %bins2, ptr %list_slot\n")
+                    append_cstr(ref b_inv_args, "ptr %list_slot")
+
+                let b_inv_str as String = b_inv_args.to_string()
+                b_inv_args.deinit()
+
+                let b_ret_t as String = self.resolve_py_return_type(fn_node)
+                let b_is_void as bool = strcmp(b_ret_t.data to cstr, "void" to cstr) == 0
+
+                if b_is_void:
+                    append_cstr(ref (deref self).main_out, "  call void @")
+                    append_str(ref (deref self).main_out, fn_name)
+                    append_cstr(ref (deref self).main_out, "(")
+                    append_str(ref (deref self).main_out, b_inv_str)
+                    append_cstr(ref (deref self).main_out, ")\n  call void @PyBuffer_Release(ptr %py_buf)\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
+                else:
+                    append_cstr(ref (deref self).main_out, "  %buf_res = call ")
+                    append_str(ref (deref self).main_out, b_ret_t)
+                    append_cstr(ref (deref self).main_out, " @")
+                    append_str(ref (deref self).main_out, fn_name)
+                    append_cstr(ref (deref self).main_out, "(")
+                    append_str(ref (deref self).main_out, b_inv_str)
+                    append_cstr(ref (deref self).main_out, ")\n  call void @PyBuffer_Release(ptr %py_buf)\n")
+
+                    if strcmp(b_ret_t.data to cstr, "i64" to cstr) == 0:
+                        let is_unsigned as bool = self.is_return_unsigned(fn_node)
+                        if is_unsigned:
+                            append_cstr(ref (deref self).main_out, "  %py_res_b = call ptr @PyLong_FromUnsignedLongLong(i64 %buf_res)\n  ret ptr %py_res_b\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %py_res_b = call ptr @PyLong_FromLongLong(i64 %buf_res)\n  ret ptr %py_res_b\n")
+                    elif strcmp(b_ret_t.data to cstr, "i32" to cstr) == 0:
+                        let is_unsigned as bool = self.is_return_unsigned(fn_node)
+                        if is_unsigned:
+                            append_cstr(ref (deref self).main_out, "  %ext_res_b = zext i32 %buf_res to i64\n  %py_res_b = call ptr @PyLong_FromUnsignedLongLong(i64 %ext_res_b)\n  ret ptr %py_res_b\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %ext_res_b = sext i32 %buf_res to i64\n  %py_res_b = call ptr @PyLong_FromLongLong(i64 %ext_res_b)\n  ret ptr %py_res_b\n")
+                    elif strcmp(b_ret_t.data to cstr, "i8" to cstr) == 0:
+                        let is_b as bool = self.is_return_bool(fn_node)
+                        if is_b:
+                            append_cstr(ref (deref self).main_out, "  %ext_b_b = zext i8 %buf_res to i64\n  %py_res_b = call ptr @PyBool_FromLong(i64 %ext_b_b)\n  ret ptr %py_res_b\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %ext_res_b = sext i8 %buf_res to i64\n  %py_res_b = call ptr @PyLong_FromLongLong(i64 %ext_res_b)\n  ret ptr %py_res_b\n")
+                    elif strcmp(b_ret_t.data to cstr, "double" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %py_res_b = call ptr @PyFloat_FromDouble(double %buf_res)\n  ret ptr %py_res_b\n")
+                    elif strcmp(b_ret_t.data to cstr, "float" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %ext_f_b = fpext float %buf_res to double\n  %py_res_b = call ptr @PyFloat_FromDouble(double %ext_f_b)\n  ret ptr %py_res_b\n")
+                    elif strcmp(b_ret_t.data to cstr, "ptr" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  %is_null_b = icmp eq ptr %buf_res, null\n  br i1 %is_null_b, label %ret_none_b, label %make_str_b\nmake_str_b:\n  %py_res_b = call ptr @PyUnicode_FromString(ptr %buf_res)\n  ret ptr %py_res_b\nret_none_b:\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
+                    elif strcmp(b_ret_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0:
+                        let r_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
+                        var is_list as bool = False
+                        var ret_elem_sz as i32 = 8 to i32
+                        var ret_elem_fmt as cstr = "d" to cstr
+                        if r_annot != None to ptr[TypeAnnotation] and (deref r_annot).name.data != None:
+                            let ran as cstr = (deref r_annot).name.data to cstr
+                            if self.is_list_or_slice_annot(ran):
+                                is_list = True
+                                ret_elem_sz = self.get_buffer_elem_size(ran)
+                                ret_elem_fmt = self.get_buffer_elem_fmt(ran)
+                        if is_list:
+                            let buf_box_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                            _sp = sprintf(buf_box_b, "  %%buf_data_b = extractvalue { ptr, i64, i64 } %%buf_res, 0\n  %%buf_len_b = extractvalue { ptr, i64, i64 } %%buf_res, 1\n  %%buf_type_b = load ptr, ptr @__nizam_py_type_MantiqBuffer\n  %%py_res_b = call ptr @__mantiq_py_wrap_buffer(ptr %%buf_data_b, i64 %%buf_len_b, i32 %d, ptr @__nizam_py_fmt_code_%s, ptr %%buf_type_b)\n  ret ptr %%py_res_b\n", ret_elem_sz, ret_elem_fmt)
+                            append_cstr(ref (deref self).main_out, buf_box_b to cstr)
+                            free(buf_box_b to ptr)
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %str_data_b = extractvalue { ptr, i64, i64 } %buf_res, 0\n  %str_len_b = extractvalue { ptr, i64, i64 } %buf_res, 1\n  %py_res_b = call ptr @PyUnicode_FromStringAndSize(ptr %str_data_b, i64 %str_len_b)\n  ret ptr %py_res_b\n")
+                    else:
+                        append_cstr(ref (deref self).main_out, "  %py_res_b = call ptr @PyLong_FromLongLong(i64 0)\n  ret ptr %py_res_b\n")
+
+                append_cstr(ref (deref self).main_out, "std_parse:\n")
 
             // Call PyArg_ParseTuple
             append_cstr(ref (deref self).main_out, "  %parse_ok = call i32 (ptr, ptr, ...) @PyArg_ParseTuple(ptr %args, ptr @__nizam_py_fmt_")
@@ -12065,7 +12315,23 @@ struct LLVMCodegen:
                 elif strcmp(ret_t.data to cstr, "ptr" to cstr) == 0:
                     append_cstr(ref (deref self).main_out, "  %is_null = icmp eq ptr %res, null\n  br i1 %is_null, label %ret_none, label %make_str\nmake_str:\n  %py_res = call ptr @PyUnicode_FromString(ptr %res)\n  ret ptr %py_res\nret_none:\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
                 elif strcmp(ret_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0:
-                    append_cstr(ref (deref self).main_out, "  %str_data = extractvalue { ptr, i64, i64 } %res, 0\n  %str_len = extractvalue { ptr, i64, i64 } %res, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %str_data, i64 %str_len)\n  ret ptr %py_res\n")
+                    let r_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
+                    var is_list as bool = False
+                    var ret_elem_sz as i32 = 8 to i32
+                    var ret_elem_fmt as cstr = "d" to cstr
+                    if r_annot != None to ptr[TypeAnnotation] and (deref r_annot).name.data != None:
+                        let ran as cstr = (deref r_annot).name.data to cstr
+                        if self.is_list_or_slice_annot(ran):
+                            is_list = True
+                            ret_elem_sz = self.get_buffer_elem_size(ran)
+                            ret_elem_fmt = self.get_buffer_elem_fmt(ran)
+                    if is_list:
+                        let buf_box as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                        _sp = sprintf(buf_box, "  %%buf_data = extractvalue { ptr, i64, i64 } %%res, 0\n  %%buf_len = extractvalue { ptr, i64, i64 } %%res, 1\n  %%buf_type = load ptr, ptr @__nizam_py_type_MantiqBuffer\n  %%py_res = call ptr @__mantiq_py_wrap_buffer(ptr %%buf_data, i64 %%buf_len, i32 %d, ptr @__nizam_py_fmt_code_%s, ptr %%buf_type)\n  ret ptr %%py_res\n", ret_elem_sz, ret_elem_fmt)
+                        append_cstr(ref (deref self).main_out, buf_box to cstr)
+                        free(buf_box to ptr)
+                    else:
+                        append_cstr(ref (deref self).main_out, "  %str_data = extractvalue { ptr, i64, i64 } %res, 0\n  %str_len = extractvalue { ptr, i64, i64 } %res, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %str_data, i64 %str_len)\n  ret ptr %py_res\n")
                 else:
                     append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyLong_FromLongLong(i64 0)\n  ret ptr %py_res\n")
 
@@ -12540,7 +12806,23 @@ struct LLVMCodegen:
                     elif strcmp(m_ret_t.data to cstr, "ptr" to cstr) == 0:
                         append_cstr(ref (deref self).main_out, "  %is_null = icmp eq ptr %res, null\n  br i1 %is_null, label %ret_none, label %make_str\nmake_str:\n  %py_res = call ptr @PyUnicode_FromString(ptr %res)\n  ret ptr %py_res\nret_none:\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
                     elif strcmp(m_ret_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0:
-                        append_cstr(ref (deref self).main_out, "  %str_data = extractvalue { ptr, i64, i64 } %res, 0\n  %str_len = extractvalue { ptr, i64, i64 } %res, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %str_data, i64 %str_len)\n  ret ptr %py_res\n")
+                        let r_annot as ptr[TypeAnnotation] = node_return_type_annot(m_node)
+                        var is_list as bool = False
+                        var ret_elem_sz as i32 = 8 to i32
+                        var ret_elem_fmt as cstr = "d" to cstr
+                        if r_annot != None to ptr[TypeAnnotation] and (deref r_annot).name.data != None:
+                            let ran as cstr = (deref r_annot).name.data to cstr
+                            if self.is_list_or_slice_annot(ran):
+                                is_list = True
+                                ret_elem_sz = self.get_buffer_elem_size(ran)
+                                ret_elem_fmt = self.get_buffer_elem_fmt(ran)
+                        if is_list:
+                            let buf_box as ptr[u8] = make[u8](512 to usize) to ptr[u8]
+                            _sp = sprintf(buf_box, "  %%buf_data = extractvalue { ptr, i64, i64 } %%res, 0\n  %%buf_len = extractvalue { ptr, i64, i64 } %%res, 1\n  %%buf_type = load ptr, ptr @__nizam_py_type_MantiqBuffer\n  %%py_res = call ptr @__mantiq_py_wrap_buffer(ptr %%buf_data, i64 %%buf_len, i32 %d, ptr @__nizam_py_fmt_code_%s, ptr %%buf_type)\n  ret ptr %%py_res\n", ret_elem_sz, ret_elem_fmt)
+                            append_cstr(ref (deref self).main_out, buf_box to cstr)
+                            free(buf_box to ptr)
+                        else:
+                            append_cstr(ref (deref self).main_out, "  %str_data = extractvalue { ptr, i64, i64 } %res, 0\n  %str_len = extractvalue { ptr, i64, i64 } %res, 1\n  %py_res = call ptr @PyUnicode_FromStringAndSize(ptr %str_data, i64 %str_len)\n  ret ptr %py_res\n")
                     else:
                         append_cstr(ref (deref self).main_out, "  %py_res = call ptr @PyLong_FromLongLong(i64 0)\n  ret ptr %py_res\n")
 
@@ -12796,6 +13078,11 @@ struct LLVMCodegen:
         append_str(ref (deref self).main_out, mod_name)
         append_cstr(ref (deref self).main_out, "() {\nentry:\n")
         append_cstr(ref (deref self).main_out, "  %mod = call ptr @PyModule_Create2(ptr @__nizam_py_module_def, i32 1013)\n")
+        append_cstr(ref (deref self).main_out, "  %type_MantiqBuffer = call ptr @PyType_FromSpec(ptr @__nizam_py_spec_MantiqBuffer)\n")
+        append_cstr(ref (deref self).main_out, "  store ptr %type_MantiqBuffer, ptr @__nizam_py_type_MantiqBuffer\n")
+        append_cstr(ref (deref self).main_out, "  %add_buf1 = call i32 @PyModule_AddObject(ptr %mod, ptr @__nizam_py_str_name_MantiqBuffer, ptr %type_MantiqBuffer)\n")
+        append_cstr(ref (deref self).main_out, "  call void @Py_IncRef(ptr %type_MantiqBuffer)\n")
+        append_cstr(ref (deref self).main_out, "  %add_buf2 = call i32 @PyModule_AddObject(ptr %mod, ptr @__nizam_py_str_name_Buffer, ptr %type_MantiqBuffer)\n")
 
         // Register each exported struct in PyInit_<mod_name>
         si = 0 to i64
