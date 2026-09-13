@@ -2240,6 +2240,8 @@ struct Lowerer:
             kind = ImportKind.Path
         elif strstr(text, "[pkg]" to cstr) != None to cstr:
             kind = ImportKind.Pkg
+        elif strstr(text, "[python]" to cstr) != None to cstr or strstr(text, "[py]" to cstr) != None to cstr:
+            kind = ImportKind.Python
         
         let buf as cstr = strdup(text)
         var b_idx as usize = 0 to usize
@@ -2255,7 +2257,9 @@ struct Lowerer:
         var first_tok as cstr = strtok(buf, delims)
         if first_tok != None to cstr:
             if strcmp(first_tok, "from" to cstr) == 0:
-                let target_tok as cstr = strtok(None to cstr, delims)
+                var target_tok as cstr = strtok(None to cstr, delims)
+                if target_tok != None to cstr and (strcmp(target_tok, "c" to cstr) == 0 or strcmp(target_tok, "vendor" to cstr) == 0 or strcmp(target_tok, "path" to cstr) == 0 or strcmp(target_tok, "pkg" to cstr) == 0 or strcmp(target_tok, "python" to cstr) == 0 or strcmp(target_tok, "py" to cstr) == 0):
+                    target_tok = strtok(None to cstr, delims)
                 if target_tok != None to cstr:
                     target = strip_quotes(target_tok to ptr[u8], strlen(target_tok))
                     
@@ -2276,7 +2280,7 @@ struct Lowerer:
                 let tok_len as i64 = tokens.length()
                 if tok_len > 0 to i64:
                     let t0 as cstr = tokens[0].data to cstr
-                    if strcmp(t0, "c" to cstr) == 0 or strcmp(t0, "vendor" to cstr) == 0 or strcmp(t0, "path" to cstr) == 0 or strcmp(t0, "pkg" to cstr) == 0:
+                    if strcmp(t0, "c" to cstr) == 0 or strcmp(t0, "vendor" to cstr) == 0 or strcmp(t0, "path" to cstr) == 0 or strcmp(t0, "pkg" to cstr) == 0 or strcmp(t0, "python" to cstr) == 0 or strcmp(t0, "py" to cstr) == 0:
                         start_tok_idx = 1 to i64
                 
                 var from_idx as i64 = -1 to i64

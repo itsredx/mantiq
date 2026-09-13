@@ -344,12 +344,17 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let extra_flags as StringBuilder = StringBuilder.make()
     let lt_count as i64 = (deref sema).link_targets.length()
     var lti as i64 = 0 to i64
+    var has_py_flag as bool = False
     while lti < lt_count:
         let lt_name as String = (deref sema).link_targets[lti]
         if strcmp(lt_name.data to cstr, "m" to cstr) != 0:
             extra_flags.append(" -l" to cstr)
             extra_flags.append(lt_name.data to cstr)
+            if strcmp(lt_name.data to cstr, "python3.12" to cstr) == 0:
+                has_py_flag = True
         lti = lti + 1 to i64
+    if (deref cg).has_python_embed and not has_py_flag:
+        extra_flags.append(" -lpython3.12 -ldl" to cstr)
     let extra_flags_str as String = extra_flags.to_string()
     let extra_flags_c as cstr = extra_flags_str.data to cstr
 

@@ -131,6 +131,8 @@ struct TypeChecker:
             return make_type(TypeKind.Utf8Str)
         elif strcmp(name, "void" to cstr) == 0:
             return make_type(TypeKind.Void)
+        elif strcmp(name, "PyObject" to cstr) == 0:
+            return make_type(TypeKind.PyObject)
         elif strcmp(name, "Any" to cstr) == 0:
             return make_type(TypeKind.Any)
         elif strcmp(name, "qbit" to cstr) == 0:
@@ -619,7 +621,7 @@ struct TypeChecker:
                 skip = True
             elif strcmp(name, "f16" to cstr) == 0 or strcmp(name, "bf16" to cstr) == 0 or strcmp(name, "BFloat16" to cstr) == 0 or strcmp(name, "f32" to cstr) == 0 or strcmp(name, "f64" to cstr) == 0 or strcmp(name, "f128" to cstr) == 0:
                 skip = True
-            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "Channel" to cstr) == 0 or strcmp(name, "channel" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0:
+            elif strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0 or strcmp(name, "void" to cstr) == 0 or strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0 or strcmp(name, "String" to cstr) == 0 or strcmp(name, "List" to cstr) == 0 or strcmp(name, "Dict" to cstr) == 0 or strcmp(name, "Option" to cstr) == 0 or strcmp(name, "Result" to cstr) == 0 or strcmp(name, "Any" to cstr) == 0 or strcmp(name, "Channel" to cstr) == 0 or strcmp(name, "channel" to cstr) == 0 or strcmp(name, "qbit" to cstr) == 0 or strcmp(name, "qreg" to cstr) == 0 or strcmp(name, "color" to cstr) == 0 or strcmp(name, "Color" to cstr) == 0 or strcmp(name, "TSNode" to cstr) == 0 or strcmp(name, "SymbolKind" to cstr) == 0 or strcmp(name, "MacroDef" to cstr) == 0 or strcmp(name, "VarInfo" to cstr) == 0 or strcmp(name, "ObjectState" to cstr) == 0 or strcmp(name, "PyObject" to cstr) == 0:
                 skip = True
                 
             let name_ptr as ptr[u8] = name to ptr[u8]
@@ -1396,12 +1398,45 @@ struct TypeChecker:
                                     ret_type = make_type(TypeKind.USize)
                                 else:
                                     coll_handled = False
+                            elif coll_recv_k == TypeKind.PyObject:
+                                if strcmp(coll_mname.data to cstr, "to" to cstr) == 0:
+                                    var target_k as TypeKind = TypeKind.F64
+                                    let c_ann as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+                                    var ann_list as ptr[List[Option[ptr[TypeAnnotation]]]] = c_ann
+                                    if ann_list == None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                                        ann_list = node_type_annots(callee)
+                                    if ann_list != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref ann_list).length() > 0 to i64:
+                                        var a_opt as Option[ptr[TypeAnnotation]] = (deref ann_list)[0 to i64]
+                                        let a_ref as ptr[OptionLayout] = (ref a_opt) to ptr[OptionLayout]
+                                        if option_has_value(a_ref to ptr[u8]):
+                                            let an as ptr[TypeAnnotation] = option_value(a_ref to ptr[u8]) to ptr[TypeAnnotation]
+                                            if an != None to ptr[TypeAnnotation] and (deref an).name.data != None to ptr[u8]:
+                                                let a_cstr as cstr = (deref an).name.data to cstr
+                                                if strstr(a_cstr, "f64" to cstr) != None to cstr:
+                                                    target_k = TypeKind.F64
+                                                elif strstr(a_cstr, "f32" to cstr) != None to cstr:
+                                                    target_k = TypeKind.F32
+                                                elif strstr(a_cstr, "i64" to cstr) != None to cstr:
+                                                    target_k = TypeKind.I64
+                                                elif strstr(a_cstr, "i32" to cstr) != None to cstr:
+                                                    target_k = TypeKind.I32
+                                                elif strstr(a_cstr, "bool" to cstr) != None to cstr or strstr(a_cstr, "Boolean" to cstr) != None to cstr:
+                                                    target_k = TypeKind.Boolean
+                                                elif strstr(a_cstr, "String" to cstr) != None to cstr:
+                                                    target_k = TypeKind.String
+                                                elif strstr(a_cstr, "cstr" to cstr) != None to cstr:
+                                                    target_k = TypeKind.CStr
+                                    ret_type = make_type(target_k)
+                                else:
+                                    ret_type = make_type(TypeKind.PyObject)
                             else:
                                 coll_handled = False
                             if coll_handled:
                                 set_node_inferred_type(node, ret_type)
                                 return ret_type
-            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "Ok" to cstr) == 0:
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "py_import" to cstr) == 0:
+                ret_type = make_type(TypeKind.PyObject)
+            elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "Ok" to cstr) == 0:
                 let ok_t as ptr[Type] = make_type(TypeKind.Result)
                 if arg_count > 0 to i64:
                     let ok_arg_t as ptr[Type] = node_inferred_type(args[0])
@@ -1516,6 +1551,8 @@ struct TypeChecker:
                         ret_type = make_type(TypeKind.Any)
             elif obj_kind == TypeKind.Enum:
                 ret_type = obj_t
+            elif obj_kind == TypeKind.PyObject:
+                ret_type = make_type(TypeKind.PyObject)
             elif obj_kind == TypeKind.Module:
                 let left_name as String = node_name(node_left(node))
                 if (deref (deref self).sema).loaded_modules.has(left_name):

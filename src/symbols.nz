@@ -82,6 +82,7 @@ enum ImportKind:
     Vendor
     C
     Pkg
+    Python
 
 // ── Per-Variant Data Structs ───────────────────────────────────────────
 // Each node type has exactly the fields it needs, no more.

@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier, node_is_nogil, node_is_gil_independent
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier, node_is_nogil, node_is_gil_independent, node_alias, node_import_kind, ImportKind
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 from layout import Target
 
@@ -252,6 +252,8 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "3" to ptr[u8]
         elif strcmp(v_cstr, "Pkg" to cstr) == 0:
             return "4" to ptr[u8]
+        elif strcmp(v_cstr, "Python" to cstr) == 0:
+            return "5" to ptr[u8]
     elif strcmp(e_cstr, "NodeType" to cstr) == 0:
         if strcmp(v_cstr, "Program" to cstr) == 0:
             return "0" to ptr[u8]
@@ -444,6 +446,8 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "53" to ptr[u8]
         elif strcmp(v_cstr, "Void" to cstr) == 0:
             return "54" to ptr[u8]
+        elif strcmp(v_cstr, "PyObject" to cstr) == 0:
+            return "55" to ptr[u8]
     return "0" to ptr[u8]
 
 fn type_to_llvm(t as ptr[Type]) as String:
@@ -490,7 +494,7 @@ fn type_to_llvm(t as ptr[Type]) as String:
         return String.make("{ ptr, i64, i64 }" to cstr)
     if k == TypeKind.CStr:
         return String.make("ptr" to cstr)
-    if k == TypeKind.RawPointer:
+    if k == TypeKind.RawPointer or k == TypeKind.PyObject:
         return String.make("ptr" to cstr)
     if k == TypeKind.Option:
         return String.make("{ i8, ptr }" to cstr)
@@ -583,7 +587,7 @@ fn type_size(t as ptr[Type]) as i64:
         return 4 to i64
     if k == TypeKind.I64 or k == TypeKind.U64 or k == TypeKind.F64:
         return 8 to i64
-    if k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.RawPointer or k == TypeKind.CStr:
+    if k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.RawPointer or k == TypeKind.CStr or k == TypeKind.PyObject:
         extern fn nizam_get_target_ptr_size() as i32
         return nizam_get_target_ptr_size() to i64
     if k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
@@ -770,6 +774,9 @@ struct LLVMCodegen:
     public var python_ext_module_name as String
     public var python_exported_functions as List[ptr[Node]]
     public var python_exported_structs as List[ptr[Node]]
+    public var has_python_embed as bool
+    public var pyobject_vars as Dict[String, bool]
+    public var py_module_aliases as Dict[String, String]
 
     public fn init_cg(self as ptr[LLVMCodegen]):
         (deref self).type_out = StringBuilder.make()
@@ -804,6 +811,9 @@ struct LLVMCodegen:
         (deref self).python_ext_module_name = String.make("" to cstr)
         (deref self).python_exported_functions = List[ptr[Node]]()
         (deref self).python_exported_structs = List[ptr[Node]]()
+        (deref self).has_python_embed = False
+        (deref self).pyobject_vars = Dict[String, bool]()
+        (deref self).py_module_aliases = Dict[String, String]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make(32 to usize) to ptr[u8]
@@ -1573,6 +1583,27 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i64 @__mantiq_channel_len(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i64 @__mantiq_channel_cap(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_channel_free(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_py_init()\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_import(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_getattr(ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_call(ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_py_decref(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_py_incref(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare double @mantiq_py_to_f64(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i64 @mantiq_py_to_i64(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_py_to_i32(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i1 @mantiq_py_to_bool(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_to_cstr(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_box_list_f64(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_py_box_list_i64(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyTuple_New(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @PyTuple_SetItem(ptr, i64, ptr)\n")
+        if not (deref self).target.is_python_ext():
+            append_cstr(ref (deref self).type_out, "declare ptr @PyFloat_FromDouble(double)\n")
+            append_cstr(ref (deref self).type_out, "declare ptr @PyLong_FromLongLong(i64)\n")
+            append_cstr(ref (deref self).type_out, "declare ptr @PyBool_FromLong(i64)\n")
+            append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_FromString(ptr)\n")
+            append_cstr(ref (deref self).type_out, "declare ptr @PyUnicode_FromStringAndSize(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "%MantiqDict = type { ptr, ptr, ptr, ptr, i32, i32, i32, i32 }\n")
         self.emit_builtin_struct_types()
         self.emit_node(root)
@@ -1802,6 +1833,16 @@ struct LLVMCodegen:
                         if ta_p != None to ptr[TypeAnnotation]:
                             let tgt_name as String = (deref ta_p).name
                             set_dict_str(ref (deref self).type_aliases, t_name, tgt_name)
+            elif dk == NodeType.ImportDecl:
+                let ik as ImportKind = node_import_kind(decl)
+                if ik == ImportKind.Python:
+                    let tgt as String = node_target(decl)
+                    var opt_al as Option[String] = node_alias(decl)
+                    let opt_ref as ptr[OptionLayout] = (ref opt_al) to ptr[OptionLayout]
+                    if option_has_value(opt_ref):
+                        let al_p as ptr[String] = (deref opt_ref).val_ptr to ptr[String]
+                        if al_p != None to ptr[String] and (deref al_p).data != None to ptr[u8]:
+                            set_dict_str(ref (deref self).py_module_aliases, deref al_p, tgt)
             i = i + 1 to i64
         i = 0 to i64
         while i < count:
@@ -2133,7 +2174,7 @@ struct LLVMCodegen:
                                         var_type = String.make("{ ptr, i32, i32 }" to cstr)
                                     else:
                                         var_type = String.make("{ ptr, i64, i64 }" to cstr)
-                                elif strncmp(pa_name, "Channel" to cstr, 7 to usize) == 0 or strncmp(pa_name, "Task" to cstr, 4 to usize) == 0:
+                                elif strncmp(pa_name, "Channel" to cstr, 7 to usize) == 0 or strncmp(pa_name, "Task" to cstr, 4 to usize) == 0 or strcmp(pa_name, "PyObject" to cstr) == 0:
                                     var_type = String.make("ptr" to cstr)
                                 else:
                                     var_type = String.make(pa_name)
@@ -2190,6 +2231,26 @@ struct LLVMCodegen:
             slot_name = String.make(slot_buf to cstr)
         set_dict_str(ref (deref self).var_slots, var_name, slot_name)
         set_dict_str(ref (deref self).var_types, var_name, var_type)
+        var is_pyobj as bool = False
+        let v_inf_t as ptr[Type] = node_inferred_type(node)
+        if v_inf_t != None to ptr[Type] and (deref v_inf_t).kind == TypeKind.PyObject:
+            is_pyobj = True
+        elif init_node != None to ptr[Node]:
+            let init_t as ptr[Type] = node_inferred_type(init_node)
+            if init_t != None to ptr[Type] and (deref init_t).kind == TypeKind.PyObject:
+                is_pyobj = True
+        let v_ann_p as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+        if not is_pyobj and v_ann_p != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref v_ann_p).length() > 0 to i64:
+            var opt_a as Option[ptr[TypeAnnotation]] = (deref v_ann_p)[0 to i64]
+            let a_ref as ptr[OptionLayout] = (ref opt_a) to ptr[OptionLayout]
+            if option_has_value(a_ref):
+                let pan as ptr[TypeAnnotation] = option_unwrap_ptr(a_ref) to ptr[TypeAnnotation]
+                if pan != None to ptr[TypeAnnotation] and (deref pan).name.data != None to ptr[u8]:
+                    if strcmp((deref pan).name.data to cstr, "PyObject" to cstr) == 0:
+                        is_pyobj = True
+        if is_pyobj:
+            set_dict_bool(ref (deref self).pyobject_vars, slot_name, True)
+            set_dict_bool(ref (deref self).pyobject_vars, var_name, True)
 
         append_cstr(ref (deref self).main_out, "  %")
         append_str(ref (deref self).main_out, slot_name)
@@ -2403,6 +2464,21 @@ struct LLVMCodegen:
                     var_type = vt
             if strcmp(id_nm_str.data to cstr, "self" to cstr) == 0 and strcmp(var_type.data to cstr, "{ ptr, i64, i64 }" to cstr) != 0 and strcmp(var_type.data to cstr, "{ ptr, i32, i32 }" to cstr) != 0 and (var_type.len == 0 to usize or deref (var_type.data) != 37 to u8):
                 var_type = String.make("ptr" to cstr)
+            if not (deref self).var_slots.has(id_nm_str):
+                let inf_t as ptr[Type] = node_inferred_type(node)
+                if inf_t != None to ptr[Type] and (deref inf_t).kind == TypeKind.PyObject:
+                    (deref self).has_python_embed = True
+                    var actual_mod as String = id_nm_str
+                    if (deref self).py_module_aliases.has(id_nm_str):
+                        actual_mod = (deref self).py_module_aliases[id_nm_str]
+                    let mod_str as ptr[u8] = self.emit_string_constant(actual_mod.data to cstr)
+                    let imp_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, imp_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_import(ptr ")
+                    append_cstr(ref (deref self).main_out, mod_str to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return imp_reg
             if not (deref self).var_slots.has(id_nm_str) and (deref self).enum_variant_tags.has(id_nm_str) and ((deref self).program_functions.has(id_nm_str) or (deref self).defined_functions.has(id_nm_str)):
                 let reg as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -2602,6 +2678,26 @@ struct LLVMCodegen:
                     free(full_v_buf to ptr)
             let obj_val as ptr[u8] = self.emit_expr(obj)
             let field_name as String = node_name(node)
+            var obj_is_py as bool = False
+            let obj_t as ptr[Type] = node_inferred_type(obj)
+            if obj_t != None to ptr[Type] and (deref obj_t).kind == TypeKind.PyObject:
+                obj_is_py = True
+            elif node_kind(obj) == NodeType.Identifier:
+                let o_nm as String = node_name(obj)
+                if (deref self).pyobject_vars.has(o_nm):
+                    obj_is_py = True
+            if obj_is_py:
+                (deref self).has_python_embed = True
+                let attr_str as ptr[u8] = self.emit_string_constant(field_name.data to cstr)
+                let attr_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, attr_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_getattr(ptr ")
+                append_cstr(ref (deref self).main_out, obj_val to cstr)
+                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, attr_str to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
+                return attr_reg
             var target_st_type as String = type_to_llvm(node_inferred_type(obj))
             let is_str_or_sb as bool = strcmp(target_st_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(target_st_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0 or strcmp(target_st_type.data to cstr, "%String" to cstr) == 0 or strcmp(target_st_type.data to cstr, "%StringBuilder" to cstr) == 0 or strcmp(target_st_type.data to cstr, "String" to cstr) == 0 or strcmp(target_st_type.data to cstr, "{ ptr, ptr }" to cstr) == 0
             if is_str_or_sb and field_name.data != None and (strcmp(field_name.data to cstr, "data" to cstr) == 0 or strcmp(field_name.data to cstr, "len" to cstr) == 0) and strcmp(target_st_type.data to cstr, "%Node" to cstr) != 0:
@@ -4592,6 +4688,29 @@ struct LLVMCodegen:
                                 let a_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
                                 let _ as i32 = sprintf(a_buf, "%lld" to cstr, al_val)
                                 return a_buf
+                        if strcmp(c_name.data to cstr, "py_import" to cstr) == 0:
+                            (deref self).has_python_embed = True
+                            if args.length() > 0 to i64:
+                                let arg_node as ptr[Node] = get_node_decl(ref args, 0 to i64)
+                                let mod_str_reg as ptr[u8] = self.emit_expr(arg_node)
+                                var cstr_reg as ptr[u8] = mod_str_reg
+                                let arg_t as ptr[Type] = node_inferred_type(arg_node)
+                                if node_kind(arg_node) != NodeType.StringLiteral and arg_t != None to ptr[Type] and (deref arg_t).kind == TypeKind.String:
+                                    let ext as ptr[u8] = self.fresh_temp()
+                                    append_cstr(ref (deref self).main_out, "  ")
+                                    append_cstr(ref (deref self).main_out, ext to cstr)
+                                    append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+                                    append_cstr(ref (deref self).main_out, mod_str_reg to cstr)
+                                    append_cstr(ref (deref self).main_out, ", 0\n")
+                                    cstr_reg = ext
+                                let imp_res as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, imp_res to cstr)
+                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_import(ptr ")
+                                append_cstr(ref (deref self).main_out, cstr_reg to cstr)
+                                append_cstr(ref (deref self).main_out, ")\n")
+                                return imp_res
+                            return "null" to ptr[u8]
                         if strcmp(c_name.data to cstr, "Ok" to cstr) == 0:
                             if args.length() > 0 to i64:
                                 var ok_arg as ptr[Node] = get_node_decl(ref args, 0 to i64)
@@ -5469,6 +5588,17 @@ struct LLVMCodegen:
                     let mname_s as String = node_name(callee)
                     if mname_s.data != None to ptr[u8]:
                         let mname_c as cstr = mname_s.data to cstr
+                        var is_py_method as bool = False
+                        let obj_inf_type as ptr[Type] = node_inferred_type(obj_node)
+                        if obj_inf_type != None to ptr[Type] and (deref obj_inf_type).kind == TypeKind.PyObject:
+                            is_py_method = True
+                        elif node_kind(obj_node) == NodeType.Identifier:
+                            let o_name_str as String = node_name(obj_node)
+                            if (deref self).pyobject_vars.has(o_name_str):
+                                is_py_method = True
+                        if is_py_method:
+                            let py_res as ptr[u8] = self.emit_pyobject_method(node, obj_node, mname_c)
+                            return py_res
                         let coll_res as ptr[u8] = self.emit_collection_method(node, obj_node, mname_c)
                         if coll_res != None to ptr[u8]:
                             return coll_res
@@ -6045,6 +6175,357 @@ struct LLVMCodegen:
             arg_buf.deinit()
             append_cstr(ref (deref self).main_out, ")\n")
             return "0" to ptr[u8]
+
+    public fn emit_string_constant(self as ptr[LLVMCodegen], text as cstr) as ptr[u8]:
+        let str_id as i32 = (deref self).string_counter
+        (deref self).string_counter = (deref self).string_counter + 1 to i32
+        let slen as usize = strlen(text)
+        append_cstr(ref (deref self).type_out, "@.str.")
+        append_i32(ref (deref self).type_out, str_id)
+        append_cstr(ref (deref self).type_out, " = private unnamed_addr constant [")
+        append_i64(ref (deref self).type_out, (slen + 1 to usize) to i64)
+        append_cstr(ref (deref self).type_out, " x i8] c\"")
+        append_cstr(ref (deref self).type_out, text)
+        append_cstr(ref (deref self).type_out, "\\00\"\n" to cstr)
+        let reg as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, reg to cstr)
+        append_cstr(ref (deref self).main_out, " = getelementptr [")
+        append_i64(ref (deref self).main_out, (slen + 1 to usize) to i64)
+        append_cstr(ref (deref self).main_out, " x i8], ptr @.str.")
+        append_i32(ref (deref self).main_out, str_id)
+        append_cstr(ref (deref self).main_out, ", i32 0, i32 0\n")
+        return reg
+
+    public fn emit_pyobject_method(self as ptr[LLVMCodegen], node as ptr[Node], obj_node as ptr[Node], mname as cstr) as ptr[u8]:
+        (deref self).has_python_embed = True
+        let obj_val as ptr[u8] = self.emit_expr(obj_node)
+        if strcmp(mname, "to" to cstr) == 0:
+            let target_t as ptr[Type] = node_inferred_type(node)
+            if target_t != None to ptr[Type]:
+                let tk as TypeKind = (deref target_t).kind
+                if tk == TypeKind.F64:
+                    let res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call double @mantiq_py_to_f64(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return res
+                elif tk == TypeKind.F32:
+                    let d_res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, d_res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call double @mantiq_py_to_f64(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    let f_res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, f_res to cstr)
+                    append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                    append_cstr(ref (deref self).main_out, d_res to cstr)
+                    append_cstr(ref (deref self).main_out, " to float\n")
+                    return f_res
+                elif tk == TypeKind.I64 or tk == TypeKind.U64 or tk == TypeKind.ISize or tk == TypeKind.USize:
+                    let res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i64 @mantiq_py_to_i64(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return res
+                elif tk == TypeKind.I32 or tk == TypeKind.U32:
+                    let res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i32 @mantiq_py_to_i32(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return res
+                elif tk == TypeKind.Boolean:
+                    let res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i1 @mantiq_py_to_bool(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return res
+                elif tk == TypeKind.CStr:
+                    let res as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, res to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_to_cstr(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    return res
+                elif tk == TypeKind.String:
+                    let cstr_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, cstr_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_to_cstr(ptr ")
+                    append_cstr(ref (deref self).main_out, obj_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    let len_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, len_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i64 @strlen(ptr ")
+                    append_cstr(ref (deref self).main_out, cstr_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    let ins0 as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ins0 to cstr)
+                    append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } undef, ptr ")
+                    append_cstr(ref (deref self).main_out, cstr_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    let ins1 as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ins1 to cstr)
+                    append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, ins0 to cstr)
+                    append_cstr(ref (deref self).main_out, ", i64 ")
+                    append_cstr(ref (deref self).main_out, len_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", 1\n")
+                    let ins2 as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ins2 to cstr)
+                    append_cstr(ref (deref self).main_out, " = insertvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, ins1 to cstr)
+                    append_cstr(ref (deref self).main_out, ", i64 ")
+                    append_cstr(ref (deref self).main_out, len_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", 2\n")
+                    return ins2
+            return obj_val
+
+        let mname_str as ptr[u8] = self.emit_string_constant(mname)
+        let fn_obj as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, fn_obj to cstr)
+        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_getattr(ptr ")
+        append_cstr(ref (deref self).main_out, obj_val to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, mname_str to cstr)
+        append_cstr(ref (deref self).main_out, ")\n")
+
+        let params_raw as List[ptr[Node]] = node_params(node)
+        let params as ptr[List[ptr[Node]]] = ref params_raw
+        let arg_count as i64 = (deref params).length()
+        let tuple_reg as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, tuple_reg to cstr)
+        append_cstr(ref (deref self).main_out, " = call ptr @PyTuple_New(i64 ")
+        append_i64(ref (deref self).main_out, arg_count)
+        append_cstr(ref (deref self).main_out, ")\n")
+
+        var i as i64 = 0 to i64
+        while i < arg_count:
+            let a_node as ptr[Node] = get_node_decl(params, i)
+            let a_val as ptr[u8] = self.emit_expr(a_node)
+            let a_t as ptr[Type] = node_inferred_type(a_node)
+            var boxed as ptr[u8] = "null" to ptr[u8]
+            var boxed_set as bool = False
+
+            if a_t != None to ptr[Type]:
+                let tk as TypeKind = (deref a_t).kind
+                if tk == TypeKind.F64:
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyFloat_FromDouble(double ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.F32:
+                    let d_val as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, d_val to cstr)
+                    append_cstr(ref (deref self).main_out, " = fpext float ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to double\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyFloat_FromDouble(double ")
+                    append_cstr(ref (deref self).main_out, d_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.I64 or tk == TypeKind.U64 or tk == TypeKind.ISize or tk == TypeKind.USize:
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyLong_FromLongLong(i64 ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.I32 or tk == TypeKind.U32 or tk == TypeKind.I16 or tk == TypeKind.U16 or tk == TypeKind.I8 or tk == TypeKind.U8:
+                    let ext as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, " = sext i32 ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to i64\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyLong_FromLongLong(i64 ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.Boolean:
+                    let ext as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, " = zext i1 ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to i64\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyBool_FromLong(i64 ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.String:
+                    let s_buf as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, s_buf to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    let s_len as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, s_len to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", 1\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyUnicode_FromStringAndSize(ptr ")
+                    append_cstr(ref (deref self).main_out, s_buf to cstr)
+                    append_cstr(ref (deref self).main_out, ", i64 ")
+                    append_cstr(ref (deref self).main_out, s_len to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.CStr:
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyUnicode_FromString(ptr ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.List:
+                    let elem_t as ptr[Type] = (deref a_t).payload
+                    var is_f64_list as bool = False
+                    if elem_t != None to ptr[Type] and (deref elem_t).kind == TypeKind.F64:
+                        is_f64_list = True
+                    let l_buf as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, l_buf to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    let l_len as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, l_len to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue { ptr, i64, i64 } ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", 1\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    if is_f64_list:
+                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_box_list_f64(ptr ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_box_list_i64(ptr ")
+                    append_cstr(ref (deref self).main_out, l_buf to cstr)
+                    append_cstr(ref (deref self).main_out, ", i64 ")
+                    append_cstr(ref (deref self).main_out, l_len to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                    boxed_set = True
+                elif tk == TypeKind.PyObject:
+                    append_cstr(ref (deref self).main_out, "  call void @mantiq_py_incref(ptr ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = a_val
+                    boxed_set = True
+
+            if not boxed_set:
+                let nk as NodeType = node_kind(a_node)
+                if nk == NodeType.NumberLiteral:
+                    var is_flt as bool = node_is_float(a_node)
+                    let raw as String = node_str_val(a_node)
+                    if not is_flt and raw.data != None to ptr[u8] and raw.len > 0 to usize:
+                        extern fn strstr(haystack as cstr, needle as cstr) as cstr
+                        if strstr(raw.data to cstr, "." to cstr) != None to cstr:
+                            is_flt = True
+                    if is_flt:
+                        let b as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, b to cstr)
+                        append_cstr(ref (deref self).main_out, " = call ptr @PyFloat_FromDouble(double ")
+                        append_cstr(ref (deref self).main_out, a_val to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                        boxed = b
+                    else:
+                        let b as ptr[u8] = self.fresh_temp()
+                        append_cstr(ref (deref self).main_out, "  ")
+                        append_cstr(ref (deref self).main_out, b to cstr)
+                        append_cstr(ref (deref self).main_out, " = call ptr @PyLong_FromLongLong(i64 ")
+                        append_cstr(ref (deref self).main_out, a_val to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                        boxed = b
+                elif nk == NodeType.StringLiteral:
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyUnicode_FromString(ptr ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                elif nk == NodeType.BooleanLiteral:
+                    let ext as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, " = zext i1 ")
+                    append_cstr(ref (deref self).main_out, a_val to cstr)
+                    append_cstr(ref (deref self).main_out, " to i64\n")
+                    let b as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, b to cstr)
+                    append_cstr(ref (deref self).main_out, " = call ptr @PyBool_FromLong(i64 ")
+                    append_cstr(ref (deref self).main_out, ext to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    boxed = b
+                else:
+                    boxed = a_val
+
+            append_cstr(ref (deref self).main_out, "  call i32 @PyTuple_SetItem(ptr ")
+            append_cstr(ref (deref self).main_out, tuple_reg to cstr)
+            append_cstr(ref (deref self).main_out, ", i64 ")
+            append_i64(ref (deref self).main_out, i)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+            append_cstr(ref (deref self).main_out, boxed to cstr)
+            append_cstr(ref (deref self).main_out, ")\n")
+            i = i + 1 to i64
+
+        let call_res as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, call_res to cstr)
+        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_py_call(ptr ")
+        append_cstr(ref (deref self).main_out, fn_obj to cstr)
+        append_cstr(ref (deref self).main_out, ", ptr ")
+        append_cstr(ref (deref self).main_out, tuple_reg to cstr)
+        append_cstr(ref (deref self).main_out, ")\n")
+        return call_res
 
     public fn emit_collection_method(self as ptr[LLVMCodegen], node as ptr[Node], obj_node as ptr[Node], mname as cstr) as ptr[u8]:
         let obj_t as ptr[Type] = node_inferred_type(obj_node)
@@ -10257,7 +10738,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0:
+                if strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0 or strcmp(f_c, "pyobject_vars" to cstr) == 0 or strcmp(f_c, "py_module_aliases" to cstr) == 0:
                     return True
         let index as ptr[Node] = node_right(node)
         if index != None to ptr[Node]:
@@ -10297,9 +10778,9 @@ struct LLVMCodegen:
                     return String.make("i64" to cstr)
                 if strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0:
                     return String.make("i32" to cstr)
-                if strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0:
+                if strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "pyobject_vars" to cstr) == 0:
                     return String.make("i1" to cstr)
-                if strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0:
+                if strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0 or strcmp(f_c, "py_module_aliases" to cstr) == 0:
                     return String.make("{ ptr, i64, i64 }" to cstr)
                 if strcmp(f_c, "macros" to cstr) == 0:
                     return String.make("%MacroDef" to cstr)
@@ -10366,7 +10847,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(node)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0 or strcmp(f_c, "pyobject_vars" to cstr) == 0 or strcmp(f_c, "py_module_aliases" to cstr) == 0:
                     return self.dict_key_size_from_name("String" to cstr)
         return 8 to i64
 
@@ -10395,7 +10876,7 @@ struct LLVMCodegen:
             let f_nm as String = node_name(collection)
             if f_nm.data != None to ptr[u8]:
                 let f_c as cstr = f_nm.data to cstr
-                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0:
+                if strcmp(f_c, "macros" to cstr) == 0 or strcmp(f_c, "macro_args" to cstr) == 0 or strcmp(f_c, "symbols" to cstr) == 0 or strcmp(f_c, "loaded_modules" to cstr) == 0 or strcmp(f_c, "module_asts" to cstr) == 0 or strcmp(f_c, "fn_scopes" to cstr) == 0 or strcmp(f_c, "var_slots" to cstr) == 0 or strcmp(f_c, "var_counts" to cstr) == 0 or strcmp(f_c, "var_types" to cstr) == 0 or strcmp(f_c, "struct_sizes" to cstr) == 0 or strcmp(f_c, "struct_field_indices" to cstr) == 0 or strcmp(f_c, "defined_types" to cstr) == 0 or strcmp(f_c, "external_decls" to cstr) == 0 or strcmp(f_c, "auto_drops" to cstr) == 0 or strcmp(f_c, "symbol_states" to cstr) == 0 or strcmp(f_c, "defined_functions" to cstr) == 0 or strcmp(f_c, "program_functions" to cstr) == 0 or strcmp(f_c, "enum_variant_tags" to cstr) == 0 or strcmp(f_c, "type_aliases" to cstr) == 0 or strcmp(f_c, "global_vars" to cstr) == 0 or strcmp(f_c, "global_types" to cstr) == 0 or strcmp(f_c, "pyobject_vars" to cstr) == 0 or strcmp(f_c, "py_module_aliases" to cstr) == 0:
                     is_struct_val = True
         if is_struct_val and (deref coll_val) == 37 to u8:
             let ext as ptr[u8] = self.fresh_temp()
@@ -10901,18 +11382,25 @@ struct LLVMCodegen:
         let count as i64 = drops.length()
         var i as i64 = 0 to i64
         while i < count:
-            var var_name as String = drops[i]
+            let orig_name as String = drops[i]
+            var var_name as String = orig_name
             if (deref self).var_slots.has(var_name):
                 var_name = (deref self).var_slots[var_name]
+            let is_py as bool = (deref self).pyobject_vars.has(var_name) or (deref self).pyobject_vars.has(orig_name)
             let load_reg as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, load_reg to cstr)
             append_cstr(ref (deref self).main_out, " = load ptr, ptr %")
             append_str(ref (deref self).main_out, var_name)
             append_cstr(ref (deref self).main_out, "\n")
-            append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
-            append_cstr(ref (deref self).main_out, load_reg to cstr)
-            append_cstr(ref (deref self).main_out, ")\n")
+            if is_py:
+                append_cstr(ref (deref self).main_out, "  call void @mantiq_py_decref(ptr ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
+            else:
+                append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
             i = i + 1 to i64
 
     public fn populate_auto_drops_from_borrowck(self as ptr[LLVMCodegen], borroWck_auto_drops as Dict[usize, List[ptr[Symbol]]]):

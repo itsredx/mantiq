@@ -1,0 +1,51 @@
+// ── Phase 5 Embedded Python Test ─────────────────────────────────────────
+import[python] math
+import[python] numpy as np
+
+extern fn printf(fmt as cstr, ...) as i32
+
+fn test_math_sqrt() as bool:
+    let val as f64 = 144.0
+    let res_obj as PyObject = math.sqrt(val)
+    let res as f64 = res_obj.to[f64]()
+    printf("  [Test 1] math.sqrt(144.0) = %f\n" to cstr, res)
+    return res == 12.0
+
+fn test_numpy_mean() as bool:
+    let data as List[f64] = [1.0, 2.0, 3.0, 4.0]
+    let arr as PyObject = np.array(data)
+    let mean_obj as PyObject = np.mean(arr)
+    let mean_val as f64 = mean_obj.to[f64]()
+    printf("  [Test 2] np.mean([1.0, 2.0, 3.0, 4.0]) = %f\n" to cstr, mean_val)
+    return mean_val == 2.5
+
+fn test_scope_drops() as bool:
+    var i as i64 = 0 to i64
+    while i < 1000 to i64:
+        let m as PyObject = math.sqrt(16.0)
+        let v as f64 = m.to[f64]()
+        if v != 4.0:
+            return False
+        i = i + 1 to i64
+    printf("  [Test 3] 1000 loop scope allocations & auto-drops completed\n" to cstr)
+    return True
+
+fn main() as i32:
+    printf("============================================================\n" to cstr)
+    printf(" Running Phase 5 Embedded Python in Nizam Verification\n" to cstr)
+    printf("============================================================\n" to cstr)
+
+    if not test_math_sqrt():
+        printf("FAILED: test_math_sqrt\n" to cstr)
+        return 1 to i32
+
+    if not test_numpy_mean():
+        printf("FAILED: test_numpy_mean\n" to cstr)
+        return 2 to i32
+
+    if not test_scope_drops():
+        printf("FAILED: test_scope_drops\n" to cstr)
+        return 3 to i32
+
+    printf("ALL EMBEDDED PYTHON TESTS PASSED!\n" to cstr)
+    return 0 to i32

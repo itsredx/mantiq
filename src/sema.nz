@@ -9,7 +9,7 @@ from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, Langu
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import types
-from types import Type
+from types import Type, TypeKind, make_type
 import error
 from error import DiagnosticEngine, Diagnostic, Severity
 
@@ -283,6 +283,8 @@ struct Sema:
         (deref gs).symbols[String.make("Z")] = make_symbol(String.make("Z"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("channel")] = make_symbol(String.make("channel"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Channel")] = make_symbol(String.make("Channel"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("PyObject")] = make_symbol(String.make("PyObject"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("py_import")] = make_symbol(String.make("py_import"), SymbolKind.Function, None to ptr[Node])
 
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
         self.report_error_with_code("E0101" to cstr, msg, (deref self).current_file, span)
@@ -419,6 +421,43 @@ struct Sema:
             return
         
         let import_k as ImportKind = node_import_kind(node)
+        if import_k == ImportKind.Python:
+            var opt_al as Option[String] = node_alias(node)
+            var sym_name as String = target
+            if option_has_value((ref opt_al) to ptr[u8]):
+                let al_p as ptr[String] = option_value((ref opt_al) to ptr[u8]) to ptr[String]
+                if al_p != None to ptr[String]:
+                    sym_name = deref al_p
+            let py_sym as ptr[Symbol] = make_symbol(sym_name, SymbolKind.Variable, node)
+            (deref py_sym).resolved_type = make_type(TypeKind.PyObject)
+            (deref (deref self).current_scope).symbols[sym_name] = py_sym
+
+            let count as i64 = node_imported_symbols(node).length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                let imported_sym as ptr[Symbol] = make_symbol(s_name, SymbolKind.Variable, node)
+                (deref imported_sym).resolved_type = make_type(TypeKind.PyObject)
+                (deref (deref self).current_scope).symbols[s_name] = imported_sym
+                s_idx = s_idx + 1 to i64
+
+            var py_present as bool = False
+            var dl_present as bool = False
+            let l_cnt as i64 = (deref self).link_targets.length()
+            var li as i64 = 0 to i64
+            while li < l_cnt:
+                let lt as cstr = (deref self).link_targets[li].data to cstr
+                if strcmp(lt, "python3.12" to cstr) == 0:
+                    py_present = True
+                elif strcmp(lt, "dl" to cstr) == 0:
+                    dl_present = True
+                li = li + 1 to i64
+            if not py_present:
+                (deref self).link_targets.append(String.make("python3.12" to cstr))
+            if not dl_present:
+                (deref self).link_targets.append(String.make("dl" to cstr))
+            return
+
         if import_k == ImportKind.C or import_k == ImportKind.Pkg:
             let t_cstr as cstr = target.data to cstr
             let t_len as usize = target.len
