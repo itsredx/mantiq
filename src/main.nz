@@ -41,6 +41,7 @@ extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
 extern fn strlen(s as cstr) as usize
+extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
 
 // ── Performance Monitor ─────────────────────────────────────────────────
 extern fn mantiq_perf_now_ns() as i64
@@ -386,6 +387,26 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
     let res as i32 = system(cmd_buf to cstr)
     perf_end(perf, "link", t6)
+
+    if target.is_python_ext() and res == 0:
+        // ── Phase 7.5: Generate and write PEP 484 type stub (.pyi) ──
+        let pyi_content as String = (deref cg).generate_pyi_stub()
+        let pyi_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
+        let out_len as usize = strlen(out_file)
+        var base_len as usize = out_len
+        if out_len > 8 to usize and strcmp(((out_file to usize) + (out_len - 8 to usize)) to cstr, ".abi3.so" to cstr) == 0:
+            base_len = out_len - 8 to usize
+        elif out_len > 3 to usize and strcmp(((out_file to usize) + (out_len - 3 to usize)) to cstr, ".so" to cstr) == 0:
+            base_len = out_len - 3 to usize
+        memcpy(pyi_buf to ptr, out_file to ptr, base_len)
+        let pyi_suffix as cstr = ".pyi" to cstr
+        memcpy(((pyi_buf to usize) + base_len) to ptr, pyi_suffix to ptr, 5 to usize)
+        let pyi_path as cstr = pyi_buf to cstr
+        let f_pyi as ptr = fopen(pyi_path, "wb" to cstr)
+        if f_pyi != None to ptr:
+            let _w_pyi as usize = fwrite(pyi_content.data to ptr, 1 to usize, pyi_content.len, f_pyi)
+            fclose(f_pyi)
+        free(pyi_buf to ptr)
 
     return res == 0
 

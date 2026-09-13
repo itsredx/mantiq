@@ -13619,3 +13619,291 @@ struct LLVMCodegen:
             si = si + 1 to i64
 
         append_cstr(ref (deref self).main_out, "  ret ptr %mod\n}\n\n")
+
+    // ── Python Type Stub Generation ─────────────────────────────────────────
+    public fn map_annot_to_py_type(self as ptr[LLVMCodegen], annot as cstr) as String:
+        if annot == None to cstr:
+            return String.make("Any" to cstr)
+        if strlen(annot) == 0 to usize:
+            return String.make("Any" to cstr)
+        if strcmp(annot, "i8" to cstr) == 0 or strcmp(annot, "i16" to cstr) == 0 or strcmp(annot, "i32" to cstr) == 0 or strcmp(annot, "i64" to cstr) == 0 or strcmp(annot, "u8" to cstr) == 0 or strcmp(annot, "u16" to cstr) == 0 or strcmp(annot, "u32" to cstr) == 0 or strcmp(annot, "u64" to cstr) == 0 or strcmp(annot, "usize" to cstr) == 0 or strcmp(annot, "isize" to cstr) == 0 or strcmp(annot, "int" to cstr) == 0:
+            return String.make("int" to cstr)
+        elif strcmp(annot, "f16" to cstr) == 0 or strcmp(annot, "bf16" to cstr) == 0 or strcmp(annot, "f32" to cstr) == 0 or strcmp(annot, "f64" to cstr) == 0 or strcmp(annot, "f128" to cstr) == 0 or strcmp(annot, "float" to cstr) == 0:
+            return String.make("float" to cstr)
+        elif strcmp(annot, "bool" to cstr) == 0:
+            return String.make("bool" to cstr)
+        elif strcmp(annot, "String" to cstr) == 0 or strcmp(annot, "cstr" to cstr) == 0 or strcmp(annot, "str" to cstr) == 0:
+            return String.make("str" to cstr)
+        elif strcmp(annot, "void" to cstr) == 0 or strcmp(annot, "None" to cstr) == 0:
+            return String.make("None" to cstr)
+        elif strcmp(annot, "PyObject" to cstr) == 0 or strcmp(annot, "ptr" to cstr) == 0:
+            return String.make("Any" to cstr)
+        elif strncmp(annot, "ptr[", 4 to usize) == 0:
+            let ob as cstr = strchr(annot, 91 to i32)
+            if ob != None to cstr:
+                let ob_next as cstr = ((ob to usize) + 1 to usize) to cstr
+                let cb as cstr = strchr(ob_next, 93 to i32)
+                if cb != None to cstr and (cb to usize) > (ob_next to usize):
+                    let in_len as usize = (cb to usize) - (ob_next to usize)
+                    let in_buf as ptr[u8] = make[u8](in_len + 1 to usize) to ptr[u8]
+                    memcpy(in_buf to ptr, ob_next to ptr, in_len)
+                    (deref ((in_buf to usize + in_len) to ptr[u8])) = 0 to u8
+                    let in_py as String = self.map_annot_to_py_type(in_buf to cstr)
+                    free(in_buf to ptr)
+                    let sb as StringBuilder = StringBuilder.make()
+                    append_cstr(ref sb, "Sequence[" to cstr)
+                    append_str(ref sb, in_py)
+                    append_cstr(ref sb, "]" to cstr)
+                    let res as String = sb.to_string()
+                    sb.deinit()
+                    return res
+            return String.make("Sequence[Any]" to cstr)
+        elif strncmp(annot, "List[", 5 to usize) == 0 or strncmp(annot, "Slice[", 6 to usize) == 0:
+            let ob as cstr = strchr(annot, 91 to i32)
+            if ob != None to cstr:
+                let ob_next as cstr = ((ob to usize) + 1 to usize) to cstr
+                let cb as cstr = strchr(ob_next, 93 to i32)
+                if cb != None to cstr and (cb to usize) > (ob_next to usize):
+                    let in_len as usize = (cb to usize) - (ob_next to usize)
+                    let in_buf as ptr[u8] = make[u8](in_len + 1 to usize) to ptr[u8]
+                    memcpy(in_buf to ptr, ob_next to ptr, in_len)
+                    (deref ((in_buf to usize + in_len) to ptr[u8])) = 0 to u8
+                    let in_py as String = self.map_annot_to_py_type(in_buf to cstr)
+                    free(in_buf to ptr)
+                    let sb as StringBuilder = StringBuilder.make()
+                    append_cstr(ref sb, "Sequence[" to cstr)
+                    append_str(ref sb, in_py)
+                    append_cstr(ref sb, "]" to cstr)
+                    let res as String = sb.to_string()
+                    sb.deinit()
+                    return res
+            return String.make("Sequence[Any]" to cstr)
+        elif strncmp(annot, "Buffer[", 7 to usize) == 0:
+            let ob as cstr = strchr(annot, 91 to i32)
+            if ob != None to cstr:
+                let ob_next as cstr = ((ob to usize) + 1 to usize) to cstr
+                let cb as cstr = strchr(ob_next, 93 to i32)
+                if cb != None to cstr and (cb to usize) > (ob_next to usize):
+                    let in_len as usize = (cb to usize) - (ob_next to usize)
+                    let in_buf as ptr[u8] = make[u8](in_len + 1 to usize) to ptr[u8]
+                    memcpy(in_buf to ptr, ob_next to ptr, in_len)
+                    (deref ((in_buf to usize + in_len) to ptr[u8])) = 0 to u8
+                    let in_py as String = self.map_annot_to_py_type(in_buf to cstr)
+                    free(in_buf to ptr)
+                    let sb as StringBuilder = StringBuilder.make()
+                    append_cstr(ref sb, "Sequence[" to cstr)
+                    append_str(ref sb, in_py)
+                    append_cstr(ref sb, "]" to cstr)
+                    let res as String = sb.to_string()
+                    sb.deinit()
+                    return res
+            return String.make("Sequence[Any]" to cstr)
+        elif strncmp(annot, "Dict[", 5 to usize) == 0:
+            return String.make("dict[Any, Any]" to cstr)
+        return String.make(annot)
+
+    public fn generate_pyi_stub(self as ptr[LLVMCodegen]) as String:
+        let out as StringBuilder = StringBuilder.make()
+        append_cstr(ref out, "\"\"\"Auto-generated PEP 484 type stub for Nizam native extension.\"\"\"\n" to cstr)
+        append_cstr(ref out, "from typing import Any, List, Sequence, Dict, Optional, Tuple, Union\n\n" to cstr)
+        append_cstr(ref out, "class MantiqBuffer:\n    def to_list(self) -> List[Any]: ...\n    def to_bytes(self) -> bytes: ...\n\n" to cstr)
+        append_cstr(ref out, "Buffer = MantiqBuffer\n\n" to cstr)
+
+        // 1. Exported Structs & Classes
+        let exp_structs as List[ptr[Node]] = (deref self).python_exported_structs
+        let s_count as i64 = exp_structs.length()
+        var si as i64 = 0 to i64
+        while si < s_count:
+            let s_node as ptr[Node] = exp_structs[si]
+            let s_name as String = node_name(s_node)
+            append_cstr(ref out, "class " to cstr)
+            append_str(ref out, s_name)
+            append_cstr(ref out, ":\n" to cstr)
+
+            var s_body as ptr[Node] = node_body(s_node)
+            var s_decls as List[ptr[Node]] = List[ptr[Node]]()
+            if s_body != None to ptr[Node]:
+                s_decls = node_declarations(s_body)
+            else:
+                s_decls = node_declarations(s_node)
+
+            let s_fields as List[ptr[Node]] = List[ptr[Node]]()
+            let s_methods as List[ptr[Node]] = List[ptr[Node]]()
+            let d_cnt as i64 = s_decls.length()
+            var di as i64 = 0 to i64
+            while di < d_cnt:
+                let d as ptr[Node] = s_decls[di]
+                let dk as NodeType = node_kind(d)
+                if dk == NodeType.VarDecl or dk == NodeType.FieldDecl:
+                    s_fields.append(d)
+                elif dk == NodeType.FunDecl:
+                    let m_nm as String = node_name(d)
+                    if m_nm.data != None to ptr[u8] and m_nm.len > 0 to usize:
+                        let acc as String = node_access_modifier(d)
+                        if (deref m_nm.data) != 95 to u8 and (acc.data == None to ptr[u8] or strcmp(acc.data to cstr, "private" to cstr) != 0):
+                            s_methods.append(d)
+                di = di + 1 to i64
+
+            let fld_cnt as i64 = s_fields.length()
+            let meth_cnt as i64 = s_methods.length()
+            if fld_cnt == 0 to i64 and meth_cnt == 0 to i64:
+                append_cstr(ref out, "    ...\n" to cstr)
+
+            var fi as i64 = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let f_ann as String = self.get_param_annot_str(f_node)
+                var f_type as String = String.make("Any" to cstr)
+                if f_ann.len > 0 to usize and f_ann.data != None to ptr[u8]:
+                    f_type = self.map_annot_to_py_type(f_ann.data to cstr)
+                else:
+                    let f_pt as String = self.resolve_py_param_type(f_node)
+                    f_type = self.map_annot_to_py_type(f_pt.data to cstr)
+                append_cstr(ref out, "    " to cstr)
+                append_str(ref out, f_name)
+                append_cstr(ref out, ": " to cstr)
+                append_str(ref out, f_type)
+                append_cstr(ref out, "\n" to cstr)
+                fi = fi + 1 to i64
+
+            // __init__ constructor
+            append_cstr(ref out, "    def __init__(self" to cstr)
+            fi = 0 to i64
+            while fi < fld_cnt:
+                let f_node as ptr[Node] = s_fields[fi]
+                let f_name as String = node_name(f_node)
+                let f_ann as String = self.get_param_annot_str(f_node)
+                var f_type as String = String.make("Any" to cstr)
+                if f_ann.len > 0 to usize and f_ann.data != None to ptr[u8]:
+                    f_type = self.map_annot_to_py_type(f_ann.data to cstr)
+                else:
+                    let f_pt as String = self.resolve_py_param_type(f_node)
+                    f_type = self.map_annot_to_py_type(f_pt.data to cstr)
+                append_cstr(ref out, ", " to cstr)
+                append_str(ref out, f_name)
+                append_cstr(ref out, ": " to cstr)
+                append_str(ref out, f_type)
+                append_cstr(ref out, " = ..." to cstr)
+                fi = fi + 1 to i64
+            append_cstr(ref out, ") -> None: ...\n" to cstr)
+
+            // methods
+            var mi as i64 = 0 to i64
+            while mi < meth_cnt:
+                let m_node as ptr[Node] = s_methods[mi]
+                let m_name as String = node_name(m_node)
+                let m_params as List[ptr[Node]] = node_params(m_node)
+                let mp_cnt as i64 = m_params.length()
+
+                var has_self as bool = False
+                if mp_cnt > 0 to i64:
+                    let p0 as ptr[Node] = m_params[0]
+                    let p0_nm as String = node_name(p0)
+                    if p0_nm.data != None to ptr[u8] and strcmp(p0_nm.data to cstr, "self" to cstr) == 0:
+                        has_self = True
+
+                var start_p as i64 = 0 to i64
+                if has_self:
+                    start_p = 1 to i64
+
+                append_cstr(ref out, "    def " to cstr)
+                append_str(ref out, m_name)
+                append_cstr(ref out, "(self" to cstr)
+
+                var mpi as i64 = start_p
+                while mpi < mp_cnt:
+                    let mp_node as ptr[Node] = m_params[mpi]
+                    let mp_name as String = node_name(mp_node)
+                    let mp_ann as String = self.get_param_annot_str(mp_node)
+                    var mp_type as String = String.make("Any" to cstr)
+                    if mp_ann.len > 0 to usize and mp_ann.data != None to ptr[u8]:
+                        mp_type = self.map_annot_to_py_type(mp_ann.data to cstr)
+                    else:
+                        let mp_pt as String = self.resolve_py_param_type(mp_node)
+                        mp_type = self.map_annot_to_py_type(mp_pt.data to cstr)
+                    append_cstr(ref out, ", " to cstr)
+                    if mp_name.len > 0 to usize and mp_name.data != None to ptr[u8]:
+                        append_str(ref out, mp_name)
+                    else:
+                        let p_id_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                        let _sp as i32 = sprintf(p_id_buf, "arg%lld", mpi)
+                        append_cstr(ref out, p_id_buf to cstr)
+                        free(p_id_buf to ptr)
+                    append_cstr(ref out, ": " to cstr)
+                    append_str(ref out, mp_type)
+                    mpi = mpi + 1 to i64
+                append_cstr(ref out, ") -> " to cstr)
+
+                // Return type
+                let mr_annot as ptr[TypeAnnotation] = node_return_type_annot(m_node)
+                var m_ret_py as String = String.make("None" to cstr)
+                if mr_annot != None to ptr[TypeAnnotation] and (deref mr_annot).name.data != None to ptr[u8]:
+                    m_ret_py = self.map_annot_to_py_type((deref mr_annot).name.data to cstr)
+                else:
+                    let m_ret_t as String = self.resolve_py_return_type(m_node)
+                    if strcmp(m_ret_t.data to cstr, "void" to cstr) != 0:
+                        m_ret_py = self.map_annot_to_py_type(m_ret_t.data to cstr)
+                append_str(ref out, m_ret_py)
+                append_cstr(ref out, ": ...\n" to cstr)
+                mi = mi + 1 to i64
+
+            append_cstr(ref out, "\n" to cstr)
+            si = si + 1 to i64
+
+        // 2. Exported Module Functions
+        let exp_fns as List[ptr[Node]] = (deref self).python_exported_functions
+        let fn_count as i64 = exp_fns.length()
+        var fni as i64 = 0 to i64
+        while fni < fn_count:
+            let fn_node as ptr[Node] = exp_fns[fni]
+            let fn_name as String = node_name(fn_node)
+            let params as List[ptr[Node]] = node_params(fn_node)
+            let p_count as i64 = params.length()
+
+            append_cstr(ref out, "def " to cstr)
+            append_str(ref out, fn_name)
+            append_cstr(ref out, "(" to cstr)
+
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                let p_node as ptr[Node] = params[pi]
+                let p_name as String = node_name(p_node)
+                let p_ann as String = self.get_param_annot_str(p_node)
+                var p_type as String = String.make("Any" to cstr)
+                if p_ann.len > 0 to usize and p_ann.data != None to ptr[u8]:
+                    p_type = self.map_annot_to_py_type(p_ann.data to cstr)
+                else:
+                    let pt as String = self.resolve_py_param_type(p_node)
+                    p_type = self.map_annot_to_py_type(pt.data to cstr)
+                if pi > 0 to i64:
+                    append_cstr(ref out, ", " to cstr)
+                if p_name.len > 0 to usize and p_name.data != None to ptr[u8]:
+                    append_str(ref out, p_name)
+                else:
+                    let p_id_buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                    let _sp as i32 = sprintf(p_id_buf, "arg%lld", pi)
+                    append_cstr(ref out, p_id_buf to cstr)
+                    free(p_id_buf to ptr)
+                append_cstr(ref out, ": " to cstr)
+                append_str(ref out, p_type)
+                pi = pi + 1 to i64
+
+            append_cstr(ref out, ") -> " to cstr)
+
+            let r_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
+            var ret_py as String = String.make("None" to cstr)
+            if r_annot != None to ptr[TypeAnnotation] and (deref r_annot).name.data != None to ptr[u8]:
+                ret_py = self.map_annot_to_py_type((deref r_annot).name.data to cstr)
+            else:
+                let ret_t as String = self.resolve_py_return_type(fn_node)
+                if strcmp(ret_t.data to cstr, "void" to cstr) != 0:
+                    ret_py = self.map_annot_to_py_type(ret_t.data to cstr)
+            append_str(ref out, ret_py)
+            append_cstr(ref out, ": ...\n" to cstr)
+
+            fni = fni + 1 to i64
+
+        let res_str as String = out.to_string()
+        out.deinit()
+        return res_str

@@ -1,0 +1,8 @@
+// ── Concurrent Test Kernel ─────────────────────────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+fn compute_worker_val(worker_id as i64, scale as i64) as i64:
+    return (worker_id * scale) + 42 to i64
+
+fn sum_worker_data(worker_id as i64, factor as f64) as f64:
+    return (worker_id to f64) * factor + 100.5

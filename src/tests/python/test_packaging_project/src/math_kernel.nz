@@ -1,0 +1,26 @@
+// ── Nizam Math Kernel Package Test ────────────────────────────────────
+extern fn printf(fmt as cstr, ...) as i32
+
+struct Point2D:
+    public var x as f64
+    public var y as f64
+
+    public fn make(x as f64, y as f64) as Point2D:
+        return Point2D(x = x, y = y)
+
+    public fn length_sq(self as ptr[Point2D]) as f64:
+        return (deref self).x * (deref self).x + (deref self).y * (deref self).y
+
+fn fast_sum(vals as ptr[f64], n as usize) as f64:
+    var s as f64 = 0.0
+    var i as usize = 0 to usize
+    while i < n:
+        s = s + vals[i]
+        i = i + 1 to usize
+    return s
+
+fn compute_statistics(vals as ptr[f64], n as usize) as f64:
+    if n == 0 to usize:
+        return 0.0
+    var total as f64 = fast_sum(vals, n)
+    return total / (n to f64)

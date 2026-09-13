@@ -1,0 +1,12 @@
+[build-system]
+requires = []
+build-backend = "nizam_build.core"
+
+[project]
+name = "nizam-demo-pkg"
+version = "0.1.0"
+description = "Nizam Phase 6 test package demonstration"
+authors = [{ name = "Nizam Team" }]
+
+[tool.nizam]
+sources = ["src/math_kernel.nz"]
