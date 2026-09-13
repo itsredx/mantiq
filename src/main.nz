@@ -282,6 +282,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     (deref sema).root_ast = root
     sema.declare_pass(root)
     sema.resolve_pass(root)
+    sema.analyze_gil_safety(root)
     perf_end(perf, "sema", t1)
 
     // ── Phase 3: Type Checking ──

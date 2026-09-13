@@ -4,7 +4,7 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty
 from std.mem import make
-from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier
+from symbols import Node, NodeType, TypeAnnotation, Symbol, SymbolKind, node_kind, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_op_ptr, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_str_val_ptr, node_auto_drops, node_inferred_type, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_span, node_type_annots, node_is_float, node_is_vectorized, set_node_inferred_type, set_node_name, node_return_names, node_return_type_annots, node_target, node_imported_symbols, node_module_name, node_captured_vars, node_access_modifier, node_is_nogil, node_is_gil_independent
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type
 from layout import Target
 
@@ -1114,7 +1114,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("ProgramData", "{ { ptr, i32, i32 } }")
             self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { i8, ptr } }")
-            self.register_builtin_struct("FunDeclData", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i8, i8, i8, ptr, ptr, i8, i8, { ptr, i32, i32 } }")
+            self.register_builtin_struct("FunDeclData", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i8, i8, i8, ptr, ptr, i8, i8, { ptr, i32, i32 }, i8, i8 }")
             self.register_builtin_struct("VarDeclData", "{ { ptr, i32, i32 }, ptr, i8, ptr, { ptr, i32, i32 } }")
             self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr } }")
             self.register_builtin_struct("ClassDeclData", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i8, { ptr, i32, i32 } }")
@@ -1175,7 +1175,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("Node", "{ i32, %Span, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("ProgramData", "{ { ptr, i64, i64 } }")
             self.register_builtin_struct("ImportDeclData", "{ i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { i8, ptr } }")
-            self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr, i8, i8, { ptr, i64, i64 } }")
+            self.register_builtin_struct("FunDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, i8, i8, ptr, ptr, i8, i8, { ptr, i64, i64 }, i8, i8 }")
             self.register_builtin_struct("VarDeclData", "{ { ptr, i64, i64 }, ptr, i8, ptr, { ptr, i64, i64 } }")
             self.register_builtin_struct("IfStmtData", "{ ptr, ptr, { i8, ptr } }")
             self.register_builtin_struct("ClassDeclData", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i8, { ptr, i64, i64 } }")
@@ -1248,6 +1248,8 @@ struct LLVMCodegen:
         self.register_field_idx("FunDeclData" to cstr, "is_override" to cstr, 8 to i32)
         self.register_field_idx("FunDeclData" to cstr, "is_final" to cstr, 9 to i32)
         self.register_field_idx("FunDeclData" to cstr, "access_modifier" to cstr, 10 to i32)
+        self.register_field_idx("FunDeclData" to cstr, "is_nogil" to cstr, 11 to i32)
+        self.register_field_idx("FunDeclData" to cstr, "is_gil_independent" to cstr, 12 to i32)
         self.register_field_idx("VarDeclData" to cstr, "name" to cstr, 0 to i32)
         self.register_field_idx("VarDeclData" to cstr, "left" to cstr, 1 to i32)
         self.register_field_idx("VarDeclData" to cstr, "is_mut" to cstr, 2 to i32)
@@ -3141,6 +3143,10 @@ struct LLVMCodegen:
                         field_idx = 9 to i32
                     elif strcmp(f_cstr, "access_modifier" to cstr) == 0:
                         field_idx = 10 to i32
+                    elif strcmp(f_cstr, "is_nogil" to cstr) == 0:
+                        field_idx = 11 to i32
+                    elif strcmp(f_cstr, "is_gil_independent" to cstr) == 0:
+                        field_idx = 12 to i32
                 elif strcmp(s_cstr, "VarDeclData" to cstr) == 0:
                     if strcmp(f_cstr, "name" to cstr) == 0:
                         field_idx = 0 to i32
@@ -11884,7 +11890,9 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i32 @__mantiq_py_extract_buffer(ptr, ptr, ptr, ptr, i32, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i64 @PyTuple_Size(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @PyTuple_GetItem(ptr, i64)\n")
-        append_cstr(ref (deref self).type_out, "declare void @PyBuffer_Release(ptr)\n\n")
+        append_cstr(ref (deref self).type_out, "declare void @PyBuffer_Release(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @PyEval_SaveThread()\n")
+        append_cstr(ref (deref self).type_out, "declare void @PyEval_RestoreThread(ptr)\n\n")
 
         // ── MantiqBuffer PEP 3118 Type Spec ──────────────────────────────────
         append_cstr(ref (deref self).type_out, "@__nizam_py_slots_MantiqBuffer = internal global [5 x %PyType_Slot] [\n")
@@ -12074,12 +12082,19 @@ struct LLVMCodegen:
                 let b_ret_t as String = self.resolve_py_return_type(fn_node)
                 let b_is_void as bool = strcmp(b_ret_t.data to cstr, "void" to cstr) == 0
 
+                let is_gil_indep as bool = node_is_gil_independent(fn_node)
+                if is_gil_indep:
+                    append_cstr(ref (deref self).main_out, "  %save_th_b = call ptr @PyEval_SaveThread()\n")
+
                 if b_is_void:
                     append_cstr(ref (deref self).main_out, "  call void @")
                     append_str(ref (deref self).main_out, fn_name)
                     append_cstr(ref (deref self).main_out, "(")
                     append_str(ref (deref self).main_out, b_inv_str)
-                    append_cstr(ref (deref self).main_out, ")\n  call void @PyBuffer_Release(ptr %py_buf)\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    if is_gil_indep:
+                        append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %save_th_b)\n")
+                    append_cstr(ref (deref self).main_out, "  call void @PyBuffer_Release(ptr %py_buf)\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
                 else:
                     append_cstr(ref (deref self).main_out, "  %buf_res = call ")
                     append_str(ref (deref self).main_out, b_ret_t)
@@ -12087,7 +12102,10 @@ struct LLVMCodegen:
                     append_str(ref (deref self).main_out, fn_name)
                     append_cstr(ref (deref self).main_out, "(")
                     append_str(ref (deref self).main_out, b_inv_str)
-                    append_cstr(ref (deref self).main_out, ")\n  call void @PyBuffer_Release(ptr %py_buf)\n")
+                    append_cstr(ref (deref self).main_out, ")\n")
+                    if is_gil_indep:
+                        append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %save_th_b)\n")
+                    append_cstr(ref (deref self).main_out, "  call void @PyBuffer_Release(ptr %py_buf)\n")
 
                     if strcmp(b_ret_t.data to cstr, "i64" to cstr) == 0:
                         let is_unsigned as bool = self.is_return_unsigned(fn_node)
@@ -12271,6 +12289,10 @@ struct LLVMCodegen:
                 pi = pi + 1 to i64
 
             // Invoke Nizam function
+            let is_gil_indep as bool = node_is_gil_independent(fn_node)
+            if is_gil_indep:
+                append_cstr(ref (deref self).main_out, "  %save_th = call ptr @PyEval_SaveThread()\n")
+
             let ret_t as String = self.resolve_py_return_type(fn_node)
             let is_void as bool = strcmp(ret_t.data to cstr, "void" to cstr) == 0
 
@@ -12280,6 +12302,8 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "(")
                 append_str(ref (deref self).main_out, invoke_args.to_string())
                 append_cstr(ref (deref self).main_out, ")\n")
+                if is_gil_indep:
+                    append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %save_th)\n")
                 append_cstr(ref (deref self).main_out, "  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
             else:
                 append_cstr(ref (deref self).main_out, "  %res = call ")
@@ -12289,6 +12313,8 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "(")
                 append_str(ref (deref self).main_out, invoke_args.to_string())
                 append_cstr(ref (deref self).main_out, ")\n")
+                if is_gil_indep:
+                    append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %save_th)\n")
 
                 if strcmp(ret_t.data to cstr, "i64" to cstr) == 0:
                     let is_unsigned as bool = self.is_return_unsigned(fn_node)
@@ -12770,16 +12796,25 @@ struct LLVMCodegen:
                 let m_inv_str as String = m_invoke_args.to_string()
                 m_invoke_args.deinit()
 
+                let m_is_gil_indep as bool = node_is_gil_independent(m_node)
+                if m_is_gil_indep:
+                    append_cstr(ref (deref self).main_out, "  %m_save_th = call ptr @PyEval_SaveThread()\n")
+
                 if m_is_void:
                     let call_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
-                    _sp = sprintf(call_b, "  call void @%s_%s(%s)\n  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n", s_name.data to cstr, m_name.data to cstr, m_inv_str.data to cstr)
+                    _sp = sprintf(call_b, "  call void @%s_%s(%s)\n", s_name.data to cstr, m_name.data to cstr, m_inv_str.data to cstr)
                     append_cstr(ref (deref self).main_out, call_b to cstr)
                     free(call_b to ptr)
+                    if m_is_gil_indep:
+                        append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %m_save_th)\n")
+                    append_cstr(ref (deref self).main_out, "  call void @Py_IncRef(ptr @_Py_NoneStruct)\n  ret ptr @_Py_NoneStruct\n")
                 else:
                     let call_b as ptr[u8] = make[u8](512 to usize) to ptr[u8]
                     _sp = sprintf(call_b, "  %%res = call %s @%s_%s(%s)\n", m_ret_t.data to cstr, s_name.data to cstr, m_name.data to cstr, m_inv_str.data to cstr)
                     append_cstr(ref (deref self).main_out, call_b to cstr)
                     free(call_b to ptr)
+                    if m_is_gil_indep:
+                        append_cstr(ref (deref self).main_out, "  call void @PyEval_RestoreThread(ptr %m_save_th)\n")
 
                     if strcmp(m_ret_t.data to cstr, "i64" to cstr) == 0:
                         let is_unsigned as bool = self.is_return_unsigned(m_node)

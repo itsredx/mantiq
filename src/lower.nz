@@ -1976,6 +1976,7 @@ struct Lowerer:
         var is_override as bool = False
         var is_final_fn as bool = False
         var is_async_fn as bool = False
+        var is_nogil as bool = False
         var access_mod as String = String.make("public" to cstr)
 
         var nf_node as TSNode = deref ts_node
@@ -2001,6 +2002,8 @@ struct Lowerer:
                         is_final_fn = True
                     if strstr((deref d_str).data to cstr, "async" to cstr) != None to cstr:
                         is_async_fn = True
+                    if strstr((deref d_str).data to cstr, "nogil" to cstr) != None to cstr:
+                        is_nogil = True
                     drop(d_str to ptr)
                 elif strcmp(c_type, "fun_modifier" to cstr) == 0:
                     let m_str as ptr[String] = self.slice_string_from_node(ref child)
@@ -2204,6 +2207,8 @@ struct Lowerer:
         (deref data).is_override = is_override
         (deref data).is_final = is_final_fn
         (deref data).access_modifier = access_mod
+        (deref data).is_nogil = is_nogil
+        (deref data).is_gil_independent = False
         (deref n).data = data to ptr[u8]
         return n
 
@@ -2931,6 +2936,8 @@ struct Lowerer:
             (deref fn_data).is_extern = False
             (deref fn_data).is_variadic = False
             (deref fn_data).return_type_annot = None to ptr[TypeAnnotation]
+            (deref fn_data).is_nogil = False
+            (deref fn_data).is_gil_independent = False
             (deref fn_node).data = fn_data to ptr[u8]
             return fn_node
         else:

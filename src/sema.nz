@@ -5,7 +5,7 @@ from std.collections import List
 from std.collections import Dict
 from std.option import Option, Empty
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import types
@@ -73,8 +73,164 @@ fn read_file_to_str(path as cstr) as String:
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn printf(format as cstr, ...) as i32
 extern fn strdup(s as cstr) as cstr
+
+// ── GIL Safety Helper Functions ──────────────────────────────────────────
+fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node as ptr[ptr[Node]], out_viol_reason as ptr[String]) as bool:
+    if n == None to ptr[Node]:
+        return False
+
+    let nt as NodeType = node_kind(n)
+
+    if nt == NodeType.CallExpr:
+        let callee as ptr[Node] = node_left(n)
+        if callee != None to ptr[Node]:
+            let ck as NodeType = node_kind(callee)
+            if ck == NodeType.Identifier:
+                let c_name as String = node_name(callee)
+                if c_name.data != None to ptr[u8]:
+                    let cn as cstr = c_name.data to cstr
+                    if strncmp(cn, "Py" to cstr, 2 to usize) == 0 or strncmp(cn, "_Py" to cstr, 3 to usize) == 0 or strcmp(cn, "py_eval" to cstr) == 0 or strcmp(cn, "py_exec" to cstr) == 0 or strcmp(cn, "py_import" to cstr) == 0:
+                        deref out_viol_node = n
+                        deref out_viol_reason = String.make("invokes CPython API" to cstr)
+                        return True
+                    (deref calls).append(c_name)
+            elif ck == NodeType.MemberExpr:
+                let m_name as String = node_name(callee)
+                if m_name.data != None to ptr[u8]:
+                    let mn as cstr = m_name.data to cstr
+                    if strcmp(mn, "getattr" to cstr) == 0 or strcmp(mn, "setattr" to cstr) == 0 or strcmp(mn, "call" to cstr) == 0:
+                        deref out_viol_node = n
+                        deref out_viol_reason = String.make("transitively invokes CPython API" to cstr)
+                        return True
+            if scan_node_for_gil(callee, calls, out_viol_node, out_viol_reason):
+                return True
+
+        let args as List[ptr[Node]] = node_params(n)
+        let a_cnt as i64 = args.length()
+        var ai as i64 = 0 to i64
+        while ai < a_cnt:
+            if scan_node_for_gil(args[ai], calls, out_viol_node, out_viol_reason):
+                return True
+            ai = ai + 1 to i64
+        return False
+
+    elif nt == NodeType.Identifier:
+        let id_name as String = node_name(n)
+        if id_name.data != None to ptr[u8]:
+            let iname as cstr = id_name.data to cstr
+            if strcmp(iname, "PyObject" to cstr) == 0:
+                deref out_viol_node = n
+                deref out_viol_reason = String.make("references PyObject" to cstr)
+                return True
+        return False
+
+    elif nt == NodeType.BlockStmt or nt == NodeType.Program:
+        let decls as List[ptr[Node]] = node_declarations(n)
+        let d_cnt as i64 = decls.length()
+        var di as i64 = 0 to i64
+        while di < d_cnt:
+            if scan_node_for_gil(decls[di], calls, out_viol_node, out_viol_reason):
+                return True
+            di = di + 1 to i64
+        return False
+
+    elif nt == NodeType.IfStmt:
+        if scan_node_for_gil(node_cond(n), calls, out_viol_node, out_viol_reason):
+            return True
+        if scan_node_for_gil(node_then_branch(n), calls, out_viol_node, out_viol_reason):
+            return True
+        let opt_eb as Option[ptr[Node]] = node_else_branch(n)
+        let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
+        if option_has_value(opt_ref):
+            let eb as ptr[Node] = option_value(opt_ref) to ptr[Node]
+            if scan_node_for_gil(eb, calls, out_viol_node, out_viol_reason):
+                return True
+        return False
+
+    elif nt == NodeType.WhileStmt:
+        if scan_node_for_gil(node_cond(n), calls, out_viol_node, out_viol_reason):
+            return True
+        if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.ForStmt or nt == NodeType.WithStmt:
+        if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
+            return True
+        if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.BinaryExpr:
+        if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
+            return True
+        if scan_node_for_gil(node_right(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.UnaryExpr or nt == NodeType.CastExpr or nt == NodeType.ReturnStmt or nt == NodeType.VarDecl or nt == NodeType.MemberExpr or nt == NodeType.SpawnStmt or nt == NodeType.AwaitExpr:
+        if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.IndexExpr:
+        if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
+            return True
+        if scan_node_for_gil(node_right(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.ParamBlockStmt:
+        if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
+            return True
+        return False
+
+    elif nt == NodeType.InterpolatedString or nt == NodeType.ListLiteral:
+        let decls as List[ptr[Node]] = node_declarations(n)
+        let d_cnt as i64 = decls.length()
+        var di as i64 = 0 to i64
+        while di < d_cnt:
+            if scan_node_for_gil(decls[di], calls, out_viol_node, out_viol_reason):
+                return True
+            di = di + 1 to i64
+        return False
+
+    return False
+
+fn check_sig_has_py_types(fn_node as ptr[Node]) as bool:
+    let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
+    if ret_annot != None to ptr[TypeAnnotation] and (deref ret_annot).name.data != None to ptr[u8]:
+        let r_name as cstr = (deref ret_annot).name.data to cstr
+        if strstr(r_name, "PyObject" to cstr) != None to cstr or strstr(r_name, "Py_buffer" to cstr) != None to cstr:
+            return True
+
+    let params as List[ptr[Node]] = node_params(fn_node)
+    let p_cnt as i64 = params.length()
+    var pi as i64 = 0 to i64
+    while pi < p_cnt:
+        let p_node as ptr[Node] = params[pi]
+        let annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
+        if annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            let annots as List[Option[ptr[TypeAnnotation]]] = deref annots_ptr
+            let a_count as i64 = annots.length()
+            var ai as i64 = 0 to i64
+            while ai < a_count:
+                let opt_a as Option[ptr[TypeAnnotation]] = annots[ai]
+                let opt_ref as ptr[u8] = (ref opt_a) to ptr[u8]
+                if option_has_value(opt_ref):
+                    let val_p as ptr[u8] = option_value(opt_ref)
+                    let ta as ptr[TypeAnnotation] = val_p to ptr[TypeAnnotation]
+                    if ta != None to ptr[TypeAnnotation] and (deref ta).name.data != None to ptr[u8]:
+                        let t_name as cstr = (deref ta).name.data to cstr
+                        if strstr(t_name, "PyObject" to cstr) != None to cstr or strstr(t_name, "Py_buffer" to cstr) != None to cstr:
+                            return True
+                ai = ai + 1 to i64
+        pi = pi + 1 to i64
+    return False
+
 
 // ── Sema ───────────────────────────────────────────────────────────────
 struct Sema:
@@ -147,6 +303,15 @@ struct Sema:
     public fn report_error_node(self as ptr[Sema], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
         let file_path as String = node_file_path(node, (deref self).current_file)
         return self.report_error_with_code(code, msg, file_path, node_span(node))
+
+    public fn report_warning_with_code(self as ptr[Sema], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
+        if (deref self).engine != None to ptr[DiagnosticEngine]:
+            return (deref (deref self).engine).report_warning(code, msg, file_path, span)
+        return None to ptr[Diagnostic]
+
+    public fn report_warning_node(self as ptr[Sema], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+        let file_path as String = node_file_path(node, (deref self).current_file)
+        return self.report_warning_with_code(code, msg, file_path, node_span(node))
 
     public fn lookup_symbol(self as ptr[Sema], name as String) as ptr[Symbol]:
         var curr as ptr[Scope] = (deref self).current_scope
@@ -1319,3 +1484,137 @@ struct Sema:
         elif nt == NodeType.SpreadExpr or nt == NodeType.SpawnStmt or nt == NodeType.AwaitExpr:
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
+
+    // ── GIL Safety Engine ──────────────────────────────────────────────────
+    public fn analyze_gil_safety(self as ptr[Sema], root as ptr[Node]):
+        if root == None to ptr[Node]:
+            return
+
+        let decls as List[ptr[Node]] = node_declarations(root)
+        let d_cnt as i64 = decls.length()
+
+        var fn_names as List[String] = List[String]()
+        var fn_nodes as List[ptr[Node]] = List[ptr[Node]]()
+
+        var di as i64 = 0 to i64
+        while di < d_cnt:
+            let d as ptr[Node] = decls[di]
+            if d != None to ptr[Node]:
+                let dk as NodeType = node_kind(d)
+                if dk == NodeType.FunDecl:
+                    let fn_name as String = node_name(d)
+                    if fn_name.data != None to ptr[u8]:
+                        fn_names.append(fn_name)
+                        fn_nodes.append(d)
+                elif dk == NodeType.ClassDecl or dk == NodeType.StructDecl:
+                    let body as ptr[Node] = node_body(d)
+                    if body != None to ptr[Node] and node_kind(body) == NodeType.BlockStmt:
+                        let m_decls as List[ptr[Node]] = node_declarations(body)
+                        let mc as i64 = m_decls.length()
+                        var mi as i64 = 0 to i64
+                        while mi < mc:
+                            let m as ptr[Node] = m_decls[mi]
+                            if m != None to ptr[Node] and node_kind(m) == NodeType.FunDecl:
+                                let m_name as String = node_name(m)
+                                if m_name.data != None to ptr[u8]:
+                                    fn_names.append(m_name)
+                                    fn_nodes.append(m)
+                            mi = mi + 1 to i64
+            di = di + 1 to i64
+
+        let f_count as i64 = fn_names.length()
+        if f_count == 0 to i64:
+            return
+
+        var direct_gil as List[bool] = List[bool]()
+        var direct_viol_node as List[ptr[Node]] = List[ptr[Node]]()
+        var call_caller_idx as List[i64] = List[i64]()
+        var call_target_name as List[String] = List[String]()
+
+        // Direct scan for each function
+        var fi as i64 = 0 to i64
+        while fi < f_count:
+            let f_node as ptr[Node] = fn_nodes[fi]
+
+            if check_sig_has_py_types(f_node):
+                direct_gil.append(True)
+                direct_viol_node.append(f_node)
+            else:
+                var callees as List[String] = List[String]()
+                var viol_node as ptr[Node] = None to ptr[Node]
+                var viol_reason as String = String.make("" to cstr)
+                let has_direct as bool = scan_node_for_gil(node_body(f_node), ref callees, ref viol_node, ref viol_reason)
+                if has_direct:
+                    direct_gil.append(True)
+                    direct_viol_node.append(viol_node)
+                else:
+                    direct_gil.append(False)
+                    direct_viol_node.append(None to ptr[Node])
+
+                let c_cnt as i64 = callees.length()
+                var ci as i64 = 0 to i64
+                while ci < c_cnt:
+                    call_caller_idx.append(fi)
+                    call_target_name.append(callees[ci])
+                    ci = ci + 1 to i64
+
+            fi = fi + 1 to i64
+
+        // Transitive reachability fixed-point propagation
+        var trans_gil as List[bool] = List[bool]()
+        var trans_viol_node as List[ptr[Node]] = List[ptr[Node]]()
+        fi = 0 to i64
+        while fi < f_count:
+            trans_gil.append(direct_gil[fi])
+            trans_viol_node.append(direct_viol_node[fi])
+            fi = fi + 1 to i64
+
+        let total_calls as i64 = call_caller_idx.length()
+        var changed as bool = True
+        while changed:
+            changed = False
+            var ci as i64 = 0 to i64
+            while ci < total_calls:
+                let caller_i as i64 = call_caller_idx[ci]
+                if not trans_gil[caller_i]:
+                    let tgt as String = call_target_name[ci]
+                    if tgt.data != None to ptr[u8]:
+                        let t_cstr as cstr = tgt.data to cstr
+                        if strncmp(t_cstr, "Py" to cstr, 2 to usize) == 0 or strncmp(t_cstr, "_Py" to cstr, 3 to usize) == 0 or strcmp(t_cstr, "py_eval" to cstr) == 0 or strcmp(t_cstr, "py_exec" to cstr) == 0:
+                            trans_gil[caller_i] = True
+                            changed = True
+                        else:
+                            var ti as i64 = 0 to i64
+                            while ti < f_count:
+                                if strcmp(fn_names[ti].data to cstr, t_cstr) == 0:
+                                    if trans_gil[ti]:
+                                        trans_gil[caller_i] = True
+                                        trans_viol_node[caller_i] = trans_viol_node[ti]
+                                        changed = True
+                                        break
+                                ti = ti + 1 to i64
+                ci = ci + 1 to i64
+
+        // Enforcement & annotation setting
+        fi = 0 to i64
+        while fi < f_count:
+            let f_node as ptr[Node] = fn_nodes[fi]
+            let is_nogil as bool = node_is_nogil(f_node)
+
+            if trans_gil[fi]:
+                set_node_is_gil_independent(f_node, False)
+                if is_nogil:
+                    var err_node as ptr[Node] = f_node
+                    if trans_viol_node[fi] != None to ptr[Node]:
+                        err_node = trans_viol_node[fi]
+                    let emsg as String = String.make("function marked @nogil violates transitive GIL independence: transitively invokes CPython API" to cstr)
+                    self.report_error_node("E0450" to cstr, emsg, err_node)
+                else:
+                    let acc as String = node_access_modifier(f_node)
+                    if acc.data != None to ptr[u8] and strcmp(acc.data to cstr, "public" to cstr) == 0:
+                        let wmsg as String = String.make("function retains Python GIL during execution" to cstr)
+                        self.report_warning_node("W0041" to cstr, wmsg, f_node)
+            else:
+                set_node_is_gil_independent(f_node, True)
+
+            fi = fi + 1 to i64

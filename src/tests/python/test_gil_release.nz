@@ -1,0 +1,37 @@
+// ── Phase 4: Transitive Static GIL Safety Engine Test Module ──────────
+
+@nogil
+fn cpu_heavy_mandelbrot(iterations as i32, cx as f64, cy as f64) as i32:
+    var zx as f64 = 0.0
+    var zy as f64 = 0.0
+    var tmp as f64 = 0.0
+    var i as i32 = 0
+    while i < iterations:
+        if (zx * zx + zy * zy) >= 4.0:
+            return i
+        tmp = zx * zx - zy * zy + cx
+        zy = 2.0 * zx * zy + cy
+        zx = tmp
+        i = i + 1
+    return i
+
+fn compute_fib(n as i32) as i64:
+    if n <= 1:
+        return n to i64
+    var a as i64 = 0 to i64
+    var b as i64 = 1 to i64
+    var i as i32 = 2
+    while i <= n:
+        let next as i64 = a + b
+        a = b
+        b = next
+        i = i + 1
+    return b
+
+fn heavy_work_loop(n as i64) as i64:
+    var acc as i64 = 0 to i64
+    var i as i64 = 0 to i64
+    while i < n:
+        acc = (acc + i * 3) ^ (i >> 1)
+        i = i + 1 to i64
+    return acc
