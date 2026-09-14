@@ -7,6 +7,8 @@ The Nizam and Mantiq project is structured as a multi-repository workspace spann
 - **`mantiqz/`**: The Stage 1 Zig reference bootstrap compiler.
 - **`stage3/`**: The native self-hosted compiler binary (`mantiq`) and runtime artifacts.
 - **`stage4/`**: The bootstrapped WebAssembly compiler (`nizam.wasm`) and WASM modules.
+- **`mantiq-vscode/`**: Visual Studio Code extension & standalone Language Server (`out/server.js`) with WebAssembly parser.
+- **`nvim-mantiq/`**: Neovim Lua plugin providing automated LSP attachment, tree-sitter syntax highlighting, and buffer commands.
 - **`compiler-service/`**: The Docker container microservice deployed to Render / Cloud Run for live in-browser compilation.
 - **`playground/`**: The static WebAssembly interactive studio deployed to Vercel Edge CDN.
 - **System Environments**: User-local directories (`~/.local/bin`, `~/.local/lib/mantiq`) and system directories (`/usr/local/bin`, `/usr/local/lib/mantiq`).
@@ -33,6 +35,9 @@ Every replicated asset belongs to exactly one canonical root. Edits must be made
 │ mantiq/std/                  │ Standard Library Modules     │
 │ stage3/mantiq                │ Self-Hosted Compiler Binary  │
 │ stage4/nizam.wasm            │ Bootstrapped WASM Compiler   │
+│ mantiq-vscode/out/server.js  │ Standalone LSP Server Binary │
+│ mantiq-vscode/...wasm        │ Tree-sitter WASM Parser      │
+│ nvim-mantiq/queries/mantiq/  │ Canonical Tree-sitter Queries│
 └──────────────────────────────┴──────────────────────────────┘
                                │
                        ./dev-sync.sh
@@ -50,6 +55,9 @@ Every replicated asset belongs to exactly one canonical root. Edits must be made
 │ • stage3/std, compiler-service/mantiq/std, compiler-service/std │
 │ • mantiqz/std, ~/.local/lib/mantiq/std                      │
 │ • compiler-service/stage4/nizam.wasm                        │
+│ • ~/.local/lib/mantiq/server.js                             │
+│ • ~/.local/lib/mantiq/tree-sitter-mantiq.wasm               │
+│ • nvim-mantiq/queries/nizam/                                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,6 +73,9 @@ Every replicated asset belongs to exactly one canonical root. Edits must be made
 | **Standard Library** | `mantiq/std/` | • `stage3/std/`<br>• `compiler-service/mantiq/std/`<br>• `compiler-service/std/`<br>• `mantiqz/std/`<br>• `~/.local/lib/mantiq/std/`<br>• `/usr/local/lib/mantiq/std/` *(system)* | Directory Content MD5 |
 | **Native Compiler Executables** | `stage3/mantiq` *(built via `./build.sh`)* | • `mantiq/nizam`<br>• `mantiq/mantiq`<br>• `compiler-service/bin/nizam`<br>• `~/.local/bin/nizam`<br>• `~/.local/bin/mantiq`<br>• `/usr/local/bin/nizam` *(system)*<br>• `/usr/local/bin/mantiq` *(system)* | MD5 (repo) & mtime/RPATH (user/system) |
 | **WASM Compiler Module** | `stage4/nizam.wasm` | • `compiler-service/stage4/nizam.wasm` | MD5 Checksum |
+| **Language Server (LSP)** | `mantiq-vscode/out/server.js` | • `~/.local/lib/mantiq/server.js`<br>• `/usr/local/lib/mantiq/server.js` *(system)* | MD5 Checksum |
+| **Tree-Sitter WASM Parser** | `mantiq-vscode/tree-sitter-mantiq.wasm` | • `~/.local/lib/mantiq/tree-sitter-mantiq.wasm`<br>• `/usr/local/lib/mantiq/tree-sitter-mantiq.wasm` *(system)* | MD5 Checksum |
+| **Editor Queries (Tree-sitter)** | `nvim-mantiq/queries/mantiq/` | • `nvim-mantiq/queries/nizam/` | Directory Content MD5 |
 
 ---
 
@@ -129,7 +140,12 @@ sudo ./dev-sync.sh --system
 3. **Updating the Compiler**:
    - Make source changes in `mantiq/src/*.nz`.
    - Run `./dev-sync.sh --build`. This rebuilds `stage3/mantiq` and updates `mantiq/nizam`, `compiler-service/bin/nizam`, and `~/.local/bin/nizam` in a single command.
-4. **Validating Parity**:
+4. **Editor Tooling & Language Server Development**:
+   - Make TypeScript language server changes in `mantiq-vscode/src/`.
+   - Run `npm run compile` (or `./dev-sync.sh --build`) to compile `out/server.js`.
+   - Tree-sitter highlight and indent queries for Neovim must be edited in `nvim-mantiq/queries/mantiq/`; `./dev-sync.sh` automatically synchronizes them to `nvim-mantiq/queries/nizam/`.
+   - Running `./dev-sync.sh` installs the updated `server.js` and `tree-sitter-mantiq.wasm` into `~/.local/lib/mantiq/`, ensuring all local editor installations (VSCode, Neovim) stay synchronized without manual path configurations.
+5. **Validating Parity**:
    - Before submitting pull requests or committing, run:
      ```bash
      ./dev-sync.sh --check
