@@ -11,13 +11,28 @@ def main(argv=None):
         prog="nizam-transpiler",
         description="Transpile Python source code into native Nizam (.nz) code."
     )
-    parser.add_argument("input", help="Path to input Python file (.py)")
-    parser.add_argument("-o", "--output", help="Path to output Nizam file (.nz)")
+    parser.add_argument("input", nargs="?", default=None, help="Path to input Python file (.py)")
+    parser.add_argument("-o", "--output", help="Path to output Nizam file (.nz) or .so extension")
     parser.add_argument("-p", "--print", action="store_true", help="Print transpiled code to stdout")
     parser.add_argument("-r", "--run", action="store_true", help="Execute the transpiled code via mantiq run")
     parser.add_argument("--mantiq-bin", default=None, help="Path to mantiq/nizam executable")
+    parser.add_argument("--build-reconciler", action="store_true", help="Compile native UI reconciler C-extension (.abi3.so)")
 
     args = parser.parse_args(argv)
+
+    if args.build_reconciler:
+        from ..reconciler import compile_reconciler_extension
+        try:
+            so_path = compile_reconciler_extension(args.output)
+            print(f"✔ Native reconciler compiled successfully: {so_path}")
+            return 0
+        except Exception as e:
+            sys.stderr.write(f"Reconciler compilation error: {e}\n")
+            return 1
+
+    if not args.input:
+        parser.print_help(sys.stderr)
+        return 1
 
     if not os.path.exists(args.input):
         sys.stderr.write(f"Error: Input file not found: {args.input}\n")
