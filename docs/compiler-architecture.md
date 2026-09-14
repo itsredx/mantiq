@@ -67,18 +67,18 @@ Source text (*.nz, *.mq)
 
 | Module | Source File | Lines | Responsibilities |
 | :--- | :--- | :--- | :--- |
-| **AST & Symbols** | `src/symbols.nz` | ~1,200 | `Node`, `Span`, `Symbol`, `Scope`, `NodeType` definitions, accessors, and setters |
-| **Type System** | `src/types.nz` | ~180 | `Type`, `TypeKind`, primitive/composite types, copy vs move classification |
-| **Target & Layout** | `src/layout.nz` | ~250 | Target abstraction (`Target`), pointer widths (32-bit vs 64-bit), struct alignment & layout |
+| **AST & Symbols** | `src/symbols.nz` | ~2,000 | `Node`, `Span`, `Symbol`, `Scope`, `NodeType`, `PyObject`, `is_python_extern` |
+| **Type System** | `src/types.nz` | ~250 | `Type`, `TypeKind` (including `PyObject`), copy vs move classification |
+| **Target & Layout** | `src/layout.nz` | ~300 | Target abstraction (`Target`), 32-bit WASM vs 64-bit native vs `python-ext` (abi3) |
 | **Tree-Sitter FFI** | `src/tree_sitter.nz` | ~100 | C FFI bindings to Tree-sitter parser, node navigation, and cursor API |
-| **CST Lowering** | `src/lower.nz` | ~1,700 | Transforms Tree-sitter CST to typed AST, macro definition/invocation handling |
-| **Semantic Analysis** | `src/sema.nz` | ~800 | Two-pass symbol declaration and resolution, module import loading, closure detection |
-| **Type Checker** | `src/typecheck.nz` | ~1,100 | Type validation, type unification, generic monomorphization, literal inference |
+| **CST Lowering** | `src/lower.nz` | ~3,270 | CST to AST lowering, `extern[python]` blocks/inlines, decorators (`@nogil`), macros |
+| **Semantic Analysis** | `src/sema.nz` | ~1,700 | Two-pass symbol declaration, module loading, closure capture, static GIL analysis |
+| **Type Checker** | `src/typecheck.nz` | ~2,400 | Type validation, bidirectional inference, generic monomorphization, `PyObject` coercion |
 | **Borrow Checker** | `src/borrowck.nz` | ~450 | Move analysis, use-after-move detection, deterministic auto-drop injection |
-| **LLVM Codegen** | `src/codegen.nz` | ~6,350 | Generates SSA LLVM IR, type-to-LLVM mapping, struct layouts, function emission |
+| **LLVM Codegen** | `src/codegen.nz` | ~14,500 | SSA LLVM IR emission, Vectorcall trampolines, `%PyTypeObject`, PEP 3118 buffer protocol, lazy callable caching |
 | **Diagnostic Engine** | `src/error.nz` | ~1,070 | Box-drawing ANSI terminal renderer, multi-file source cache, error codes catalog |
-| **CLI Driver** | `src/main.nz` | ~230 | CLI entry point (`build`, `repl`, `run`), pipeline orchestration, native linker invocation |
-| **C Runtime** | `src/runtime.c` | ~975 | Task actor concurrency, dictionary hash table, string utilities, memory management |
+| **CLI Driver** | `src/main.nz` | ~560 | Multi-target driver (`build`, `run`, `version`), `--target`, `--lib-dir`, `--profile`, native/WASI/CPython runners |
+| **C Runtime** | `src/runtime.c` | ~2,250 | Task concurrency, hash table, string buffer utils, PEP 3118 buffer bridge, weak CPython C-API stubs |
 
 ---
 
@@ -147,26 +147,24 @@ $$\text{Stage 2} \longrightarrow \text{Stage 3} \longrightarrow \text{Stage 4} \
 
 ---
 
-## 5. Test Harness & Verification (`src/tests/run_tests.sh`)
+## 5. Test Harness & Verification
 
-The compiler contains a comprehensive 14-suite test harness executed via `src/tests/run_tests.sh`:
+The compiler contains a multi-tiered test harness validating all subsystems:
 
-1. `src/tests/test_types.nz`: Type representation, copy/move classification.
-2. `src/tests/test_abi.nz`: C calling conventions, struct packing, FFI ABI.
-3. `src/tests/test_std.nz`: Standard library `String`, `List`, `Dict`, `Option`.
-4. `src/tests/test_magic.nz`: Magic methods (`__add__`, `__eq__`, `__len__`).
-5. `src/tests/test_ast.nz`: AST node allocation, span propagation, data getters/setters.
-6. `src/tests/test_error.nz`: DiagnosticEngine, box formatting, error codes, word wrapping.
-7. `src/tests/test_macro.nz`: Macro expansion, hygienic identifier mangling, strict modes.
-8. `src/tests/test_sema.nz`: Lexical scoping, duplicate detection, closure capture, monomorphization.
-9. `src/tests/test_borrowck.nz`: Use-after-move detection, auto-drop injection, context manager drops.
-10. `src/tests/test_ffi.nz`: Tree-sitter FFI bindings and CST traversal.
-11. `src/tests/test_lower.nz`: Tree-sitter CST to Nizam AST lowering.
-12. `src/tests/test_traverse.nz`: AST visitor and depth-first traversal.
-13. `src/tests/test_utils.nz`: String utilities and helper functions.
-14. `src/tests/test_codegen.nz`: LLVM IR generation and Clang validation.
-
-**Result**: 14 / 14 suites pass with 100% parity across self-hosted builds.
+1. **Unit & Subsystem Test Suites (`src/tests/run_tests.sh`)**:
+   - 14 foundational suites (`test_types.nz`, `test_abi.nz`, `test_std.nz`, `test_magic.nz`, `test_ast.nz`, `test_error.nz`, `test_macro.nz`, `test_sema.nz`, `test_borrowck.nz`, `test_ffi.nz`, `test_lower.nz`, `test_traverse.nz`, `test_utils.nz`, `test_codegen.nz`).
+2. **Language Feature Integration Suites**:
+   - Closures & Lambdas (`test_closures_lambdas.mq`), Downcasting & Reflection (`test_reflection_downcast.mq`), List Comprehensions (`test_list_comprehensions.mq`), String Interpolation (`test_string_interpolation.mq`), Channels & Actors (`test_channels_actors.mq`).
+3. **WebAssembly Target Test Suites (`src/tests/wasm/run_wasm_tests.sh`)**:
+   - 32-bit linear memory collections (`test_wasm_collections.nz`), classes & OOP dispatch (`test_wasm_classes.mq`), ABI layout parity (`test_wasm_abi.nz`).
+4. **Python FFI Integration Suites (`src/tests/python/`)**:
+   - Phase 1: Primitives & Vectorcall (`run_phase_1_tests.sh`)
+   - Phase 2: Struct & Class type synthesis (`run_phase_2_tests.sh`)
+   - Phase 3: PEP 3118 buffer protocol (`run_phase_3_tests.sh`)
+   - Phase 4: Static GIL safety & `@nogil` (`run_phase_4_tests.sh`)
+   - Phase 5: Embedded Python runtime (`run_phase_5_tests.sh`)
+   - Phase 6: In-process packaging backend (`run_phase_6_tests.sh`)
+   - Tier 2: Static typed `extern[python]` declarations (`run_extern_python_tests.sh`)
 
 ---
 
@@ -203,3 +201,43 @@ The compiler features full WebAssembly (`wasm32-wasi`) code generation and a dua
    Replaces nested Node WASI virtualization with direct invocation of the native Linux ELF `nizam` compiler binary, eliminating 444MB of V8 isolate overhead and OS `fork()` memory duplication.
 3. **Pre-Warmed Sysroot Cache**:
    The compiler Docker image pre-compiles WASI `libc`, `compiler-rt`, and `runtime.c` during build time into `/opt/zig_cache`, ensuring zero runtime compilation overhead and preventing kernel OOM events on 512MB RAM free cloud tiers.
+
+---
+
+## 7. Bidirectional Python FFI Subsystem & C-Extension Generation
+
+The compiler includes an end-to-end bidirectional Python Foreign Function Interface enabling seamless interoperation between Nizam and CPython:
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                        Bidirectional Python FFI Engine                        │
+├────────────────────────────────────────┬──────────────────────────────────────┤
+│ 1. Nizam -> Python Extension (Export)  │ 2. Python -> Nizam Embedding (Import)│
+├────────────────────────────────────────┼──────────────────────────────────────┤
+│ • Flag: --target python-ext            │ • Syntax: extern[python] "mod":      │
+│ • Standard: PEP 384 Limited API (abi3) │ • Syntax: import[python] mod as py   │
+│ • Zero Python.h dependency             │ • Static pointer caching (@__cached) │
+│ • Fast Vectorcall trampolines          │ • Type unboxing (f64, i64, bool, ...)│
+│ • PEP 3118 zero-copy buffer protocol   │ • Weak C-API linkage in runtime.c    │
+│ • Transitive static @nogil analysis    │ • Dynamic PyObject unboxing          │
+└────────────────────────────────────────┴──────────────────────────────────────┘
+```
+
+### 1. PEP 384 Limited API (`abi3`) Generation (`--target python-ext`)
+- Compiles Nizam code directly into standard C-extension shared libraries (`.abi3.so`) compatible across all Python 3.8+ versions without recompilation.
+- Generates `%PyMethodDef`, `%PyModuleDef`, and `PyInit_<module>` entirely within SSA LLVM IR without requiring local Python headers (`Python.h`).
+
+### 2. Struct & Class CPython Type Synthesis
+- Generates native `%PyTypeObject` descriptors for Nizam structs and classes with `tp_members`, `tp_methods`, `tp_init`, `tp_new`, and `tp_dealloc`.
+- Enables Python code to instantiate, inspect, and invoke methods on native Nizam types with zero wrapper boilerplate.
+
+### 3. Shared-Ownership PEP 3118 Buffer Protocol
+- Implements `bf_getbuffer` and `bf_releasebuffer` handlers for Nizam structs containing raw memory buffers.
+- Permits zero-copy conversion into Python `memoryview` and NumPy `ndarray` types, maintaining reference-counted memory safety.
+
+### 4. Transitive Static GIL Safety & `@nogil`
+- The compiler sema pass enforces compile-time GIL independence: functions marked `@nogil` cannot touch Python runtime APIs or allocate managed objects.
+- At the call boundary, the runtime invokes `Py_BEGIN_ALLOW_THREADS` and `Py_END_ALLOW_THREADS`, enabling multi-threaded CPU parallel execution across GIL boundaries.
+
+### 5. In-Process Packaging Backend (`nizam_build`)
+- Provides a PEP 517 standard build backend (`mantiq/python/nizam_build`) enabling pure `pyproject.toml` integration (`pip install .` / `python -m build --wheel`).
