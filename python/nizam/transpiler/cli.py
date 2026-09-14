@@ -16,6 +16,8 @@ def main(argv=None):
     parser.add_argument("-p", "--print", action="store_true", help="Print transpiled code to stdout")
     parser.add_argument("-r", "--run", action="store_true", help="Execute the transpiled code via mantiq run")
     parser.add_argument("--mantiq-bin", default=None, help="Path to mantiq/nizam executable")
+    parser.add_argument("--foreign-mode", choices=["extern", "import", "auto"], default="extern", help="Foreign module interop mode (extern, import, auto)")
+    parser.add_argument("--workspace-root", default=None, help="Root directory for local module resolution")
     parser.add_argument("--build-reconciler", action="store_true", help="Compile native UI reconciler C-extension (.abi3.so)")
 
     args = parser.parse_args(argv)
@@ -43,7 +45,7 @@ def main(argv=None):
         base, _ = os.path.splitext(args.input)
         out_path = f"{base}.nz"
 
-    transpiler = Transpiler()
+    transpiler = Transpiler(foreign_mode=args.foreign_mode, workspace_root=args.workspace_root)
     try:
         transpiled = transpiler.transpile_file(args.input, out_path)
     except Exception as e:

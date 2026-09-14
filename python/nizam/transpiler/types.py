@@ -23,6 +23,9 @@ PRIMITIVE_TYPE_MAP: Dict[str, str] = {
     "NoneType": "void",
     "Any": "PyObject",
     "object": "PyObject",
+    "PyObject": "PyObject",
+    "cstr": "cstr",
+    "ptr": "ptr",
     "void": "void",
 }
 
@@ -205,8 +208,17 @@ class TypeEnvironment:
                     return "f64"
                 if func_name == "str":
                     return "String"
-                if func_name == "bool":
+                if func_name in ("bool", "hasattr"):
                     return "bool"
+                if func_name == "setattr":
+                    return "void"
+                if func_name == "getattr" and len(node.args) >= 2:
+                    obj_t = self.infer_expression_type(node.args[0])
+                    attr_arg = node.args[1]
+                    if isinstance(attr_arg, ast.Constant) and isinstance(attr_arg.value, str):
+                        s_info = self.lookup_struct(obj_t)
+                        if s_info and attr_arg.value in s_info:
+                            return s_info[attr_arg.value]
                 sig = self.lookup_function(func_name)
                 if sig:
                     return sig["return_type"]

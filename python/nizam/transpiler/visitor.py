@@ -1,8 +1,9 @@
 # ── Imports ────────────────────────────────────────────────────────────
 import ast
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict, Tuple, Any
 from .types import TypeEnvironment, PRIMITIVE_TYPE_MAP
 from .classes import ClassTransformer
+from .foreign import DependencyClassifier, ForeignModuleRegistry, ForeignFunctionSignature
 
 # ── Operator Mappings ──────────────────────────────────────────────────
 BIN_OP_MAP = {
@@ -42,9 +43,20 @@ UNARY_OP_MAP = {
 class NizamTranspilerVisitor(ast.NodeVisitor):
     """Visits Python AST nodes and emits canonical, statically-typed Nizam code."""
 
-    def __init__(self, type_env: Optional[TypeEnvironment] = None):
+    def __init__(
+        self,
+        type_env: Optional[TypeEnvironment] = None,
+        foreign_mode: str = "extern",
+        workspace_root: Optional[str] = None,
+        dependency_classifier: Optional[DependencyClassifier] = None,
+        foreign_registry: Optional[ForeignModuleRegistry] = None,
+    ):
         self.indent_level = 0
         self.type_env = type_env or TypeEnvironment()
+        self.foreign_mode = foreign_mode
+        self.workspace_root = workspace_root
+        self.classifier = dependency_classifier or DependencyClassifier(workspace_root)
+        self.foreign_registry = foreign_registry or ForeignModuleRegistry(self.classifier)
         self.output_lines: List[str] = []
         self.declared_variables: Set[str] = set()
         self.needs_printf: bool = False
@@ -63,13 +75,29 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
 
     # ── Module Handling ────────────────────────────────────────────────
     def visit_Module(self, node: ast.Module) -> str:
-        # Pre-scan functions and classes to register signatures
+        # Pre-pass 1: Register imports (foreign vs local)
+        for stmt in node.body:
+            if isinstance(stmt, ast.Import):
+                for alias in stmt.names:
+                    if self.classifier.is_foreign(alias.name):
+                        self.foreign_registry.register_import(alias.name, alias.asname)
+            elif isinstance(stmt, ast.ImportFrom):
+                if stmt.module and self.classifier.is_foreign(stmt.module):
+                    names = [(alias.name, alias.asname) for alias in stmt.names]
+                    self.foreign_registry.register_import_from(stmt.module, names)
+
+        # Pre-pass 2: Register local functions and classes into type_env
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef):
                 self._pre_register_function(stmt)
             elif isinstance(stmt, ast.ClassDef):
                 transformer = ClassTransformer(stmt, self.type_env)
                 transformer.analyze()
+
+        # Pre-pass 3: Scan calls to detect foreign calls and record signatures
+        for sub_node in ast.walk(node):
+            if isinstance(sub_node, ast.Call):
+                self._pre_register_foreign_call(sub_node)
 
         # Separate function/class definitions from top-level scripts
         script_stmts = []
@@ -106,10 +134,22 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         headers = []
         if self.needs_printf:
             headers.append("extern fn printf(format as cstr, ...) as i32")
-        if self.needs_math:
+        if self.needs_math and "math" not in self.foreign_registry.recorded_calls:
             headers.append("from std.math import pow, sqrt")
 
+        # Foreign Interop declarations
+        if self.foreign_mode in ("extern", "auto"):
+            extern_lines = self.foreign_registry.generate_extern_blocks()
+            if extern_lines:
+                headers.extend(extern_lines)
+        elif self.foreign_mode == "import":
+            import_lines = self.foreign_registry.generate_import_statements()
+            if import_lines:
+                headers.extend(import_lines)
+
         if headers:
+            while headers and headers[-1] == "":
+                headers.pop()
             headers.append("")
             self.output_lines = headers + self.output_lines
 
@@ -134,18 +174,49 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         ret_type = self.type_env.resolve_annotation(node.returns) if node.returns else "void"
         self.type_env.register_function(node.name, params, ret_type)
 
+    def _pre_register_foreign_call(self, call_node: ast.Call):
+        target = None
+        if isinstance(call_node.func, ast.Name):
+            target = call_node.func.id
+        elif isinstance(call_node.func, ast.Attribute):
+            target = self._get_attr_chain(call_node.func)
+
+        if target:
+            resolved = self.foreign_registry.resolve_foreign_call(target)
+            if resolved:
+                mod, func_name = resolved
+                arg_types = [self.type_env.infer_expression_type(arg) for arg in call_node.args]
+                sig = self.foreign_registry.record_call(mod, func_name, arg_types)
+                # Register in type_env so assignment inference picks up the return type
+                self.type_env.register_function(func_name, sig.params, sig.return_type)
+
+    def _get_attr_chain(self, node: ast.AST) -> Optional[str]:
+        parts = []
+        curr = node
+        while isinstance(curr, ast.Attribute):
+            parts.append(curr.attr)
+            curr = curr.value
+        if isinstance(curr, ast.Name):
+            parts.append(curr.id)
+            return ".".join(reversed(parts))
+        return None
+
     # ── Imports ────────────────────────────────────────────────────────
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
-            if alias.name in ("math", "sys", "os"):
-                continue  # Builtins handled directly
-            elif alias.name in ("typing", "collections.abc"):
+            if alias.name in ("typing", "typing_extensions", "collections.abc"):
                 continue  # Type hints only
+            if self.classifier.is_foreign(alias.name):
+                # Foreign module is handled in headers via extern[python] or import[python]
+                continue
             else:
                 self.emit(f"import {alias.name}")
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
         if node.module in ("typing", "typing_extensions", "collections.abc"):
+            return
+        if node.module and self.classifier.is_foreign(node.module):
+            # Foreign symbols handled via extern[python] or import[python]
             return
         names = ", ".join(alias.name for alias in node.names)
         if node.module:
@@ -386,6 +457,8 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             if isinstance(node.value, ast.Name) and node.value.id == "self":
                 if self.current_class:
                     return f"(deref self).{node.attr}"
+            if isinstance(node.value, ast.Name) and node.value.id == "sys" and node.attr == "argv":
+                return "[]"
             return f"{self.visit_expr(node.value)}.{node.attr}"
         if isinstance(node, ast.Subscript):
             target = self.visit_expr(node.value)
@@ -433,6 +506,36 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         return " ".join(parts)
 
     def _format_call(self, node: ast.Call) -> str:
+        # Dynamic introspection: getattr, setattr, hasattr
+        if isinstance(node.func, ast.Name):
+            if node.func.id == "getattr" and len(node.args) >= 2:
+                obj_str = self.visit_expr(node.args[0])
+                attr_node = node.args[1]
+                if isinstance(attr_node, ast.Constant) and isinstance(attr_node.value, str):
+                    return f"{obj_str}.{attr_node.value}"
+                else:
+                    attr_expr = self.visit_expr(attr_node)
+                    return f"{obj_str}.get({attr_expr})"
+
+            elif node.func.id == "setattr" and len(node.args) == 3:
+                obj_str = self.visit_expr(node.args[0])
+                attr_node = node.args[1]
+                val_str = self.visit_expr(node.args[2])
+                if isinstance(attr_node, ast.Constant) and isinstance(attr_node.value, str):
+                    return f"{obj_str}.{attr_node.value} = {val_str}"
+                else:
+                    attr_expr = self.visit_expr(attr_node)
+                    return f"{obj_str}.set({attr_expr}, {val_str})"
+
+            elif node.func.id == "hasattr" and len(node.args) == 2:
+                obj_str = self.visit_expr(node.args[0])
+                attr_node = node.args[1]
+                if isinstance(attr_node, ast.Constant) and isinstance(attr_node.value, str):
+                    return f'{obj_str}.has("{attr_node.value}" to cstr)'
+                else:
+                    attr_expr = self.visit_expr(attr_node)
+                    return f"{obj_str}.has({attr_expr})"
+
         # Check print(...)
         if isinstance(node.func, ast.Name) and node.func.id == "print":
             self.needs_printf = True
@@ -460,8 +563,23 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                     call_expr = self.visit_expr(arg0)
                     return f"{call_expr} /* nizam_ui_mark_dirty(self) */"
 
-        func_str = self.visit_expr(node.func)
+        target = None
         if isinstance(node.func, ast.Name):
+            target = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            target = self._get_attr_chain(node.func)
+
+        func_str = self.visit_expr(node.func)
+        is_foreign = False
+
+        if target and self.foreign_mode in ("extern", "auto"):
+            resolved = self.foreign_registry.resolve_foreign_call(target)
+            if resolved:
+                mod, func_name = resolved
+                func_str = func_name
+                is_foreign = True
+
+        if not is_foreign and isinstance(node.func, ast.Name):
             if self.type_env.lookup_struct(node.func.id):
                 func_str = f"{node.func.id}.init"
 
@@ -499,6 +617,9 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             elif arg_type == "String":
                 format_specifiers.append("%s")
                 call_args.append(f"{expr_str} to cstr")
+            elif arg_type == "cstr":
+                format_specifiers.append("%s")
+                call_args.append(expr_str)
             else:
                 format_specifiers.append("%lld")
                 call_args.append(expr_str)
