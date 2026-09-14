@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nizam"
+version = "0.1.0"
+description = "Nizam language runtime, in-process import hook, and FFI interop"
+authors = [{ name = "Nizam Team" }]
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
