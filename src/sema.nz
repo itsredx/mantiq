@@ -5,7 +5,7 @@ from std.collections import List
 from std.collections import Dict
 from std.option import Option, Empty
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier, node_is_python_extern, node_python_module
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import types
@@ -873,6 +873,22 @@ struct Sema:
                 if not (deref (deref self).current_scope).symbols.has(name):
                     let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Function, node)
                     (deref (deref self).current_scope).symbols[name] = sym
+                if node_is_python_extern(node):
+                    var py_present as bool = False
+                    var dl_present as bool = False
+                    let l_cnt as i64 = (deref self).link_targets.length()
+                    var li as i64 = 0 to i64
+                    while li < l_cnt:
+                        let lt as cstr = (deref self).link_targets[li].data to cstr
+                        if strcmp(lt, "python3.12" to cstr) == 0:
+                            py_present = True
+                        elif strcmp(lt, "dl" to cstr) == 0:
+                            dl_present = True
+                        li = li + 1 to i64
+                    if not py_present:
+                        (deref self).link_targets.append(String.make("python3.12" to cstr))
+                    if not dl_present:
+                        (deref self).link_targets.append(String.make("dl" to cstr))
             else:
                 if (deref (deref self).current_scope).symbols.has(name):
                     self.report_error_node("E0102" to cstr, String.make("duplicate function declaration" to cstr), node)

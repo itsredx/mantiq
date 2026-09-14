@@ -431,6 +431,14 @@
           "named": true
         },
         {
+          "type": "extern_block",
+          "named": true
+        },
+        {
+          "type": "extern_fn_decl",
+          "named": true
+        },
+        {
           "type": "fun_decl",
           "named": true
         },
@@ -904,6 +912,14 @@
           "named": true
         },
         {
+          "type": "extern_block",
+          "named": true
+        },
+        {
+          "type": "extern_fn_decl",
+          "named": true
+        },
+        {
           "type": "fun_decl",
           "named": true
         },
@@ -1077,6 +1093,86 @@
         },
         {
           "type": "update_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "extern_block",
+    "named": true,
+    "fields": {
+      "module": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "tag": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "block_body",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "extern_fn_decl",
+    "named": true,
+    "fields": {
+      "module": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "tag": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "named_function",
           "named": true
         }
       ]
@@ -1839,6 +1935,14 @@
         },
         {
           "type": "enum_decl",
+          "named": true
+        },
+        {
+          "type": "extern_block",
+          "named": true
+        },
+        {
+          "type": "extern_fn_decl",
           "named": true
         },
         {

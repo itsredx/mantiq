@@ -4,8 +4,8 @@ from std.string import String, StringBuilder
 from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
-from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, SpawnStmtData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ColorLiteralData, ListComprehensionData, InterpolatedStringData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier
-from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr
+from symbols import Node, Span, LanguageMode, NodeType, make_node, TypeAnnotation, node_span, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_declarations_ptr, node_params, node_params_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_vectorized, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, set_node_import_kind, node_module_name, set_node_name, set_node_left, set_node_right, set_node_body, set_node_declarations, set_node_params, set_node_op, set_node_cond, set_node_then_branch, set_node_else_branch, set_node_val, set_node_str_val, set_node_is_async, set_node_is_vectorized, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_is_mut, set_node_type_annots, set_node_auto_drops, set_node_target, set_node_imported_symbols, set_node_alias, set_node_module_name, set_node_file_path, OptionLayout, ProgramData, ImportDeclData, FunDeclData, VarDeclData, IfStmtData, ClassDeclData, InterfaceDeclData, BinaryExprData, IdentifierData, NumberLiteralData, StringLiteralData, MacroDeclData, MacroInvocationData, CallExprData, ReturnStmtData, WhileStmtData, ForStmtData, MemberExprData, UnaryExprData, CastExprData, BlockStmtData, ParamBlockStmtData, WithStmtData, MatchStmtData, TryStmtData, ThrowStmtData, ListLiteralData, DictLiteralData, IndexExprData, SpreadExprData, BooleanLiteralData, AwaitExprData, SpawnStmtData, ClosureExprData, StructDeclData, EnumDeclData, UnionDeclData, FieldDeclData, ColorLiteralData, ListComprehensionData, InterpolatedStringData, ImportKind, node_return_names, node_return_names_ptr, set_node_return_names, node_return_type_annots, set_node_return_type_annots, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_is_python_extern, set_node_is_python_extern, node_python_module, set_node_python_module
+from tree_sitter import TSNode, ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, ts_node_child_count_ptr, ts_node_child_ptr, ts_node_start_byte_ptr, ts_node_end_byte_ptr, ts_node_start_row_ptr, ts_node_start_col_ptr, ts_node_end_row_ptr, ts_node_end_col_ptr, ts_node_is_named_ptr, ts_node_named_child_ptr, ts_node_child_by_field_name_ptr, ts_node_is_null_ptr, ts_node_field_name_for_child_ptr
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
@@ -256,6 +256,8 @@ struct Lowerer:
             return self.lower_import(ts_node)
         elif strcmp(kind, "link_decl" to cstr) == 0:
             return self.lower_import(ts_node)
+        elif strcmp(kind, "extern_fn_decl" to cstr) == 0:
+            return self.lower_extern_fn_decl(ts_node)
         elif strcmp(kind, "call_expression" to cstr) == 0:
             return self.lower_call_expr(ts_node)
         elif strcmp(kind, "jump_stmt" to cstr) == 0 or strcmp(kind, "raise_statement" to cstr) == 0 or strcmp(kind, "throw_stmt" to cstr) == 0:
@@ -955,9 +957,13 @@ struct Lowerer:
         while i < count:
             var child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
             ts_node_child_ptr(ts_node, i, ref child)
-            let lowered as ptr[Node] = self.lower_node(ref child)
-            if lowered != None to ptr[Node]:
-                decls.append(lowered)
+            let c_type as cstr = ts_node_type_ptr(ref child)
+            if strcmp(c_type, "extern_block" to cstr) == 0:
+                self.lower_extern_block(ref child, ref decls)
+            else:
+                let lowered as ptr[Node] = self.lower_node(ref child)
+                if lowered != None to ptr[Node]:
+                    decls.append(lowered)
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.Program, span)
@@ -2209,8 +2215,107 @@ struct Lowerer:
         (deref data).access_modifier = access_mod
         (deref data).is_nogil = is_nogil
         (deref data).is_gil_independent = False
+        (deref data).is_python_extern = False
+        (deref data).python_module = String.make("" to cstr)
         (deref n).data = data to ptr[u8]
         return n
+
+    public fn lower_extern_block(self as ptr[Lowerer], ts_node as ptr[TSNode], out_decls as ptr[List[ptr[Node]]]):
+        var tag_str as String = String.make("python" to cstr)
+        var mod_str as String = String.make("" to cstr)
+        var body_node as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+        var has_body as bool = False
+
+        let child_count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < child_count:
+            var ch as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref ch)
+            let fn_name as cstr = ts_node_field_name_for_child_ptr(ts_node, i)
+            if fn_name != None to cstr:
+                if strcmp(fn_name, "tag" to cstr) == 0:
+                    let p_str as ptr[String] = self.slice_string_from_node(ref ch)
+                    tag_str = deref p_str
+                    drop(p_str to ptr)
+                elif strcmp(fn_name, "module" to cstr) == 0:
+                    let raw as ptr[String] = self.slice_string_from_node(ref ch)
+                    mod_str = strip_quotes((deref raw).data, (deref raw).len)
+                    drop(raw to ptr)
+            let ch_type as cstr = ts_node_type_ptr(ref ch)
+            if strcmp(ch_type, "block_body" to cstr) == 0:
+                body_node = ch
+                has_body = True
+            elif mod_str.len == 0 to usize and (strcmp(ch_type, "string" to cstr) == 0 or strcmp(ch_type, "identifier" to cstr) == 0):
+                let raw as ptr[String] = self.slice_string_from_node(ref ch)
+                mod_str = strip_quotes((deref raw).data, (deref raw).len)
+                drop(raw to ptr)
+            i = i + 1 to u32
+
+        var is_py as bool = False
+        if tag_str.data != None to ptr[u8] and (strcmp(tag_str.data to cstr, "python" to cstr) == 0 or strcmp(tag_str.data to cstr, "py" to cstr) == 0):
+            is_py = True
+
+        if has_body:
+            let b_count as u32 = ts_node_child_count_ptr(ref body_node)
+            var j as u32 = 0 to u32
+            while j < b_count:
+                var b_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                ts_node_child_ptr(ref body_node, j, ref b_child)
+                let b_type as cstr = ts_node_type_ptr(ref b_child)
+                if strcmp(b_type, "fun_decl" to cstr) == 0 or strcmp(b_type, "function_definition" to cstr) == 0 or strcmp(b_type, "named_function" to cstr) == 0:
+                    let fn_node as ptr[Node] = self.lower_fun_decl(ref b_child)
+                    if fn_node != None to ptr[Node]:
+                        set_node_is_extern(fn_node, True)
+                        if is_py:
+                            set_node_is_python_extern(fn_node, True)
+                            set_node_python_module(fn_node, mod_str)
+                        (deref out_decls).append(fn_node)
+                j = j + 1 to u32
+
+    public fn lower_extern_fn_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        var tag_str as String = String.make("python" to cstr)
+        var mod_str as String = String.make("" to cstr)
+        var nf_node as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+        var has_nf as bool = False
+
+        let child_count as u32 = ts_node_child_count_ptr(ts_node)
+        var i as u32 = 0 to u32
+        while i < child_count:
+            var ch as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+            ts_node_child_ptr(ts_node, i, ref ch)
+            let fn_name as cstr = ts_node_field_name_for_child_ptr(ts_node, i)
+            if fn_name != None to cstr:
+                if strcmp(fn_name, "tag" to cstr) == 0:
+                    let p_str as ptr[String] = self.slice_string_from_node(ref ch)
+                    tag_str = deref p_str
+                    drop(p_str to ptr)
+                elif strcmp(fn_name, "module" to cstr) == 0:
+                    let raw as ptr[String] = self.slice_string_from_node(ref ch)
+                    mod_str = strip_quotes((deref raw).data, (deref raw).len)
+                    drop(raw to ptr)
+            let ch_type as cstr = ts_node_type_ptr(ref ch)
+            if strcmp(ch_type, "named_function" to cstr) == 0 or strcmp(ch_type, "function_definition" to cstr) == 0 or strcmp(ch_type, "fun_decl" to cstr) == 0:
+                nf_node = ch
+                has_nf = True
+            elif mod_str.len == 0 to usize and (strcmp(ch_type, "string" to cstr) == 0 or strcmp(ch_type, "identifier" to cstr) == 0):
+                let raw as ptr[String] = self.slice_string_from_node(ref ch)
+                mod_str = strip_quotes((deref raw).data, (deref raw).len)
+                drop(raw to ptr)
+            i = i + 1 to u32
+
+        var is_py as bool = False
+        if tag_str.data != None to ptr[u8] and (strcmp(tag_str.data to cstr, "python" to cstr) == 0 or strcmp(tag_str.data to cstr, "py" to cstr) == 0):
+            is_py = True
+
+        if has_nf:
+            let fn_node as ptr[Node] = self.lower_fun_decl(ref nf_node)
+            if fn_node != None to ptr[Node]:
+                set_node_is_extern(fn_node, True)
+                if is_py:
+                    set_node_is_python_extern(fn_node, True)
+                    set_node_python_module(fn_node, mod_str)
+                return fn_node
+        return None to ptr[Node]
 
     public fn lower_import(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
         let span as Span = self.get_span(ts_node)

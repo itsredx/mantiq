@@ -110,6 +110,8 @@ struct FunDeclData:
     public var access_modifier as String
     public var is_nogil as bool
     public var is_gil_independent as bool
+    public var is_python_extern as bool
+    public var python_module as String
 
 struct VarDeclData:
     public var name as String
@@ -1619,6 +1621,41 @@ fn set_node_is_gil_independent(n as ptr[Node], is_gil_independent as bool):
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         (deref d).is_gil_independent = is_gil_independent
+
+// ── Python Extern Accessors ──────────────────────────────────────────
+// is_python_extern accessor (FunDecl):
+fn node_is_python_extern(n as ptr[Node]) as bool:
+    var r as bool = False
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).is_python_extern
+    return r
+
+fn set_node_is_python_extern(n as ptr[Node], is_python_extern as bool):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).is_python_extern = is_python_extern
+
+// python_module accessor (FunDecl):
+fn node_python_module(n as ptr[Node]) as String:
+    var r as String = String.make("" to cstr)
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = (deref d).python_module
+    return r
+
+fn set_node_python_module(n as ptr[Node], python_module as String):
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        (deref d).python_module = python_module
 
 // access_modifier accessor (FunDecl, VarDecl, ClassDecl, StructDecl):
 fn node_access_modifier(n as ptr[Node]) as String:

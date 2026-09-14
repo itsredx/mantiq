@@ -45,6 +45,8 @@ module.exports = grammar({
     _declaration: $ => choice(
       prec(5, $.import_decl),
       prec(5, $.link_decl),
+      prec(5, $.extern_block),
+      prec(5, $.extern_fn_decl),
       prec(5, $.class_decl),
       prec(5, $.interface_decl),
       prec(5, $.struct_decl),
@@ -73,6 +75,22 @@ module.exports = grammar({
     link_decl: $ => seq(
       'link', optional(seq('[', field('tag', $.identifier), ']')), $.string,
       $._newline
+    ),
+
+    extern_block: $ => seq(
+      'extern',
+      optional(seq('[', field('tag', $.identifier), ']')),
+      field('module', choice($.string, $.identifier)),
+      ':',
+      $.block_body
+    ),
+
+    extern_fn_decl: $ => seq(
+      'extern',
+      optional(seq('[', field('tag', $.identifier), ']')),
+      field('module', choice($.string, $.identifier)),
+      'fn',
+      $.named_function
     ),
 
     module_path: $ => seq($.identifier, repeat(seq('.', $.identifier))),
