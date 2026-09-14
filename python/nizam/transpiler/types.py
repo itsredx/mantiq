@@ -44,6 +44,7 @@ class TypeEnvironment:
         self.parent = parent
         self.symbols: Dict[str, str] = {}
         self.function_signatures: Dict[str, Dict[str, Any]] = {}
+        self.struct_definitions: Dict[str, Dict[str, str]] = {}
 
     def new_child(self) -> "TypeEnvironment":
         return TypeEnvironment(parent=self)
@@ -56,6 +57,16 @@ class TypeEnvironment:
             return self.symbols[name]
         if self.parent:
             return self.parent.lookup(name)
+        return None
+
+    def define_struct(self, name: str, fields: Dict[str, str]) -> None:
+        self.struct_definitions[name] = fields
+
+    def lookup_struct(self, name: str) -> Optional[Dict[str, str]]:
+        if name in self.struct_definitions:
+            return self.struct_definitions[name]
+        if self.parent:
+            return self.parent.lookup_struct(name)
         return None
 
     def register_function(self, name: str, params: List[tuple], return_type: str) -> None:
@@ -202,5 +213,19 @@ class TypeEnvironment:
                 # Constructor pattern (e.g. CounterWidget(...))
                 if func_name[0].isupper():
                     return func_name
+
+            elif isinstance(node.func, ast.Attribute):
+                method_name = node.func.attr
+                sig = self.lookup_function(method_name)
+                if sig:
+                    return sig["return_type"]
+
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name):
+                var_type = self.lookup(node.value.id)
+                if var_type:
+                    struct_info = self.lookup_struct(var_type)
+                    if struct_info and node.attr in struct_info:
+                        return struct_info[node.attr]
 
         return "PyObject"

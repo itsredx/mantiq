@@ -19,10 +19,10 @@ class TestNizamTranspilerPhase1(unittest.TestCase):
     def setUp(self):
         self.transpiler = Transpiler()
         # Find stage3 mantiq compiler
-        workspace_root = os.path.abspath(os.path.join(PYTHON_ROOT, "..", ".."))
-        self.compiler_bin = os.path.join(workspace_root, "stage3", "mantiq")
+        self.workspace_root = os.path.abspath(os.path.join(PYTHON_ROOT, "..", ".."))
+        self.compiler_bin = os.path.join(self.workspace_root, "stage3", "mantiq")
         if not os.path.exists(self.compiler_bin):
-            self.compiler_bin = os.path.join(workspace_root, "mantiq", "mantiq")
+            self.compiler_bin = os.path.join(self.workspace_root, "mantiq", "mantiq")
 
     # ── Test 1: Recursive Fibonacci ────────────────────────────────────
     def test_fibonacci(self):
@@ -167,7 +167,7 @@ if __name__ == '__main__':
             temp_path = tf.name
 
         try:
-            nz_proc = subprocess.run([self.compiler_bin, "run", temp_path], capture_output=True, text=True)
+            nz_proc = subprocess.run([self.compiler_bin, "run", temp_path], capture_output=True, text=True, cwd=self.workspace_root)
             self.assertEqual(nz_proc.returncode, 0, f"Nizam compiler error:\n{nz_proc.stderr}\nSTDOUT:\n{nz_proc.stdout}")
             lines = [l for l in nz_proc.stdout.strip().split("\n") if not l.startswith("zig: warning:")]
             actual_output = "\n".join(lines).strip()

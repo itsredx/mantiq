@@ -2,6 +2,7 @@
 import ast
 from typing import List, Optional, Set
 from .types import TypeEnvironment, PRIMITIVE_TYPE_MAP
+from .classes import ClassTransformer
 
 # ── Operator Mappings ──────────────────────────────────────────────────
 BIN_OP_MAP = {
@@ -50,6 +51,8 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         self.needs_math: bool = False
         self.has_main: bool = False
         self.top_level_stmts: List[ast.stmt] = []
+        self.current_class: Optional[str] = None
+        self.current_class_fields: Set[str] = set()
 
     def emit(self, line: str = ""):
         if not line:
@@ -64,6 +67,9 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef):
                 self._pre_register_function(stmt)
+            elif isinstance(stmt, ast.ClassDef):
+                transformer = ClassTransformer(stmt, self.type_env)
+                transformer.analyze()
 
         # Separate function/class definitions from top-level scripts
         script_stmts = []
@@ -145,10 +151,34 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         if node.module:
             self.emit(f"from {node.module} import {names}")
 
+    # ── Class Definitions ──────────────────────────────────────────────
+    def visit_ClassDef(self, node: ast.ClassDef):
+        transformer = ClassTransformer(node, self.type_env)
+        transformer.analyze()
+
+        self.emit()
+        self.emit(f"// ── Struct: {transformer.class_name} ─────────────────────────────────────────────")
+        struct_lines = transformer.generate_struct_definition(self)
+        for sline in struct_lines:
+            self.emit(sline)
+
+        # Instance methods inside the struct block
+        self.current_class = transformer.class_name
+        self.current_class_fields = set(transformer.fields.keys())
+
+        self.indent_level += 1
+        for method in transformer.methods:
+            self.visit_FunctionDef(method)
+        self.indent_level -= 1
+
+        self.current_class = None
+        self.current_class_fields = set()
+
     # ── Function Definitions ───────────────────────────────────────────
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.emit()
-        self.emit(f"// ── Function: {node.name} ───────────────────────────────────────────────")
+        func_title = f"Method: {self.current_class}.{node.name}" if self.current_class else f"Function: {node.name}"
+        self.emit(f"// ── {func_title} ───────────────────────────────────────────────")
 
         prev_vars = self.declared_variables
         self.declared_variables = set()
@@ -158,21 +188,31 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
 
         params_strs = []
         for arg in node.args.args:
-            arg_type = self.type_env.resolve_annotation(arg.annotation) if arg.annotation else "i64"
-            self.type_env.define(arg.arg, arg_type)
-            self.declared_variables.add(arg.arg)
-            if arg.arg == "self":
-                params_strs.append("self")
+            if arg.arg == "self" and self.current_class:
+                self.type_env.define("self", self.current_class)
+                self.declared_variables.add("self")
+                params_strs.append(f"self as ptr[{self.current_class}]")
             else:
-                params_strs.append(f"{arg.arg} as {arg_type}")
+                arg_type = self.type_env.resolve_annotation(arg.annotation) if arg.annotation else "i64"
+                self.type_env.define(arg.arg, arg_type)
+                self.declared_variables.add(arg.arg)
+                if arg.arg == "self":
+                    params_strs.append("self")
+                else:
+                    params_strs.append(f"{arg.arg} as {arg_type}")
 
         ret_type = self.type_env.resolve_annotation(node.returns) if node.returns else "void"
         param_str = ", ".join(params_strs)
 
-        if ret_type == "void":
-            self.emit(f"fn {node.name}({param_str}):")
+        if self.current_class:
+            fn_prefix = "public fn" if not node.name.startswith("_") else "fn"
         else:
-            self.emit(f"fn {node.name}({param_str}) as {ret_type}:")
+            fn_prefix = "fn"
+
+        if ret_type == "void":
+            self.emit(f"{fn_prefix} {node.name}({param_str}):")
+        else:
+            self.emit(f"{fn_prefix} {node.name}({param_str}) as {ret_type}:")
 
         self.indent_level += 1
 
@@ -185,6 +225,13 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                 body_stmts = body_stmts[1:]
 
         for stmt in body_stmts:
+            # Check for super().__init__(...)
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+                func = stmt.value.func
+                if isinstance(func, ast.Attribute) and func.attr == "__init__":
+                    if isinstance(func.value, ast.Call) and isinstance(func.value.func, ast.Name) and func.value.func.id == "super":
+                        self.emit("// super().__init__()")
+                        continue
             self.visit(stmt)
 
         self.indent_level -= 1
@@ -336,6 +383,9 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         if isinstance(node, ast.Call):
             return self._format_call(node)
         if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == "self":
+                if self.current_class:
+                    return f"(deref self).{node.attr}"
             return f"{self.visit_expr(node.value)}.{node.attr}"
         if isinstance(node, ast.Subscript):
             target = self.visit_expr(node.value)
@@ -356,7 +406,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         if val is None:
             return "None"
         if isinstance(val, bool):
-            return "true" if val else "false"
+            return "True" if val else "False"
         if isinstance(val, (int, float)):
             return str(val)
         if isinstance(val, str):
@@ -393,8 +443,33 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             arg_str = self.visit_expr(node.args[0])
             return f"{arg_str}.len()"
 
+        # Check str(...)
+        if isinstance(node.func, ast.Name) and node.func.id == "str" and len(node.args) == 1:
+            arg_str = self.visit_expr(node.args[0])
+            return f"{arg_str}.to_string()"
+
+        # Check PyThra set_state(...)
+        if (isinstance(node.func, ast.Attribute) and node.func.attr == "set_state") or \
+           (isinstance(node.func, ast.Name) and node.func.id == "set_state"):
+            if node.args:
+                arg0 = node.args[0]
+                if isinstance(arg0, ast.Lambda):
+                    body_expr = self.visit_expr(arg0.body)
+                    return f"{body_expr} /* nizam_ui_mark_dirty(self) */"
+                elif isinstance(arg0, ast.Call):
+                    call_expr = self.visit_expr(arg0)
+                    return f"{call_expr} /* nizam_ui_mark_dirty(self) */"
+
         func_str = self.visit_expr(node.func)
-        args_str = ", ".join(self.visit_expr(arg) for arg in node.args)
+        if isinstance(node.func, ast.Name):
+            if self.type_env.lookup_struct(node.func.id):
+                func_str = f"{node.func.id}.init"
+
+        arg_parts = [self.visit_expr(arg) for arg in node.args]
+        for kw in node.keywords:
+            kw_val = self.visit_expr(kw.value)
+            arg_parts.append(f"{kw.arg} = {kw_val}")
+        args_str = ", ".join(arg_parts)
         return f"{func_str}({args_str})"
 
     def _format_print_call(self, args: List[ast.AST]) -> str:
