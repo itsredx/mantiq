@@ -3,8 +3,8 @@
 *.so
 *.a
 *.ll
-mantiq
-nizam
+/mantiq
+/nizam
 
 # JIT / AOT temporary compilation files
 *_jit.ll
@@ -22,6 +22,11 @@ package-lock.json
 .DS_Store
 *.swp
 *~
+
+# Python cache artifacts
+__pycache__/
+*.pyc
+*.pyo
 
 # Research documentation
 research/
