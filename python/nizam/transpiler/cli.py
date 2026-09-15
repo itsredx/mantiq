@@ -18,6 +18,11 @@ def main(argv=None):
     parser.add_argument("--mantiq-bin", default=None, help="Path to mantiq/nizam executable")
     parser.add_argument("--foreign-mode", choices=["extern", "import", "auto"], default="extern", help="Foreign module interop mode (extern, import, auto)")
     parser.add_argument("--workspace-root", default=None, help="Root directory for local module resolution")
+    parser.add_argument("--build", action="store_true", help="Compile project into a standalone native or WebAssembly binary")
+    parser.add_argument("--target", choices=["native", "wasm", "wasm32-wasi"], default="native", help="Compilation target: native (default) or wasm/wasm32-wasi")
+    parser.add_argument("--release", action="store_true", help="Release mode: strip debug symbols and apply optimizations")
+    parser.add_argument("--web-loader", action="store_true", help="Generate index.html and nizam_app.js container when targeting WebAssembly")
+    parser.add_argument("--entry", default=None, help="Explicit entrypoint Python file when compiling a multi-file project")
     parser.add_argument("--build-reconciler", action="store_true", help="Compile native UI reconciler C-extension (.abi3.so)")
 
     args = parser.parse_args(argv)
@@ -30,6 +35,33 @@ def main(argv=None):
             return 0
         except Exception as e:
             sys.stderr.write(f"Reconciler compilation error: {e}\n")
+            return 1
+
+    if args.build:
+        from .builder import ProjectBuilder
+        input_path = args.input or os.getcwd()
+        try:
+            builder = ProjectBuilder(
+                source_path=input_path,
+                output_path=args.output,
+                target=args.target,
+                release=args.release,
+                web_loader=args.web_loader,
+                entrypoint=args.entry,
+                foreign_mode=args.foreign_mode,
+                workspace_root=args.workspace_root,
+                mantiq_bin=args.mantiq_bin,
+            )
+            result = builder.build()
+            print(f"✔ Build successful [{result['target']}]!")
+            print(f"  Entrypoint: {result['entrypoint']}")
+            print(f"  Transpiled: {result['transpiled_count']} module(s)")
+            print(f"  Binary:     {result['output_path']} ({result['binary_size']} bytes)")
+            if result.get("loader_files"):
+                print(f"  Web Loader: {result['loader_files']['html']}, {result['loader_files']['js']}")
+            return 0
+        except Exception as e:
+            sys.stderr.write(f"Build error: {e}\n")
             return 1
 
     if not args.input:

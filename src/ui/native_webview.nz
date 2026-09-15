@@ -1,0 +1,70 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+from std.string import String
+
+// ── Extern C Declarations ───────────────────────────────────────────────
+extern fn nizam_webview_create(title as cstr, width as i32, height as i32, resizable as i32, debug as i32) as ptr
+extern fn nizam_webview_set_title(wv as ptr, title as cstr)
+extern fn nizam_webview_set_size(wv as ptr, width as i32, height as i32)
+extern fn nizam_webview_navigate(wv as ptr, url as cstr)
+extern fn nizam_webview_set_html(wv as ptr, html as cstr)
+extern fn nizam_webview_eval(wv as ptr, js as cstr)
+extern fn nizam_webview_dispatch_patches(wv as ptr, patches as cstr)
+extern fn nizam_webview_run(wv as ptr)
+extern fn nizam_webview_step(wv as ptr)
+extern fn nizam_webview_terminate(wv as ptr)
+extern fn nizam_webview_destroy(wv as ptr)
+
+// ── Webview Window ──────────────────────────────────────────────────────
+struct WebviewWindow:
+    public var handle as ptr
+    public var title as String
+    public var width as i32
+    public var height as i32
+    public var is_running as bool
+
+    public fn init(self as ptr[WebviewWindow], title as String, width as i32, height as i32):
+        (deref self).handle = nizam_webview_create(title.data to cstr, width, height, 1, 0)
+        (deref self).title = title
+        (deref self).width = width
+        (deref self).height = height
+        (deref self).is_running = False
+
+    public fn set_title(self as ptr[WebviewWindow], title as String):
+        (deref self).title = title
+        if (deref self).handle != None to ptr:
+            nizam_webview_set_title((deref self).handle, title.data to cstr)
+
+    public fn set_size(self as ptr[WebviewWindow], width as i32, height as i32):
+        (deref self).width = width
+        (deref self).height = height
+        if (deref self).handle != None to ptr:
+            nizam_webview_set_size((deref self).handle, width, height)
+
+    public fn load_html(self as ptr[WebviewWindow], html as String):
+        if (deref self).handle != None to ptr:
+            nizam_webview_set_html((deref self).handle, html.data to cstr)
+
+    public fn eval_js(self as ptr[WebviewWindow], js as String):
+        if (deref self).handle != None to ptr:
+            nizam_webview_eval((deref self).handle, js.data to cstr)
+
+    public fn apply_patches(self as ptr[WebviewWindow], patches_json as String):
+        if (deref self).handle != None to ptr:
+            nizam_webview_dispatch_patches((deref self).handle, patches_json.data to cstr)
+
+    public fn run(self as ptr[WebviewWindow]):
+        if (deref self).handle != None to ptr:
+            (deref self).is_running = True
+            nizam_webview_run((deref self).handle)
+            (deref self).is_running = False
+
+    public fn step(self as ptr[WebviewWindow]):
+        if (deref self).handle != None to ptr:
+            nizam_webview_step((deref self).handle)
+
+    public fn close(self as ptr[WebviewWindow]):
+        if (deref self).handle != None to ptr:
+            nizam_webview_terminate((deref self).handle)
+            nizam_webview_destroy((deref self).handle)
+            (deref self).handle = None to ptr
+            (deref self).is_running = False

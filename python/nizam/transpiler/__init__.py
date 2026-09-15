@@ -60,4 +60,14 @@ def transpile_file(
     """Convenience helper to transpile a Python file to Nizam."""
     return Transpiler(foreign_mode=foreign_mode, workspace_root=workspace_root).transpile_file(input_path, output_path)
 
-__all__ = ["Transpiler", "transpile", "transpile_file"]
+from .builder import ProjectBuilder, build_project
+from .wasm_loader import WasmLoaderGenerator
+
+__all__ = [
+    "Transpiler",
+    "transpile",
+    "transpile_file",
+    "ProjectBuilder",
+    "build_project",
+    "WasmLoaderGenerator",
+]

@@ -153,7 +153,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             headers.append("")
             self.output_lines = headers + self.output_lines
 
-        return "\n".join(self.output_lines)
+        return "\n".join(self.output_lines).rstrip() + "\n"
 
     def _is_main_guard(self, node: ast.If) -> bool:
         """Detects if __name__ == '__main__': guard."""
