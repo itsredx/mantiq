@@ -410,6 +410,62 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
 
     return res == 0
 
+// ── Check Pipeline (Syntax, Semantic, Types, Borrowck) ───────────────────
+fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr[PerfState]) as bool:
+    let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
+    engine.init()
+    engine.register_source(String.make(path_cstr), String.make(source_cstr))
+
+    // ── Phase 1: Parse / Lower ──
+    let t0 as i64 = perf_begin(perf, "parse" to cstr)
+    var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
+    if mode == LanguageMode.Nizam to i32:
+        lowerer = make_lowerer_from_cstr(source_cstr, path_cstr)
+    else:
+        lowerer = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
+    let root as ptr[Node] = (deref lowerer).lower_source()
+    perf_end(perf, "parse" to cstr, t0)
+    if root == None to ptr:
+        let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
+        return False
+
+    // ── Phase 2: Semantic Analysis ──
+    let t1 as i64 = perf_begin(perf, "sema" to cstr)
+    let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
+    (deref sema).init_sema(path_cstr)
+    if mode == LanguageMode.Nizam to i32:
+        (deref sema).mode = LanguageMode.Nizam
+    else:
+        (deref sema).mode = LanguageMode.Mantiq
+    (deref sema).engine = engine
+    (deref sema).root_ast = root
+    sema.declare_pass(root)
+    sema.resolve_pass(root)
+    sema.analyze_gil_safety(root)
+    perf_end(perf, "sema" to cstr, t1)
+
+    // ── Phase 3: Type Checking ──
+    let t2 as i64 = perf_begin(perf, "typecheck" to cstr)
+    let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
+    (deref tc).init_tc(sema)
+    let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
+    perf_end(perf, "typecheck" to cstr, t2)
+
+    // ── Phase 4: Borrow Checking ──
+    let t3 as i64 = perf_begin(perf, "borrowck" to cstr)
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    (deref bc).init_bc()
+    (deref bc).sema = sema
+    (deref bc).current_file = (deref sema).current_file
+    (deref bc).walk_ast(root)
+    perf_end(perf, "borrowck" to cstr, t3)
+
+    if engine.has_errors():
+        engine.emit_all_cached()
+        return False
+
+    return True
+
 // ── CLI Driver ──────────────────────────────────────────────────────────
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     return argv[idx]
@@ -431,7 +487,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         ai = ai + 1 to i32
 
     if argc < 2:
-        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--profile]\n  run <file.nz> [--target <triple>] [--profile]\n  version\n" to cstr, self_name, bin_name)
+        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--profile]\n  run <file.nz> [--target <triple>] [--profile]\n  check <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
 
@@ -440,6 +496,38 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         let _p4 as i32 = printf("%s Self-Hosting Compiler v0.1.0\n" to cstr, self_name)
         let _f2 as i32 = fflush(None to ptr)
         return 0 to i32
+
+    if strcmp(cmd, "check" to cstr) == 0:
+        if argc < 3:
+            let _p_chk_err as i32 = printf("Error: 'check' requires an input file path\nUsage: %s check <file.nz|file.mq> [--profile]\n" to cstr, bin_name)
+            return 1 to i32
+        let input_path as cstr = get_arg(argv, 2 to i32)
+        var chk_arg_i as i32 = 3 to i32
+        while chk_arg_i < argc:
+            if strcmp(get_arg(argv, chk_arg_i), "--lib-dir" to cstr) == 0 and chk_arg_i + 1 to i32 < argc:
+                extern fn set_compiler_lib_dir(dir as cstr)
+                set_compiler_lib_dir(get_arg(argv, chk_arg_i + 1 to i32))
+                chk_arg_i = chk_arg_i + 1 to i32
+            chk_arg_i = chk_arg_i + 1 to i32
+
+        let mode as i32 = detect_mode(input_path, default_mode)
+        let source_cstr as cstr = read_file_to_cstr(input_path)
+        if source_cstr == None to cstr:
+            let _p_chk_read as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
+            return 1 to i32
+
+        var perf as PerfState = perf_init()
+        perf.enabled = prof_flag
+        let ok as bool = check_source(source_cstr, input_path, mode, ref perf)
+        perf_print(ref perf)
+        if ok:
+            let _p_chk_ok as i32 = printf("✔ [check] Syntax & types valid: %s\n" to cstr, input_path)
+            let _ff_chk as i32 = fflush(None to ptr)
+            return 0 to i32
+        else:
+            let _p_chk_fail as i32 = printf("Check failed for %s\n" to cstr, input_path)
+            let _ff_chk2 as i32 = fflush(None to ptr)
+            return 1 to i32
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:

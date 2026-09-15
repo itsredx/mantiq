@@ -18,6 +18,13 @@ def main(argv=None):
     parser.add_argument("--mantiq-bin", default=None, help="Path to mantiq/nizam executable")
     parser.add_argument("--foreign-mode", choices=["extern", "import", "auto"], default="extern", help="Foreign module interop mode (extern, import, auto)")
     parser.add_argument("--workspace-root", default=None, help="Root directory for local module resolution")
+    parser.add_argument("--project", action="store_true", help="Transpile an entire Python project directory tree to .nz or .mq")
+    parser.add_argument("--syntax", choices=["nz", "mq"], default="nz", help="Target output syntax: nz (default) or mq")
+    parser.add_argument("--check", action="store_true", help="Validate generated code with compiler check mode (no compilation)")
+    parser.add_argument("--no-assets", action="store_true", help="Skip copying non-code project assets")
+    parser.add_argument("--no-extensions", action="store_true", help="Skip copying compiled .so / .pyd Cython extensions")
+    parser.add_argument("--no-bridge", action="store_true", help="Skip generating Cython foreign bridge modules")
+    parser.add_argument("--ignore", default=None, help="Comma-separated patterns to ignore during project scanning")
     parser.add_argument("--build", action="store_true", help="Compile project into a standalone native or WebAssembly binary")
     parser.add_argument("--target", choices=["native", "wasm", "wasm32-wasi"], default="native", help="Compilation target: native (default) or wasm/wasm32-wasi")
     parser.add_argument("--release", action="store_true", help="Release mode: strip debug symbols and apply optimizations")
@@ -35,6 +42,47 @@ def main(argv=None):
             return 0
         except Exception as e:
             sys.stderr.write(f"Reconciler compilation error: {e}\n")
+            return 1
+
+    is_project_mode = args.project or (args.input and os.path.isdir(args.input) and not args.build)
+    if is_project_mode:
+        from .project import ProjectTranspiler
+        input_path = args.input or os.getcwd()
+        out_dir = args.output or os.path.join(
+            os.path.dirname(os.path.abspath(input_path)),
+            f"{os.path.basename(os.path.abspath(input_path))}_transpiled_{args.syntax}"
+        )
+        ignore_list = [p.strip() for p in args.ignore.split(",")] if args.ignore else None
+        try:
+            transpiler = ProjectTranspiler(
+                source_dir=input_path,
+                output_dir=out_dir,
+                syntax=args.syntax,
+                check=args.check,
+                copy_assets=not args.no_assets,
+                copy_extensions=not args.no_extensions,
+                bridge_cython=not args.no_bridge,
+                ignore_patterns=ignore_list,
+                foreign_mode=args.foreign_mode,
+                workspace_root=args.workspace_root,
+                mantiq_bin=args.mantiq_bin,
+            )
+            manifest = transpiler.execute()
+            summary = manifest["summary"]
+            print(f"✔ Project transpilation complete [{args.syntax}]!")
+            print(f"  Source:      {manifest['source_dir']}")
+            print(f"  Destination: {manifest['output_dir']}")
+            print(f"  Transpiled:  {summary['transpiled_success']} module(s) ({summary['transpiled_fallback']} fallback)")
+            if summary["bridged_cython_modules"]:
+                print(f"  Cython:      {summary['bridged_cython_modules']} extension(s) bridged")
+            if summary["copied_assets"]:
+                print(f"  Assets:      {summary['copied_assets']} asset(s) replicated")
+            if args.check:
+                print(f"  Check:       {summary['check_passed']} passed, {summary['check_failed']} failed")
+            print(f"  Report:      {os.path.join(out_dir, 'TRANSPILATION_REPORT.md')}")
+            return 0 if summary["check_failed"] == 0 else 1
+        except Exception as e:
+            sys.stderr.write(f"Project transpilation error: {e}\n")
             return 1
 
     if args.build:

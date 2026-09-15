@@ -51,8 +51,34 @@ class DependencyClassifier:
                 return True
         return False
 
+    def is_cython_extension(self, module_name: str) -> bool:
+        """Check if a module exists as a compiled .so / .pyd or Cython .pyx / .pxd."""
+        if not module_name:
+            return False
+        rel_path = module_name.replace(".", os.sep)
+        roots = [self.workspace_root]
+        if self.source_root and self.source_root != self.workspace_root:
+            roots.append(self.source_root)
+
+        for root in roots:
+            target_path = os.path.join(root, rel_path)
+            dir_path = os.path.dirname(target_path)
+            base_name = os.path.basename(target_path)
+            if os.path.isdir(dir_path):
+                try:
+                    for f in os.listdir(dir_path):
+                        if (f == f"{base_name}.pyx" or f == f"{base_name}.pxd" or
+                            f == f"{base_name}.so" or f == f"{base_name}.pyd" or
+                            (f.startswith(f"{base_name}.") and (f.endswith(".so") or f.endswith(".pyd")))):
+                            return True
+                except OSError:
+                    continue
+        return False
+
     def is_foreign(self, module_name: str) -> bool:
         """Return True if the module requires foreign Python FFI bridging."""
+        if self.is_cython_extension(module_name):
+            return True
         return not self.is_local_transpilable(module_name)
 
 # ── Foreign Function Signature ───────────────────────────────────────────

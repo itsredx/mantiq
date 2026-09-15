@@ -67,6 +67,7 @@ def transpile_file(
 
 from .builder import ProjectBuilder, build_project
 from .wasm_loader import WasmLoaderGenerator
+from .project import ProjectTranspiler, transpile_project
 
 __all__ = [
     "Transpiler",
@@ -75,4 +76,6 @@ __all__ = [
     "ProjectBuilder",
     "build_project",
     "WasmLoaderGenerator",
+    "ProjectTranspiler",
+    "transpile_project",
 ]
