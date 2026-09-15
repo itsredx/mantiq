@@ -107,18 +107,17 @@ class ProjectBuilder:
     def transpile_all(self, sources: List[str]) -> Dict[str, str]:
         """Transpiles all discovered Python files into the build directory."""
         os.makedirs(self.build_dir, exist_ok=True)
-        transpiled_map = {}
+        source_dir = self.source_path if os.path.isdir(self.source_path) else os.path.dirname(self.source_path)
         transpiler = Transpiler(
             foreign_mode=self.foreign_mode,
             workspace_root=self.workspace_root,
+            source_root=source_dir,
         )
 
+        transpiled_map = {}
         for src in sources:
-            rel_path = os.path.relpath(src, self.workspace_root)
+            rel_path = os.path.relpath(src, source_dir)
             base_rel, _ = os.path.splitext(rel_path)
-            # Avoid placing files above build_dir if outside workspace
-            if base_rel.startswith(".."):
-                base_rel = os.path.basename(src).replace(".py", "")
             out_nz = os.path.join(self.build_dir, f"{base_rel}.nz")
             os.makedirs(os.path.dirname(out_nz), exist_ok=True)
 

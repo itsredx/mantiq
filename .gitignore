@@ -31,3 +31,6 @@ __pycache__/
 # Research documentation
 research/
 
+# Build distributions
+dist/
+build/

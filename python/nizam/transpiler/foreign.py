@@ -21,11 +21,12 @@ class DependencyClassifier:
         "matplotlib", "pydantic", "sqlalchemy", "yaml", "toml",
     }
 
-    def __init__(self, workspace_root: Optional[str] = None):
+    def __init__(self, workspace_root: Optional[str] = None, source_root: Optional[str] = None):
         self.workspace_root = os.path.abspath(workspace_root) if workspace_root else os.getcwd()
+        self.source_root = os.path.abspath(source_root) if source_root else self.workspace_root
 
     def is_local_transpilable(self, module_name: str) -> bool:
-        """Check if a module exists as a local source file in the workspace."""
+        """Check if a module exists as a local source file in the workspace or source root."""
         if not module_name:
             return False
 
@@ -33,15 +34,22 @@ class DependencyClassifier:
         if root_pkg in self.STANDARD_LIBRARIES or root_pkg in self.THIRD_PARTY_LIBRARIES:
             return False
 
-        # Look for local .py or .nz file candidates
+        # Look for local .py or .nz file candidates across workspace and source roots
         rel_path = module_name.replace(".", os.sep)
-        candidates = [
-            os.path.join(self.workspace_root, f"{rel_path}.py"),
-            os.path.join(self.workspace_root, rel_path, "__init__.py"),
-            os.path.join(self.workspace_root, f"{rel_path}.nz"),
-            os.path.join(self.workspace_root, f"{rel_path}.mq"),
-        ]
-        return any(os.path.isfile(cand) for cand in candidates)
+        roots = [self.workspace_root]
+        if self.source_root and self.source_root != self.workspace_root:
+            roots.append(self.source_root)
+
+        for root in roots:
+            candidates = [
+                os.path.join(root, f"{rel_path}.py"),
+                os.path.join(root, rel_path, "__init__.py"),
+                os.path.join(root, f"{rel_path}.nz"),
+                os.path.join(root, f"{rel_path}.mq"),
+            ]
+            if any(os.path.isfile(cand) for cand in candidates):
+                return True
+        return False
 
     def is_foreign(self, module_name: str) -> bool:
         """Return True if the module requires foreign Python FFI bridging."""

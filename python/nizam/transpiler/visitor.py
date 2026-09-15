@@ -48,6 +48,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         type_env: Optional[TypeEnvironment] = None,
         foreign_mode: str = "extern",
         workspace_root: Optional[str] = None,
+        source_root: Optional[str] = None,
         dependency_classifier: Optional[DependencyClassifier] = None,
         foreign_registry: Optional[ForeignModuleRegistry] = None,
     ):
@@ -55,7 +56,8 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         self.type_env = type_env or TypeEnvironment()
         self.foreign_mode = foreign_mode
         self.workspace_root = workspace_root
-        self.classifier = dependency_classifier or DependencyClassifier(workspace_root)
+        self.source_root = source_root
+        self.classifier = dependency_classifier or DependencyClassifier(workspace_root=workspace_root, source_root=source_root)
         self.foreign_registry = foreign_registry or ForeignModuleRegistry(self.classifier)
         self.output_lines: List[str] = []
         self.declared_variables: Set[str] = set()
@@ -218,6 +220,9 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         if node.module and self.classifier.is_foreign(node.module):
             # Foreign symbols handled via extern[python] or import[python]
             return
+        for alias in node.names:
+            if alias.name and alias.name[0].isupper() and not alias.name.isupper():
+                self.type_env.register_struct(alias.name, {})
         names = ", ".join(alias.name for alias in node.names)
         if node.module:
             self.emit(f"from {node.module} import {names}")
@@ -580,7 +585,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                 is_foreign = True
 
         if not is_foreign and isinstance(node.func, ast.Name):
-            if self.type_env.lookup_struct(node.func.id):
+            if self.type_env.lookup_struct(node.func.id) is not None or (node.func.id and node.func.id[0].isupper() and not node.func.id.isupper()):
                 func_str = f"{node.func.id}.init"
 
         arg_parts = [self.visit_expr(arg) for arg in node.args]
@@ -613,7 +618,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                 call_args.append(expr_str)
             elif arg_type == "bool":
                 format_specifiers.append("%s")
-                call_args.append(f'({expr_str} ? "True" : "False") to cstr')
+                call_args.append(f'("True" to cstr if {expr_str} else "False" to cstr)')
             elif arg_type == "String":
                 format_specifiers.append("%s")
                 call_args.append(f"{expr_str} to cstr")

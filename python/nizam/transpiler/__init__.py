@@ -13,10 +13,12 @@ class Transpiler:
         self,
         foreign_mode: str = "extern",
         workspace_root: Optional[str] = None,
+        source_root: Optional[str] = None,
         type_env: Optional[TypeEnvironment] = None,
     ):
         self.foreign_mode = foreign_mode
         self.workspace_root = workspace_root
+        self.source_root = source_root
         self.type_env = type_env or TypeEnvironment()
 
     def transpile(self, source_code: str) -> str:
@@ -26,6 +28,7 @@ class Transpiler:
             type_env=self.type_env,
             foreign_mode=self.foreign_mode,
             workspace_root=self.workspace_root,
+            source_root=self.source_root,
         )
         return visitor.visit(parsed_ast)
 
@@ -47,18 +50,20 @@ def transpile(
     source_code: str,
     foreign_mode: str = "extern",
     workspace_root: Optional[str] = None,
+    source_root: Optional[str] = None,
 ) -> str:
     """Convenience helper to transpile a Python code string to Nizam."""
-    return Transpiler(foreign_mode=foreign_mode, workspace_root=workspace_root).transpile(source_code)
+    return Transpiler(foreign_mode=foreign_mode, workspace_root=workspace_root, source_root=source_root).transpile(source_code)
 
 def transpile_file(
     input_path: str,
     output_path: Optional[str] = None,
     foreign_mode: str = "extern",
     workspace_root: Optional[str] = None,
+    source_root: Optional[str] = None,
 ) -> str:
     """Convenience helper to transpile a Python file to Nizam."""
-    return Transpiler(foreign_mode=foreign_mode, workspace_root=workspace_root).transpile_file(input_path, output_path)
+    return Transpiler(foreign_mode=foreign_mode, workspace_root=workspace_root, source_root=source_root).transpile_file(input_path, output_path)
 
 from .builder import ProjectBuilder, build_project
 from .wasm_loader import WasmLoaderGenerator

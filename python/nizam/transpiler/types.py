@@ -65,6 +65,9 @@ class TypeEnvironment:
     def define_struct(self, name: str, fields: Dict[str, str]) -> None:
         self.struct_definitions[name] = fields
 
+    def register_struct(self, name: str, fields: Dict[str, str]) -> None:
+        self.define_struct(name, fields)
+
     def lookup_struct(self, name: str) -> Optional[Dict[str, str]]:
         if name in self.struct_definitions:
             return self.struct_definitions[name]
@@ -228,6 +231,8 @@ class TypeEnvironment:
 
             elif isinstance(node.func, ast.Attribute):
                 method_name = node.func.attr
+                if method_name.startswith("is_") or method_name.startswith("has_"):
+                    return "bool"
                 sig = self.lookup_function(method_name)
                 if sig:
                     return sig["return_type"]
