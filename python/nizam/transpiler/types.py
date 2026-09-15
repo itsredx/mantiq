@@ -231,11 +231,17 @@ class TypeEnvironment:
 
             elif isinstance(node.func, ast.Attribute):
                 method_name = node.func.attr
-                if method_name.startswith("is_") or method_name.startswith("has_"):
-                    return "bool"
                 sig = self.lookup_function(method_name)
                 if sig:
                     return sig["return_type"]
+                if method_name in ("startswith", "endswith", "has") or method_name.startswith("is_") or method_name.startswith("has_"):
+                    return "bool"
+                if method_name in ("lower", "upper", "strip", "replace", "join"):
+                    return "String"
+                if method_name == "split":
+                    return "List[String]"
+                if method_name in ("keys", "to_list"):
+                    return "List[PyObject]"
 
         if isinstance(node, ast.Attribute):
             if isinstance(node.value, ast.Name):

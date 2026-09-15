@@ -1,6 +1,6 @@
 # ── Imports ────────────────────────────────────────────────────────────
 import ast
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from .types import TypeEnvironment
 
 # ── PyThra Component Base Classification ───────────────────────────────
@@ -11,9 +11,19 @@ PYTHRA_STATE_BASES = {"State"}
 class ClassTransformer:
     """Transforms Python class definitions into native Nizam structs and methods."""
 
-    def __init__(self, node: ast.ClassDef, type_env: TypeEnvironment):
+    def __init__(
+        self,
+        node: ast.ClassDef,
+        type_env: TypeEnvironment,
+        syntax: str = "nz",
+        class_index: Optional[Dict[str, Any]] = None,
+        local_classes: Optional[Dict[str, Any]] = None,
+    ):
         self.node = node
         self.type_env = type_env
+        self.syntax = syntax
+        self.class_index = class_index or {}
+        self.local_classes = local_classes or {}
         self.class_name = node.name
         self.base_names: List[str] = [self._get_base_name(b) for b in node.bases]
         self.is_widget = any(b in PYTHRA_WIDGET_BASES or "Widget" in b for b in self.base_names)
@@ -96,9 +106,57 @@ class ClassTransformer:
                         field_type = self.type_env.resolve_annotation(stmt.annotation)
                         self.fields[field_name] = field_type
 
+        # 3. Multiple inheritance and mixin merging
+        if len(self.base_names) > 1 or (self.base_names and self.class_name == "Icons"):
+            bases_to_merge = self.base_names if self.class_name == "Icons" else self.base_names[1:]
+            for base_name in bases_to_merge:
+                base_info = self.class_index.get(base_name)
+                if not base_info and self.local_classes:
+                    other_tr = self.local_classes.get(base_name)
+                    if other_tr:
+                        base_info = {
+                            "fields": other_tr.fields,
+                            "field_initializers": other_tr.field_initializers,
+                            "methods": other_tr.methods,
+                        }
+
+                if base_info:
+                    # Merge fields
+                    for fname, ftype in base_info.get("fields", {}).items():
+                        if fname not in self.fields:
+                            self.fields[fname] = ftype
+                            if fname in base_info.get("field_initializers", {}):
+                                self.field_initializers[fname] = base_info["field_initializers"][fname]
+                    # Merge methods if not overridden
+                    existing_method_names = {m.name for m in self.methods}
+                    for m in base_info.get("methods", []):
+                        if m.name not in existing_method_names:
+                            self.methods.append(m)
+                            existing_method_names.add(m.name)
+
         # Register the completed struct definition in TypeEnvironment
         self.type_env.define(self.class_name, self.class_name)
         self.type_env.define_struct(self.class_name, self.fields)
+
+    def generate_class_definition(self, visitor: "ast.NodeVisitor") -> List[str]:
+        """Emits Mantiq class header with inheritance and public vars."""
+        lines = []
+        if self.base_names and self.class_name != "Icons":
+            lines.append(f"class {self.class_name}({self.base_names[0]}):")
+        else:
+            lines.append(f"class {self.class_name}:")
+
+        if not self.fields:
+            lines.append("    public var _unused as i64")
+        else:
+            for field_name, field_type in self.fields.items():
+                if field_name in self.field_initializers:
+                    init_expr = visitor.visit_expr(self.field_initializers[field_name])
+                    lines.append(f"    public var {field_name} as {field_type} = {init_expr}")
+                else:
+                    lines.append(f"    public var {field_name} as {field_type}")
+
+        return lines
 
     def generate_struct_definition(self, visitor: "ast.NodeVisitor") -> List[str]:
         """Emits the Nizam struct header, public fields, and factory constructor."""

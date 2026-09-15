@@ -51,12 +51,21 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         source_root: Optional[str] = None,
         dependency_classifier: Optional[DependencyClassifier] = None,
         foreign_registry: Optional[ForeignModuleRegistry] = None,
+        syntax: str = "nz",
+        project_index: Optional[Dict[str, Any]] = None,
+        class_index: Optional[Dict[str, Any]] = None,
+        current_file_path: Optional[str] = None,
     ):
         self.indent_level = 0
         self.type_env = type_env or TypeEnvironment()
         self.foreign_mode = foreign_mode
         self.workspace_root = workspace_root
         self.source_root = source_root
+        self.syntax = "mq" if syntax.lower() in ("mq", "mantiq") else "nz"
+        self.project_index = project_index or {}
+        self.class_index = class_index or {}
+        self.current_file_path = current_file_path
+        self.local_classes: Dict[str, Any] = {}
         self.classifier = dependency_classifier or DependencyClassifier(workspace_root=workspace_root, source_root=source_root)
         self.foreign_registry = foreign_registry or ForeignModuleRegistry(self.classifier)
         self.output_lines: List[str] = []
@@ -84,7 +93,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                     if self.classifier.is_foreign(alias.name):
                         self.foreign_registry.register_import(alias.name, alias.asname)
             elif isinstance(stmt, ast.ImportFrom):
-                if stmt.module and self.classifier.is_foreign(stmt.module):
+                if stmt.level == 0 and stmt.module and stmt.module not in self.project_index and self.classifier.is_foreign(stmt.module):
                     names = [(alias.name, alias.asname) for alias in stmt.names]
                     self.foreign_registry.register_import_from(stmt.module, names)
 
@@ -93,8 +102,21 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             if isinstance(stmt, ast.FunctionDef):
                 self._pre_register_function(stmt)
             elif isinstance(stmt, ast.ClassDef):
-                transformer = ClassTransformer(stmt, self.type_env)
+                transformer = ClassTransformer(
+                    stmt,
+                    self.type_env,
+                    syntax=self.syntax,
+                    class_index=self.class_index,
+                    local_classes=self.local_classes,
+                )
                 transformer.analyze()
+                self.local_classes[stmt.name] = transformer
+                if self.class_index is not None:
+                    self.class_index[stmt.name] = {
+                        "fields": transformer.fields,
+                        "field_initializers": transformer.field_initializers,
+                        "methods": transformer.methods,
+                    }
 
         # Pre-pass 3: Scan calls to detect foreign calls and record signatures
         for sub_node in ast.walk(node):
@@ -217,28 +239,79 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom):
         if node.module in ("typing", "typing_extensions", "collections.abc"):
             return
-        if node.module and self.classifier.is_foreign(node.module):
+        if node.level == 0 and node.module and node.module not in self.project_index and self.classifier.is_foreign(node.module):
             # Foreign symbols handled via extern[python] or import[python]
             return
+
+        # Reconstruct relative prefix from node.level
+        dots = "." * (node.level or 0)
+        full_module = dots + (node.module or "")
+
+        is_wildcard = any(alias.name == "*" for alias in node.names)
+        if is_wildcard:
+            expanded_symbols: List[str] = []
+            mod_candidates: List[str] = []
+            if full_module:
+                mod_candidates.append(full_module)
+            if node.module:
+                mod_candidates.append(node.module)
+                mod_candidates.append(node.module.lstrip("."))
+                if "." in node.module:
+                    mod_candidates.append(node.module.split(".")[-1])
+
+            for cand in mod_candidates:
+                if cand in self.project_index:
+                    syms = self.project_index[cand].get("symbols", [])
+                    if syms:
+                        expanded_symbols = syms
+                        break
+
+            if expanded_symbols:
+                for sym in expanded_symbols:
+                    if sym and sym[0].isupper() and not sym.isupper():
+                        self.type_env.register_struct(sym, {})
+                names = ", ".join(expanded_symbols)
+                self.emit(f"from {full_module} import {names}")
+                return
+            else:
+                # Tree-sitter mantiq grammar cannot parse `*`. If wildcard expansion has no known symbols,
+                # emit a clean import statement to avoid syntax failure:
+                clean_mod = full_module.lstrip(".")
+                if clean_mod:
+                    self.emit(f"import {clean_mod}")
+                return
+
         for alias in node.names:
             if alias.name and alias.name[0].isupper() and not alias.name.isupper():
                 self.type_env.register_struct(alias.name, {})
         names = ", ".join(alias.name for alias in node.names)
-        if node.module:
-            self.emit(f"from {node.module} import {names}")
+        if full_module:
+            self.emit(f"from {full_module} import {names}")
 
     # ── Class Definitions ──────────────────────────────────────────────
     def visit_ClassDef(self, node: ast.ClassDef):
-        transformer = ClassTransformer(node, self.type_env)
+        transformer = ClassTransformer(
+            node,
+            self.type_env,
+            syntax=self.syntax,
+            class_index=self.class_index,
+            local_classes=self.local_classes,
+        )
         transformer.analyze()
 
         self.emit()
-        self.emit(f"// ── Struct: {transformer.class_name} ─────────────────────────────────────────────")
-        struct_lines = transformer.generate_struct_definition(self)
-        for sline in struct_lines:
-            self.emit(sline)
+        kind_label = "Class" if self.syntax == "mq" else "Struct"
+        self.emit(f"// ── {kind_label}: {transformer.class_name} ─────────────────────────────────────────────")
+        if self.syntax == "mq":
+            lines = transformer.generate_class_definition(self)
+            for line in lines:
+                self.emit(line)
+        else:
+            lines = transformer.generate_struct_definition(self)
+            for line in lines:
+                self.emit(line)
 
-        # Instance methods inside the struct block
+        # Instance methods inside the struct/class block
         self.current_class = transformer.class_name
         self.current_class_fields = set(transformer.fields.keys())
 
@@ -280,7 +353,7 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         ret_type = self.type_env.resolve_annotation(node.returns) if node.returns else "void"
         param_str = ", ".join(params_strs)
 
-        if self.current_class:
+        if self.syntax == "nz" and self.current_class:
             fn_prefix = "public fn" if not node.name.startswith("_") else "fn"
         else:
             fn_prefix = "fn"
@@ -395,8 +468,29 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         self.indent_level -= 1
 
     def visit_For(self, node: ast.For):
-        target_str = self.visit_expr(node.target)
         iter_node = node.iter
+
+        # Special case: for k, v in d.items() or for (k, v) in d.items()
+        if (
+            isinstance(iter_node, ast.Call)
+            and isinstance(iter_node.func, ast.Attribute)
+            and iter_node.func.attr == "items"
+            and isinstance(node.target, (ast.Tuple, ast.List))
+            and len(node.target.elts) == 2
+        ):
+            dict_expr = self.visit_expr(iter_node.func.value)
+            k_name = self.visit_expr(node.target.elts[0])
+            v_name = self.visit_expr(node.target.elts[1])
+
+            self.emit(f"for {k_name} in {dict_expr}.keys():")
+            self.indent_level += 1
+            self.emit(f"let {v_name} = {dict_expr}[{k_name}]")
+            for stmt in node.body:
+                self.visit(stmt)
+            self.indent_level -= 1
+            return
+
+        target_str = self.visit_expr(node.target)
 
         # Special case: for i in range(...)
         if isinstance(iter_node, ast.Call) and isinstance(iter_node.func, ast.Name) and iter_node.func.id == "range":
@@ -568,6 +662,30 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                     call_expr = self.visit_expr(arg0)
                     return f"{call_expr} /* nizam_ui_mark_dirty(self) */"
 
+        # Check super().method(...)
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Call):
+            inner_call = node.func.value
+            if isinstance(inner_call.func, ast.Name) and inner_call.func.id == "super":
+                arg_parts = [self.visit_expr(arg) for arg in node.args]
+                args_str = ", ".join(arg_parts)
+                return f"super().{node.func.attr}({args_str})"
+
+        # Check dict.get(k, default)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) in (1, 2):
+            obj_str = self.visit_expr(node.func.value)
+            key_str = self.visit_expr(node.args[0])
+            default_str = self.visit_expr(node.args[1]) if len(node.args) == 2 else "None"
+            return f"({obj_str}[{key_str}] if {obj_str}.has({key_str}) else {default_str})"
+
+        # Check pop(...)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "pop":
+            obj_str = self.visit_expr(node.func.value)
+            if node.args:
+                arg_str = self.visit_expr(node.args[0])
+                return f"{obj_str}.remove({arg_str})"
+            else:
+                return f"{obj_str}.remove({obj_str}.len() - 1)"
+
         target = None
         if isinstance(node.func, ast.Name):
             target = node.func.id
@@ -586,7 +704,10 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
 
         if not is_foreign and isinstance(node.func, ast.Name):
             if self.type_env.lookup_struct(node.func.id) is not None or (node.func.id and node.func.id[0].isupper() and not node.func.id.isupper()):
-                func_str = f"{node.func.id}.init"
+                if self.syntax == "mq":
+                    func_str = node.func.id
+                else:
+                    func_str = f"{node.func.id}.init"
 
         arg_parts = [self.visit_expr(arg) for arg in node.args]
         for kw in node.keywords:

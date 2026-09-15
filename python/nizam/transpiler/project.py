@@ -8,6 +8,8 @@ import subprocess
 import ast
 from typing import List, Dict, Set, Optional, Any, Tuple
 from . import Transpiler
+from .types import TypeEnvironment
+from .classes import ClassTransformer
 from .foreign import DependencyClassifier
 
 # ── Project Directory Transpiler ────────────────────────────────────────
@@ -76,6 +78,8 @@ class ProjectTranspiler:
         self.copied_extensions: List[str] = []
         self.bridged_extensions: List[Dict[str, Any]] = []
         self.check_results: Dict[str, Any] = {"passed": [], "failed": []}
+        self.project_index: Dict[str, Any] = {}
+        self.class_index: Dict[str, Any] = {}
 
     def _locate_mantiq_binary(self) -> Optional[str]:
         candidates = [
@@ -150,14 +154,86 @@ class ProjectTranspiler:
             "ignored": self.scanned_ignored,
         }
 
+    # ── Project Indexing ──────────────────────────────────────────────────
+    def build_project_index(self) -> Dict[str, Any]:
+        """Pre-scans discovered Python files to extract symbols, classes, fields, and initializers."""
+        self.project_index.clear()
+        self.class_index.clear()
+
+        for py_path in self.scanned_py:
+            try:
+                with open(py_path, "r", encoding="utf-8") as f:
+                    source = f.read()
+                tree = ast.parse(source)
+            except Exception:
+                continue
+
+            rel_py = os.path.relpath(py_path, self.source_dir)
+            base_no_ext, _ = os.path.splitext(rel_py)
+            mod_dot = base_no_ext.replace(os.sep, ".")
+            mod_base = os.path.basename(base_no_ext)
+
+            exported_symbols = []
+            classes_in_file = []
+
+            for stmt in tree.body:
+                if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    exported_symbols.append(stmt.name)
+                elif isinstance(stmt, ast.ClassDef):
+                    exported_symbols.append(stmt.name)
+                    classes_in_file.append(stmt)
+                elif isinstance(stmt, ast.Assign):
+                    for target in stmt.targets:
+                        if isinstance(target, ast.Name):
+                            exported_symbols.append(target.id)
+                elif isinstance(stmt, ast.AnnAssign):
+                    if isinstance(stmt.target, ast.Name):
+                        exported_symbols.append(stmt.target.id)
+
+            mod_entry = {
+                "file": py_path,
+                "rel_path": rel_py,
+                "symbols": exported_symbols,
+            }
+
+            self.project_index[py_path] = mod_entry
+            self.project_index[rel_py] = mod_entry
+            self.project_index[base_no_ext] = mod_entry
+            self.project_index[mod_dot] = mod_entry
+            self.project_index[mod_base] = mod_entry
+            self.project_index[f".{mod_base}"] = mod_entry
+            self.project_index[f"..{mod_base}"] = mod_entry
+
+            # Process classes into class_index
+            type_env = TypeEnvironment()
+            for cls_stmt in classes_in_file:
+                try:
+                    tr = ClassTransformer(cls_stmt, type_env, syntax=self.syntax, class_index=self.class_index)
+                    tr.analyze()
+                    self.class_index[cls_stmt.name] = {
+                        "fields": tr.fields,
+                        "field_initializers": tr.field_initializers,
+                        "methods": tr.methods,
+                    }
+                except Exception:
+                    pass
+
+        return self.project_index
+
     # ── File Transpilation ────────────────────────────────────────────────
     def transpile_all(self) -> Dict[str, str]:
         """Translates all scanned Python files into corresponding .nz or .mq files."""
         os.makedirs(self.output_dir, exist_ok=True)
+        if not self.project_index:
+            self.build_project_index()
+
         transpiler = Transpiler(
             foreign_mode=self.foreign_mode,
             workspace_root=self.workspace_root,
             source_root=self.source_dir,
+            syntax=self.syntax,
+            project_index=self.project_index,
+            class_index=self.class_index,
         )
 
         for py_path in self.scanned_py:
@@ -466,6 +542,7 @@ class ProjectTranspiler:
     def execute(self) -> Dict[str, Any]:
         """Runs full project transpilation pipeline."""
         self.scan()
+        self.build_project_index()
         self.transpile_all()
         self.replicate_assets()
         self.replicate_extensions()

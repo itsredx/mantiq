@@ -82,5 +82,59 @@ fn main() -> i32:
         let _r as i32 = printf("Test 5 (String Buffer Construction): FAILED!\n" to cstr)
         return 1 to i32
 
+    // ── Test 6: String Methods (startswith, endswith, lower, upper, strip) ──
+    let test_str as String = String.make("NizamLang" to cstr)
+    let has_prefix as bool = test_str.startswith("Niz" to cstr)
+    let has_suffix as bool = test_str.endswith("Lang" to cstr)
+    let not_prefix as bool = test_str.startswith("Foo" to cstr)
+    let not_suffix as bool = test_str.endswith("Bar" to cstr)
+
+    let low_s as String = test_str.lower()
+    let up_s as String = test_str.upper()
+
+    let ws_str as String = String.make("   hello world \r\n\t " to cstr)
+    let stripped as String = ws_str.strip()
+
+    if has_prefix and has_suffix and not not_prefix and not not_suffix and strcmp(low_s.data to cstr, "nizamlang" to cstr) == 0 and strcmp(up_s.data to cstr, "NIZAMLANG" to cstr) == 0 and strcmp(stripped.data to cstr, "hello world" to cstr) == 0:
+        let _r as i32 = printf("Test 6 (String startswith/endswith/lower/upper/strip): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 6 (String startswith/endswith/lower/upper/strip): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 7: String replace, split and join ────────────────────────────
+    let orig_msg as String = String.make("foo_bar_baz" to cstr)
+    let rep_msg as String = orig_msg.replace("bar" to cstr, "qux" to cstr)
+
+    let items as List[String] = rep_msg.split("_" to cstr)
+    let hyphen as String = String.make("-" to cstr)
+    let joined as String = hyphen.join(items)
+
+    if strcmp(rep_msg.data to cstr, "foo_qux_baz" to cstr) == 0 and items.length() == 3 to i64 and strcmp(items[0 to i64].data to cstr, "foo" to cstr) == 0 and strcmp(items[1 to i64].data to cstr, "qux" to cstr) == 0 and strcmp(items[2 to i64].data to cstr, "baz" to cstr) == 0 and strcmp(joined.data to cstr, "foo-qux-baz" to cstr) == 0:
+        let _r as i32 = printf("Test 7 (String replace, split, join): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 7 (String replace, split, join): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 8: Set Operations (update and discard) ────────────────────────
+    from std.collections import Set
+    var set_a as Set[i64] = Set[i64]()
+    set_a.init()
+    set_a.add(100 to i64)
+    set_a.add(200 to i64)
+
+    var set_b as Set[i64] = Set[i64]()
+    set_b.init()
+    set_b.add(300 to i64)
+    set_b.add(400 to i64)
+
+    set_a.update(ref set_b)
+    set_a.discard(100 to i64)
+
+    if set_a.count() == 3 to i64 and not set_a.has(100 to i64) and set_a.has(200 to i64) and set_a.has(300 to i64) and set_a.has(400 to i64):
+        let _r as i32 = printf("Test 8 (Set update and discard): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 8 (Set update and discard): FAILED!\n" to cstr)
+        return 1 to i32
+
     let _done as i32 = printf("\n[PASS] All test_std.nz tests passed successfully!\n" to cstr)
     return 0 to i32
