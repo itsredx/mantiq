@@ -317,13 +317,19 @@ struct Sema:
 
     public fn lookup_symbol(self as ptr[Sema], name as String) as ptr[Symbol]:
         var curr as ptr[Scope] = (deref self).current_scope
+        var visited_global as bool = False
         while curr != None to ptr[Scope]:
-            if (deref curr).symbols.has(name):
-                return (deref curr).symbols[name]
+            if curr == (deref self).global_scope:
+                visited_global = True
+            let sym as ptr[Symbol] = (deref curr).symbols.get(name, None to ptr[Symbol])
+            if sym != None to ptr[Symbol]:
+                return sym
             curr = (deref curr).parent
         
-        if (deref (deref self).global_scope).symbols.has(name):
-            return (deref (deref self).global_scope).symbols[name]
+        if not visited_global and (deref self).global_scope != None to ptr[Scope]:
+            let gsym as ptr[Symbol] = (deref (deref self).global_scope).symbols.get(name, None to ptr[Symbol])
+            if gsym != None to ptr[Symbol]:
+                return gsym
             
         return None to ptr[Symbol]
 
@@ -544,6 +550,16 @@ struct Sema:
                                 content = path_content
                                 resolved_path = pdir_nz
                             else:
+                                let sbp_dir_mq as StringBuilder = StringBuilder.make()
+                                sbp_dir_mq.append(pdir.data to cstr)
+                                sbp_dir_mq.append(".mq" to cstr)
+                                let pdir_mq as String = sbp_dir_mq.to_string()
+                                path_content = read_file_to_str(pdir_mq.data to cstr)
+                                if path_content.len > 0 to usize:
+                                    content = path_content
+                                    resolved_path = pdir_mq
+                                else:
+                                    pdir_mq.deinit()
                                 pdir_nz.deinit()
                             pdir.deinit()
                     target_nz.deinit()
@@ -590,17 +606,30 @@ struct Sema:
         sb1.append(path_buf to cstr)
         sb1.append(".nz" to cstr)
         let path1 as String = sb1.to_string()
+
+        let sb1_mq as StringBuilder = StringBuilder.make()
+        sb1_mq.append("./" to cstr)
+        sb1_mq.append(path_buf to cstr)
+        sb1_mq.append(".mq" to cstr)
+        let path1_mq as String = sb1_mq.to_string()
         
         let sb2 as StringBuilder = StringBuilder.make()
         sb2.append("std/" to cstr)
         sb2.append(path_buf to cstr)
         sb2.append(".nz" to cstr)
         let path2 as String = sb2.to_string()
+
         let sb3 as StringBuilder = StringBuilder.make()
         sb3.append(dir_prefix)
         sb3.append(path_buf to cstr)
         sb3.append(".nz" to cstr)
         let path3 as String = sb3.to_string()
+
+        let sb3_mq as StringBuilder = StringBuilder.make()
+        sb3_mq.append(dir_prefix)
+        sb3_mq.append(path_buf to cstr)
+        sb3_mq.append(".mq" to cstr)
+        let path3_mq as String = sb3_mq.to_string()
         
         let sb4 as StringBuilder = StringBuilder.make()
         sb4.append(dir_prefix)
@@ -614,27 +643,45 @@ struct Sema:
         sb5.append(path_buf to cstr)
         sb5.append(".nz" to cstr)
         let path5 as String = sb5.to_string()
+
+        let sb5_mq as StringBuilder = StringBuilder.make()
+        sb5_mq.append("../" to cstr)
+        sb5_mq.append(path_buf to cstr)
+        sb5_mq.append(".mq" to cstr)
+        let path5_mq as String = sb5_mq.to_string()
         
         if content.len == 0 to usize:
             content = read_file_to_str(path1.data to cstr)
             if content.len > 0 to usize:
                 resolved_path = path1
             else:
-                content = read_file_to_str(path2.data to cstr)
+                content = read_file_to_str(path1_mq.data to cstr)
                 if content.len > 0 to usize:
-                    resolved_path = path2
+                    resolved_path = path1_mq
                 else:
-                    content = read_file_to_str(path3.data to cstr)
+                    content = read_file_to_str(path2.data to cstr)
                     if content.len > 0 to usize:
-                        resolved_path = path3
+                        resolved_path = path2
                     else:
-                        content = read_file_to_str(path4.data to cstr)
+                        content = read_file_to_str(path3.data to cstr)
                         if content.len > 0 to usize:
-                            resolved_path = path4
+                            resolved_path = path3
                         else:
-                            content = read_file_to_str(path5.data to cstr)
+                            content = read_file_to_str(path3_mq.data to cstr)
                             if content.len > 0 to usize:
-                                resolved_path = path5
+                                resolved_path = path3_mq
+                            else:
+                                content = read_file_to_str(path4.data to cstr)
+                                if content.len > 0 to usize:
+                                    resolved_path = path4
+                                else:
+                                    content = read_file_to_str(path5.data to cstr)
+                                    if content.len > 0 to usize:
+                                        resolved_path = path5
+                                    else:
+                                        content = read_file_to_str(path5_mq.data to cstr)
+                                        if content.len > 0 to usize:
+                                            resolved_path = path5_mq
 
                 // If still not found, walk up from the source file looking for a project root
                 if content.len == 0 to usize:

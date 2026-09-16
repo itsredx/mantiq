@@ -251,7 +251,7 @@ fn get_module_name_from_path(path as cstr) as String:
     return res
 
 // ── Compiler Pipeline ───────────────────────────────────────────────────
-fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, target_str as cstr, perf as ptr[PerfState]) as bool:
+fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, target_str as cstr, perf as ptr[PerfState], is_debug as bool) as bool:
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make(path_cstr), String.make(source_cstr))
@@ -340,7 +340,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     // ── Phase 7: Link ──
     let t6 as i64 = perf_begin(perf, "link")
     let lib_dir as cstr = compiler_lib_dir()
-    let cmd_buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
+    let cmd_buf as ptr[u8] = malloc(8192 to usize) to ptr[u8]
     
     let extra_flags as StringBuilder = StringBuilder.make()
     let lt_count as i64 = (deref sema).link_targets.length()
@@ -359,33 +359,50 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let extra_flags_str as String = extra_flags.to_string()
     let extra_flags_c as cstr = extra_flags_str.data to cstr
 
+    let opt_flag as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
+    let wasm_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-O2" to cstr
+    let py_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
+
+    extern fn access(path as cstr, mode as i32) as i32
+    var has_rt_obj as bool = False
+    if lib_dir != None to cstr:
+        let rt_o_sb as StringBuilder = StringBuilder.make()
+        rt_o_sb.append(lib_dir)
+        rt_o_sb.append("/runtime.o" to cstr)
+        let rt_o_str as String = rt_o_sb.to_string()
+        has_rt_obj = access(rt_o_str.data to cstr, 0 to i32) == 0 to i32
+        rt_o_sb.deinit()
+
     var _sp as i32 = 0
     if target.is_wasm():
         if lib_dir == None to cstr:
-            _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. ../mantiqz/mantiq-compiler/src/runtime.c -o %s %s 2>&1" to cstr, ll_path, out_file, extra_flags_c)
+            _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, out_file, extra_flags_c)
         else:
             let ts_a_path as StringBuilder = StringBuilder.make()
             ts_a_path.append(lib_dir)
             ts_a_path.append("/libtree-sitter-mantiq.a" to cstr)
-            extern fn access(path as cstr, mode as i32) as i32
             let ts_a_str as String = ts_a_path.to_string()
             let has_ts_a as bool = access(ts_a_str.data to cstr, 0 to i32) == 0 to i32
             ts_a_path.deinit()
             if has_ts_a:
-                _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c %s/libtree-sitter-mantiq.a -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s/runtime.c\" \"%s/libtree-sitter-mantiq.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
             else:
-                _sp = sprintf(cmd_buf, "zig cc -target wasm32-wasi -Wl,-z,stack-size=16777216 %s -L. -L%s %s/runtime.c -o %s %s 2>&1" to cstr, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s/runtime.c\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
     elif target.is_python_ext():
         if lib_dir == None to cstr:
-            _sp = sprintf(cmd_buf, "clang -shared -fPIC %s ../mantiqz/mantiq-compiler/src/runtime.c -o %s -lm %s 2>&1 || zig cc -shared -fPIC %s ../mantiqz/mantiq-compiler/src/runtime.c -o %s -lm %s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
+            _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, out_file, extra_flags_c, py_opt, ll_path, out_file, extra_flags_c)
         else:
-            _sp = sprintf(cmd_buf, "clang -shared -fPIC %s %s/runtime.c -o %s -lm %s 2>&1 || zig cc -shared -fPIC %s %s/runtime.c -o %s -lm %s 2>&1" to cstr, ll_path, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, out_file, extra_flags_c)
+            _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, lib_dir, out_file, extra_flags_c, py_opt, ll_path, lib_dir, out_file, extra_flags_c)
     else:
         if lib_dir == None to cstr:
-            _sp = sprintf(cmd_buf, "zig cc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || gcc %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1 || clang %s -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o %s -lm%s 2>&1" to cstr, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c, ll_path, out_file, extra_flags_c)
+            _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c)
         else:
-            _sp = sprintf(cmd_buf, "zig cc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || gcc %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1 || clang %s -L%s -ltree-sitter-mantiq %s/tree_sitter_helper.c %s/runtime.c -Wl,-rpath,%s -o %s -lm%s 2>&1" to cstr, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+            if has_rt_obj:
+                _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+            else:
+                _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
     let res as i32 = system(cmd_buf to cstr)
+    free(cmd_buf to ptr)
     perf_end(perf, "link", t6)
 
     if target.is_python_ext() and res == 0:
@@ -487,7 +504,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         ai = ai + 1 to i32
 
     if argc < 2:
-        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--profile]\n  run <file.nz> [--target <triple>] [--profile]\n  check <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
+        let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--release|--debug] [--profile]\n  run <file.nz> [--target <triple>] [--release|--debug] [--profile]\n  check <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
 
@@ -531,13 +548,14 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:
-            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--target <triple>] [--profile]\n" to cstr, bin_name)
+            let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--target <triple>] [--release|--debug] [--profile]\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2 to i32)
         var out_path as cstr = "a.out" to cstr
         var out_specified as bool = False
         var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
         var target_specified as bool = False
+        var is_debug as bool = False
         var arg_i as i32 = 3 to i32
         while arg_i < argc:
             if strcmp(get_arg(argv, arg_i), "-o" to cstr) == 0 and arg_i + 1 to i32 < argc:
@@ -552,6 +570,10 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 extern fn set_compiler_lib_dir(dir as cstr)
                 set_compiler_lib_dir(get_arg(argv, arg_i + 1 to i32))
                 arg_i = arg_i + 1 to i32
+            elif strcmp(get_arg(argv, arg_i), "--debug" to cstr) == 0:
+                is_debug = True
+            elif strcmp(get_arg(argv, arg_i), "--release" to cstr) == 0:
+                is_debug = False
             arg_i = arg_i + 1 to i32
 
         if target_specified and strstr(target_triple, "wasm" to cstr) != None to cstr and not out_specified:
@@ -570,7 +592,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug)
         perf_print(ref perf)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
@@ -583,10 +605,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
     if strcmp(cmd, "run" to cstr) == 0:
         if argc < 3:
-            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--target <triple>] [--profile]\n" to cstr, bin_name)
+            let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--target <triple>] [--release|--debug] [--profile]\n" to cstr, bin_name)
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2 to i32)
         var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
+        var is_debug as bool = False
         var r_arg_i as i32 = 3 to i32
         while r_arg_i < argc:
             if strcmp(get_arg(argv, r_arg_i), "--target" to cstr) == 0 and r_arg_i + 1 to i32 < argc:
@@ -596,6 +619,10 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 extern fn set_compiler_lib_dir(dir as cstr)
                 set_compiler_lib_dir(get_arg(argv, r_arg_i + 1 to i32))
                 r_arg_i = r_arg_i + 1 to i32
+            elif strcmp(get_arg(argv, r_arg_i), "--debug" to cstr) == 0:
+                is_debug = True
+            elif strcmp(get_arg(argv, r_arg_i), "--release" to cstr) == 0:
+                is_debug = False
             r_arg_i = r_arg_i + 1 to i32
 
         let pidv as i32 = getpid()
@@ -617,7 +644,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
 
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug)
         perf_print(ref perf)
         if ok:
             if strstr(target_triple, "wasm" to cstr) != None to cstr:

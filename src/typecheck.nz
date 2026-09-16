@@ -1356,6 +1356,11 @@ struct TypeChecker:
                                     let coll_keys_t as ptr[Type] = make_type(TypeKind.List)
                                     (deref coll_keys_t).payload = make_type(TypeKind.Any)
                                     ret_type = coll_keys_t
+                                elif strcmp(coll_mname.data to cstr, "get") == 0:
+                                    if (deref coll_recv_t).payload != None to ptr[Type]:
+                                        ret_type = (deref coll_recv_t).payload
+                                    else:
+                                        ret_type = make_type(TypeKind.Any)
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.List:
