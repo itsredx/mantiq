@@ -61,6 +61,8 @@ struct PerfPhase:
     public var time_ns as i64
     public var rss_start as i64
     public var rss_end as i64
+    public var alloc_delta as i64
+    public var bytes_delta as i64
 
 struct PerfState:
     public var phase_buf as ptr[PerfPhase]
@@ -71,14 +73,20 @@ struct PerfState:
     public var allocs_start as i64
     public var bytes_start as i64
     public var frees_start as i64
+    public var allocs_last as i64
+    public var bytes_last as i64
 
 fn perf_init() as PerfState:
-    return PerfState(phase_buf = make[PerfPhase](16 to usize) to ptr[PerfPhase], phase_count = 0 to i64, wall_start = perf_now_ns(), rss_start = perf_rss_bytes(), enabled = False, allocs_start = mantiq_alloc_count(), bytes_start = mantiq_alloc_bytes(), frees_start = mantiq_free_count())
+    let a_start as i64 = mantiq_alloc_count()
+    let b_start as i64 = mantiq_alloc_bytes()
+    return PerfState(phase_buf = make[PerfPhase](16 to usize) to ptr[PerfPhase], phase_count = 0 to i64, wall_start = perf_now_ns(), rss_start = perf_rss_bytes(), enabled = False, allocs_start = a_start, bytes_start = b_start, frees_start = mantiq_free_count(), allocs_last = a_start, bytes_last = b_start)
 
 fn perf_begin(p as ptr[PerfState], name as cstr) as i64:
     if (deref p).enabled:
         let _pb as i32 = printf(">>> Phase: %s\n" to cstr, name)
         let _pbf as i32 = fflush(None to ptr)
+        (deref p).allocs_last = mantiq_alloc_count()
+        (deref p).bytes_last = mantiq_alloc_bytes()
     return perf_now_ns()
 
 fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
@@ -88,12 +96,16 @@ fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
     let _pef as i32 = fflush(None to ptr)
     let t1 as i64 = perf_now_ns()
     let rss_now as i64 = perf_rss_bytes()
+    let a_now as i64 = mantiq_alloc_count()
+    let b_now as i64 = mantiq_alloc_bytes()
+    let a_delta as i64 = a_now - (deref p).allocs_last
+    let b_delta as i64 = b_now - (deref p).bytes_last
     let idx as i64 = (deref p).phase_count
     if idx < 16 to i64:
         let base as usize = (deref p).phase_buf to usize
-        let offset as usize = idx to usize * 32 to usize
+        let offset as usize = idx to usize * 48 to usize
         let p_ptr as ptr[PerfPhase] = (base + offset) to ptr[PerfPhase]
-        deref p_ptr = PerfPhase(name = name, time_ns = t1 - t0, rss_start = (deref p).rss_start, rss_end = rss_now)
+        deref p_ptr = PerfPhase(name = name, time_ns = t1 - t0, rss_start = (deref p).rss_start, rss_end = rss_now, alloc_delta = a_delta, bytes_delta = b_delta)
         (deref p).phase_count = idx + 1 to i64
 
 fn perf_print(p as ptr[PerfState]):
@@ -121,14 +133,14 @@ fn perf_print(p as ptr[PerfState]):
     let _f3 as i32 = printf("│  Peak RSS:     %-51s │\n" to cstr, buf)
 
     let _f4 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
-    let _f5 as i32 = printf("│  %-28s %14s %12s            │\n" to cstr, "Phase" to cstr, "Time" to cstr, "RSS Δ" to cstr)
+    let _f5 as i32 = printf("│  %-20s %10s %9s %10s %11s  │\n" to cstr, "Phase" to cstr, "Time" to cstr, "RSS Δ" to cstr, "Allocs" to cstr, "Bytes" to cstr)
     let _f6 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
 
     var i as i64 = 0 to i64
     let cnt as i64 = (deref p).phase_count
     while i < cnt:
         let base as usize = (deref p).phase_buf to usize
-        let offset as usize = i to usize * 32 to usize
+        let offset as usize = i to usize * 48 to usize
         let ph_ptr as ptr[PerfPhase] = (base + offset) to ptr[PerfPhase]
         let ph as PerfPhase = deref ph_ptr
         let t_ns as i64 = ph.time_ns
@@ -145,7 +157,9 @@ fn perf_print(p as ptr[PerfState]):
             let _ as i32 = sprintf(rss_buf, "+%ld KB", rss_delta / 1024 to i64)
         else:
             let _ as i32 = sprintf(rss_buf, "%ld KB", rss_delta / 1024 to i64)
-        let _fp as i32 = printf("│  %-28s %14s %12s            │\n" to cstr, ph.name, buf, rss_buf)
+        let bytes_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        let _ as i32 = sprintf(bytes_buf, "%ld KB", ph.bytes_delta / 1024 to i64)
+        let _fp as i32 = printf("│  %-20s %10s %9s %10ld %11s  │\n" to cstr, ph.name, buf, rss_buf, ph.alloc_delta, bytes_buf)
         i = i + 1 to i64
 
     let _f7 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)

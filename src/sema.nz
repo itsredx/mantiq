@@ -29,12 +29,15 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
     return (deref lay).val_ptr
 
 // ── Scope & Symbol Creators ─────────────────────────────────────────────
-fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
+fn make_scope_with_capacity(parent as ptr[Scope], closure_node as ptr[Node], capacity as i32) as ptr[Scope]:
     let s as ptr[Scope] = make[Scope](1 to usize) to ptr[Scope]
     (deref s).parent = parent
-    (deref s).symbols = Dict[String, ptr[Symbol]]()
+    (deref s).symbols = Dict[String, ptr[Symbol]](capacity)
     (deref s).closure_node = closure_node
     return s
+
+fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
+    return make_scope_with_capacity(parent, closure_node, 8 to i32)
 
 fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as ptr[Symbol]:
     let sym as ptr[Symbol] = make[u8](256 to usize) to ptr[Symbol]
@@ -257,7 +260,7 @@ struct Sema:
         (deref self).engine = None to ptr[DiagnosticEngine]
         (deref self).link_targets = List[String]()
         
-        let gs as ptr[Scope] = make_scope(None to ptr[Scope], None to ptr[Node])
+        let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
         (deref self).current_scope = gs
         

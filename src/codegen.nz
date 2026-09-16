@@ -1536,6 +1536,7 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_await" to cstr), True)
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_isa(ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_malloc(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_alloc_box32()\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_realloc(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare i64 @mantiq_strlen(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_spawn(ptr, ptr)\n")
@@ -1553,6 +1554,7 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i32 @__mantiq_hash_string(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @__mantiq_hash_bytes(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_dict_create(i32, i32, i32)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_dict_create_with_capacity(i32, i32, i32, i32)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_dict_set(ptr, ptr, ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_dict_merge(ptr, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_dict_get(ptr, ptr, i32)\n")
@@ -4789,7 +4791,7 @@ struct LLVMCodegen:
                                 let box_reg as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, box_reg to cstr)
-                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_alloc_box32()\n")
                                 var ok_arg_ll as String = type_to_llvm(ok_arg_type)
                                 if strcmp(ok_arg_ll.data to cstr, "{ ptr, ptr }" to cstr) == 0 or ok_arg_ll.len == 0 to usize or strcmp(ok_arg_ll.data to cstr, "void" to cstr) == 0:
                                     ok_arg_ll = String.make("i32" to cstr)
@@ -4854,7 +4856,7 @@ struct LLVMCodegen:
                                 let box_reg as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, box_reg to cstr)
-                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_alloc_box32()\n")
                                 var err_arg_ll as String = type_to_llvm(err_arg_type)
                                 if strcmp(err_arg_ll.data to cstr, "{ ptr, ptr }" to cstr) == 0 or err_arg_ll.len == 0 to usize or strcmp(err_arg_ll.data to cstr, "void" to cstr) == 0:
                                     err_arg_ll = String.make("i32" to cstr)
@@ -4907,7 +4909,7 @@ struct LLVMCodegen:
                                 let box_reg as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, box_reg to cstr)
-                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+                                append_cstr(ref (deref self).main_out, " = call ptr @mantiq_alloc_box32()\n")
                                 var opt_arg_ll as String = type_to_llvm(opt_arg_type)
                                 if strcmp(opt_arg_ll.data to cstr, "{ ptr, ptr }" to cstr) == 0 or opt_arg_ll.len == 0 to usize:
                                     if (deref self).target.pointer_size == 4 to usize:
@@ -4985,15 +4987,46 @@ struct LLVMCodegen:
                                     else:
                                         dict_val_s = self.dict_key_size_from_name(v_name_str)
                         let dict_ptr_reg as ptr[u8] = self.fresh_temp()
-                        append_cstr(ref (deref self).main_out, "  ")
-                        append_cstr(ref (deref self).main_out, dict_ptr_reg to cstr)
-                        append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create(i32 ")
-                        append_i64(ref (deref self).main_out, dict_key_s)
-                        append_cstr(ref (deref self).main_out, ", i32 ")
-                        append_i64(ref (deref self).main_out, dict_val_s)
-                        append_cstr(ref (deref self).main_out, ", i32 ")
-                        append_i64(ref (deref self).main_out, dict_str_flag to i64)
-                        append_cstr(ref (deref self).main_out, ")\n")
+                        if args.length() > 0 to i64:
+                            let raw_cap as ptr[u8] = self.emit_expr(get_node_decl(ref args, 0 to i64))
+                            let cap_type as String = type_to_llvm(node_inferred_type(get_node_decl(ref args, 0 to i64)))
+                            var cap_val as ptr[u8] = raw_cap
+                            if strcmp(cap_type.data to cstr, "i32" to cstr) != 0:
+                                let tr_reg as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, tr_reg to cstr)
+                                if strcmp(cap_type.data to cstr, "i64" to cstr) == 0:
+                                    append_cstr(ref (deref self).main_out, " = trunc i64 ")
+                                    append_cstr(ref (deref self).main_out, raw_cap to cstr)
+                                    append_cstr(ref (deref self).main_out, " to i32\n")
+                                else:
+                                    append_cstr(ref (deref self).main_out, " = zext ")
+                                    append_str(ref (deref self).main_out, cap_type)
+                                    append_cstr(ref (deref self).main_out, " ")
+                                    append_cstr(ref (deref self).main_out, raw_cap to cstr)
+                                    append_cstr(ref (deref self).main_out, " to i32\n")
+                                cap_val = tr_reg
+                            append_cstr(ref (deref self).main_out, "  ")
+                            append_cstr(ref (deref self).main_out, dict_ptr_reg to cstr)
+                            append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create_with_capacity(i32 ")
+                            append_i64(ref (deref self).main_out, dict_key_s)
+                            append_cstr(ref (deref self).main_out, ", i32 ")
+                            append_i64(ref (deref self).main_out, dict_val_s)
+                            append_cstr(ref (deref self).main_out, ", i32 ")
+                            append_i64(ref (deref self).main_out, dict_str_flag to i64)
+                            append_cstr(ref (deref self).main_out, ", i32 ")
+                            append_cstr(ref (deref self).main_out, cap_val to cstr)
+                            append_cstr(ref (deref self).main_out, ")\n")
+                        else:
+                            append_cstr(ref (deref self).main_out, "  ")
+                            append_cstr(ref (deref self).main_out, dict_ptr_reg to cstr)
+                            append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create(i32 ")
+                            append_i64(ref (deref self).main_out, dict_key_s)
+                            append_cstr(ref (deref self).main_out, ", i32 ")
+                            append_i64(ref (deref self).main_out, dict_val_s)
+                            append_cstr(ref (deref self).main_out, ", i32 ")
+                            append_i64(ref (deref self).main_out, dict_str_flag to i64)
+                            append_cstr(ref (deref self).main_out, ")\n")
                         let coll_st as String = if (deref self).target.pointer_size == 4 to usize: String.make("{ ptr, i32, i32 }" to cstr) else: String.make("{ ptr, i64, i64 }" to cstr)
                         let p_int_t as String = (deref self).target.llvm_ptr_int()
                         let dict_iv0 as ptr[u8] = self.fresh_temp()
@@ -6187,7 +6220,22 @@ struct LLVMCodegen:
             append_str(ref (deref self).type_out, ret_type)
             append_cstr(ref (deref self).type_out, " @")
             append_str(ref (deref self).type_out, fn_target_name)
-            append_cstr(ref (deref self).type_out, "(...)\n")
+            if strcmp(fn_target_name.data to cstr, "printf" to cstr) == 0:
+                append_cstr(ref (deref self).type_out, "(ptr, ...)\n")
+            elif strcmp(fn_target_name.data to cstr, "sprintf" to cstr) == 0 or strcmp(fn_target_name.data to cstr, "fprintf" to cstr) == 0:
+                append_cstr(ref (deref self).type_out, "(ptr, ptr, ...)\n")
+            elif strcmp(fn_target_name.data to cstr, "snprintf" to cstr) == 0:
+                append_cstr(ref (deref self).type_out, "(ptr, i64, ptr, ...)\n")
+            else:
+                append_cstr(ref (deref self).type_out, "(...)\n")
+
+        var vararg_proto as cstr = "" to cstr
+        if strcmp(fn_target_name.data to cstr, "printf" to cstr) == 0:
+            vararg_proto = " (ptr, ...)" to cstr
+        elif strcmp(fn_target_name.data to cstr, "sprintf" to cstr) == 0 or strcmp(fn_target_name.data to cstr, "fprintf" to cstr) == 0:
+            vararg_proto = " (ptr, ptr, ...)" to cstr
+        elif strcmp(fn_target_name.data to cstr, "snprintf" to cstr) == 0:
+            vararg_proto = " (ptr, i64, ptr, ...)" to cstr
 
         let is_void as bool = str_eq(ret_type, String.make("void" to cstr))
         if not is_void:
@@ -6196,6 +6244,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, reg to cstr)
             append_cstr(ref (deref self).main_out, " = call ")
             append_str(ref (deref self).main_out, ret_type)
+            if strcmp(vararg_proto, "" to cstr) != 0:
+                append_cstr(ref (deref self).main_out, vararg_proto)
             append_cstr(ref (deref self).main_out, " @")
             append_str(ref (deref self).main_out, fn_target_name)
             append_cstr(ref (deref self).main_out, "(")
@@ -6207,6 +6257,8 @@ struct LLVMCodegen:
         else:
             append_cstr(ref (deref self).main_out, "  call ")
             append_str(ref (deref self).main_out, ret_type)
+            if strcmp(vararg_proto, "" to cstr) != 0:
+                append_cstr(ref (deref self).main_out, vararg_proto)
             append_cstr(ref (deref self).main_out, " @")
             append_str(ref (deref self).main_out, fn_target_name)
             append_cstr(ref (deref self).main_out, "(")
@@ -9072,7 +9124,7 @@ struct LLVMCodegen:
         let box_ptr as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, box_ptr to cstr)
-        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_alloc_box32()\n")
 
         append_cstr(ref (deref self).main_out, "  store ")
         append_str(ref (deref self).main_out, err_llvm)
@@ -10193,13 +10245,24 @@ struct LLVMCodegen:
         let dict_ptr as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, dict_ptr to cstr)
-        append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create(i32 ")
-        append_i64(ref (deref self).main_out, k_size)
-        append_cstr(ref (deref self).main_out, ", i32 ")
-        append_i64(ref (deref self).main_out, v_size)
-        append_cstr(ref (deref self).main_out, ", i32 ")
-        append_i32(ref (deref self).main_out, is_str_flag)
-        append_cstr(ref (deref self).main_out, ")\n")
+        if count > 4 to i64:
+            append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create_with_capacity(i32 ")
+            append_i64(ref (deref self).main_out, k_size)
+            append_cstr(ref (deref self).main_out, ", i32 ")
+            append_i64(ref (deref self).main_out, v_size)
+            append_cstr(ref (deref self).main_out, ", i32 ")
+            append_i32(ref (deref self).main_out, is_str_flag)
+            append_cstr(ref (deref self).main_out, ", i32 ")
+            append_i64(ref (deref self).main_out, count)
+            append_cstr(ref (deref self).main_out, ")\n")
+        else:
+            append_cstr(ref (deref self).main_out, " = call ptr @__mantiq_dict_create(i32 ")
+            append_i64(ref (deref self).main_out, k_size)
+            append_cstr(ref (deref self).main_out, ", i32 ")
+            append_i64(ref (deref self).main_out, v_size)
+            append_cstr(ref (deref self).main_out, ", i32 ")
+            append_i32(ref (deref self).main_out, is_str_flag)
+            append_cstr(ref (deref self).main_out, ")\n")
 
         var idx as i64 = 0 to i64
         while idx < count:
@@ -12251,7 +12314,7 @@ struct LLVMCodegen:
             let box_ptr as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, box_ptr to cstr)
-            append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 32)\n")
+            append_cstr(ref (deref self).main_out, " = call ptr @mantiq_alloc_box32()\n")
             append_cstr(ref (deref self).main_out, "  store ")
             append_str(ref (deref self).main_out, val_type)
             append_cstr(ref (deref self).main_out, " ")
