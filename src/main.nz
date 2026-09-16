@@ -42,6 +42,7 @@ extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
 extern fn strlen(s as cstr) as usize
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+extern fn mantiq_run_command_direct(argv as ptr[cstr]) as i32
 
 // ── Performance Monitor ─────────────────────────────────────────────────
 extern fn mantiq_perf_now_ns() as i64
@@ -415,7 +416,122 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
             else:
                 _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
-    let res as i32 = system(cmd_buf to cstr)
+    var res as i32 = -1
+    if not target.is_wasm() and not target.is_python_ext():
+        let d_argv as ptr[cstr] = malloc(128 to usize * 8 to usize) to ptr[cstr]
+        var di as usize = 0 to usize
+        d_argv[di] = "zig" to cstr
+        di = di + 1 to usize
+        d_argv[di] = "cc" to cstr
+        di = di + 1 to usize
+        if is_debug:
+            d_argv[di] = "-O0" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-g" to cstr
+            di = di + 1 to usize
+        else:
+            d_argv[di] = "-O2" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-fno-strict-aliasing" to cstr
+            di = di + 1 to usize
+        d_argv[di] = ll_path
+        di = di + 1 to usize
+        var l_str as String = String.make("" to cstr)
+        if lib_dir != None to cstr:
+            let l_sb as StringBuilder = StringBuilder.make()
+            l_sb.append("-L" to cstr)
+            l_sb.append(lib_dir)
+            l_str = l_sb.to_string()
+            d_argv[di] = l_str.data to cstr
+            di = di + 1 to usize
+        else:
+            d_argv[di] = "-L." to cstr
+            di = di + 1 to usize
+        d_argv[di] = "-ltree-sitter-mantiq" to cstr
+        di = di + 1 to usize
+        var ts_str as String = String.make("" to cstr)
+        var rt_str as String = String.make("" to cstr)
+        var rp_str as String = String.make("" to cstr)
+        if lib_dir != None to cstr:
+            if has_rt_obj:
+                let ts_sb as StringBuilder = StringBuilder.make()
+                ts_sb.append(lib_dir)
+                ts_sb.append("/tree_sitter_helper.o" to cstr)
+                ts_str = ts_sb.to_string()
+                d_argv[di] = ts_str.data to cstr
+                di = di + 1 to usize
+                let rt_sb as StringBuilder = StringBuilder.make()
+                rt_sb.append(lib_dir)
+                rt_sb.append("/runtime.o" to cstr)
+                rt_str = rt_sb.to_string()
+                d_argv[di] = rt_str.data to cstr
+                di = di + 1 to usize
+            else:
+                let ts_sb as StringBuilder = StringBuilder.make()
+                ts_sb.append(lib_dir)
+                ts_sb.append("/tree_sitter_helper.c" to cstr)
+                ts_str = ts_sb.to_string()
+                d_argv[di] = ts_str.data to cstr
+                di = di + 1 to usize
+                let rt_sb as StringBuilder = StringBuilder.make()
+                rt_sb.append(lib_dir)
+                rt_sb.append("/runtime.c" to cstr)
+                rt_str = rt_sb.to_string()
+                d_argv[di] = rt_str.data to cstr
+                di = di + 1 to usize
+            let rp_sb as StringBuilder = StringBuilder.make()
+            rp_sb.append("-Wl,-rpath," to cstr)
+            rp_sb.append(lib_dir)
+            rp_str = rp_sb.to_string()
+            d_argv[di] = rp_str.data to cstr
+            di = di + 1 to usize
+        else:
+            d_argv[di] = "tree_sitter_helper.c" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "../mantiqz/mantiq-compiler/src/runtime.c" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-Wl,-rpath,'$ORIGIN'" to cstr
+            di = di + 1 to usize
+        d_argv[di] = "-o" to cstr
+        di = di + 1 to usize
+        d_argv[di] = out_file
+        di = di + 1 to usize
+        d_argv[di] = "-lm" to cstr
+        di = di + 1 to usize
+        var lti2 as i64 = 0 to i64
+        while lti2 < lt_count:
+            let lt_name2 as String = (deref sema).link_targets[lti2]
+            if strcmp(lt_name2.data to cstr, "m" to cstr) != 0:
+                let l_sb2 as StringBuilder = StringBuilder.make()
+                l_sb2.append("-l" to cstr)
+                l_sb2.append(lt_name2.data to cstr)
+                let l_str2 as String = l_sb2.to_string()
+                d_argv[di] = l_str2.data to cstr
+                di = di + 1 to usize
+            lti2 = lti2 + 1 to i64
+        if (deref cg).has_python_embed and not has_py_flag:
+            d_argv[di] = "-lpython3.12" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-ldl" to cstr
+            di = di + 1 to usize
+        d_argv[di] = None to cstr
+        res = mantiq_run_command_direct(d_argv)
+        if res != 0:
+            // Fallback: Try gcc directly
+            var si as usize = 1 to usize
+            while si < di:
+                d_argv[si] = d_argv[si + 1 to usize]
+                si = si + 1 to usize
+            d_argv[0] = "gcc" to cstr
+            d_argv[di - 1 to usize] = None to cstr
+            res = mantiq_run_command_direct(d_argv)
+            if res != 0:
+                // Fallback: Try clang directly
+                d_argv[0] = "clang" to cstr
+                res = mantiq_run_command_direct(d_argv)
+        free(d_argv to ptr)
+    if res != 0:
+        res = system(cmd_buf to cstr)
     free(cmd_buf to ptr)
     perf_end(perf, "link", t6)
 
@@ -673,6 +789,13 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 let res as i32 = system(run_cmd to cstr)
                 return res
             else:
+                let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
+                run_argv[0] = out_path
+                run_argv[1] = None to cstr
+                let r_res as i32 = mantiq_run_command_direct(run_argv)
+                free(run_argv to ptr)
+                if r_res != -1:
+                    return r_res
                 let res as i32 = system(out_path)
                 return res
         else:

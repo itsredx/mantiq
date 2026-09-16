@@ -40,7 +40,7 @@ fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
     return make_scope_with_capacity(parent, closure_node, 8 to i32)
 
 fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as ptr[Symbol]:
-    let sym as ptr[Symbol] = make[u8](256 to usize) to ptr[Symbol]
+    let sym as ptr[Symbol] = make[Symbol](1 to usize) to ptr[Symbol]
     (deref sym).name = name
     (deref sym).kind = kind
     (deref sym).decl_node = decl_node
@@ -56,6 +56,7 @@ fn read_file_to_str(path as cstr) as String:
     extern fn rewind(stream as ptr)
     extern fn fread(ptr as ptr, size as usize, nmemb as usize, stream as ptr) as usize
     extern fn fclose(stream as ptr) as i32
+    extern fn mantiq_malloc_raw(size as i64) as ptr
     
     let f as ptr = fopen(path, "rb" to cstr)
     if f == None to ptr:
@@ -67,7 +68,7 @@ fn read_file_to_str(path as cstr) as String:
     rewind(f)
     
     let cap as usize = file_size to usize + 1 to usize
-    let buf as ptr[u8] = make(cap) to ptr[u8]
+    let buf as ptr[u8] = mantiq_malloc_raw(cap to i64) to ptr[u8]
     let read_bytes as usize = fread(buf to ptr, 1 to usize, file_size to usize, f)
     buf[read_bytes] = 0 to u8
     
