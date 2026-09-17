@@ -1,0 +1,77 @@
+// ── Statement Temporaries & Memory Lifecycle Tests ─────────────────────
+
+extern fn printf(format as cstr, ...) as i32
+
+fn helper_alloc_string(idx as i32) as String:
+    return f"helper_result_{idx * 3}"
+
+fn test_bound_interpolated_string() as bool:
+    let a as i32 = 42
+    let b as i32 = 58
+    let s as String = f"Values: a={a}, b={b}, sum={a + b}"
+    if s.len <= 0 to usize:
+        return False
+    let _ as i32 = printf("Bound string: %s (len=%lld)\n" to cstr, s.data to cstr, s.len to i64)
+    return True
+
+fn test_discarded_expression_statements() as bool:
+    var i as i32 = 0
+    while i < 100:
+        // Discarded temporary string expression statement
+        f"Intermediate loop string #{i} with number {i * 2}"
+        i = i + 1
+    return True
+
+fn test_discarded_fn_call() as bool:
+    var j as i32 = 0
+    while j < 50:
+        // Discarded temporary return value from function call
+        helper_alloc_string(j)
+        j = j + 1
+    return True
+
+fn test_discarded_list_literals() as bool:
+    var k as i32 = 0
+    while k < 30:
+        // Discarded list literal expression statement
+        [k, k + 1, k + 2]
+        k = k + 1
+    return True
+
+fn test_nested_interpolations() as bool:
+    var count as i32 = 0
+    while count < 50:
+        let msg as String = f"Step {count}: {count * 10}"
+        if msg.len > 0 to usize:
+            count = count + 1
+    return count == 50
+
+fn main() as i32:
+    let _1 as i32 = printf("Testing statement temporaries...\n" to cstr)
+    if not test_bound_interpolated_string():
+        let _e1 as i32 = printf("FAILED: test_bound_interpolated_string\n" to cstr)
+        return 1
+    let _p1 as i32 = printf("PASS: test_bound_interpolated_string\n" to cstr)
+
+    if not test_discarded_expression_statements():
+        let _e2 as i32 = printf("FAILED: test_discarded_expression_statements\n" to cstr)
+        return 2
+    let _p2 as i32 = printf("PASS: test_discarded_expression_statements\n" to cstr)
+
+    if not test_discarded_fn_call():
+        let _e4 as i32 = printf("FAILED: test_discarded_fn_call\n" to cstr)
+        return 4
+    let _p4 as i32 = printf("PASS: test_discarded_fn_call\n" to cstr)
+
+    if not test_discarded_list_literals():
+        let _e5 as i32 = printf("FAILED: test_discarded_list_literals\n" to cstr)
+        return 5
+    let _p5 as i32 = printf("PASS: test_discarded_list_literals\n" to cstr)
+
+    if not test_nested_interpolations():
+        let _e3 as i32 = printf("FAILED: test_nested_interpolations\n" to cstr)
+        return 3
+    let _p3 as i32 = printf("PASS: test_nested_interpolations\n" to cstr)
+
+    let _done as i32 = printf("All statement temporary tests passed!\n" to cstr)
+    return 0

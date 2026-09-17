@@ -57,6 +57,7 @@ TEST_FILES=(
     "src/tests/test_async_concurrency.mq"
     "src/tests/test_channels_actors.mq"
     "src/tests/test_closures_lambdas.mq"
+    "src/tests/test_statement_temporaries.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

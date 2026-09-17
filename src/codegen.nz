@@ -21,6 +21,14 @@ extern fn free(p as ptr)
 extern fn strlen(s as cstr) as usize
 extern fn fflush(stream as ptr) as i32
 
+// ── Statement Temporary Tracker FFI ──────────────────────────────────
+extern fn mantiq_temp_tracker_push(reg as cstr, llvm_type as cstr)
+extern fn mantiq_temp_tracker_consume(reg as cstr)
+extern fn mantiq_temp_tracker_count() as i64
+extern fn mantiq_temp_tracker_get_unconsumed_reg(idx as i64) as cstr
+extern fn mantiq_temp_tracker_get_unconsumed_type(idx as i64) as cstr
+extern fn mantiq_temp_tracker_clear()
+
 // ── Free Helpers ────────────────────────────────────────────────────────
 fn append_i32(sb as ptr[StringBuilder], val as i32):
     let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
@@ -818,6 +826,7 @@ struct LLVMCodegen:
         (deref self).py_module_aliases = Dict[String, String]()
         (deref self).string_intern_ids = Dict[String, i32]()
         (deref self).string_intern_lens = Dict[String, i64]()
+        mantiq_temp_tracker_clear()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         extern fn mantiq_codegen_temp(counter as i32) as ptr[u8]
@@ -837,6 +846,44 @@ struct LLVMCodegen:
         let _ as i32 = sprintf(buf, "__closure_%d" to cstr, (deref self).closure_counter)
         (deref self).closure_counter = (deref self).closure_counter + 1 to i32
         return buf
+
+    // ── Statement Temporary Lifecycle ─────────────────────────────────────────
+    public fn register_temp(self as ptr[LLVMCodegen], reg as ptr[u8], llvm_type as ptr[u8]):
+        if reg != None to ptr[u8] and (deref reg) != 0 to u8:
+            let ty_cstr as cstr = if llvm_type != None to ptr[u8]: llvm_type to cstr else: "ptr" to cstr
+            mantiq_temp_tracker_push(reg to cstr, ty_cstr)
+
+    public fn consume_temp(self as ptr[LLVMCodegen], reg as ptr[u8]):
+        if reg != None to ptr[u8] and (deref reg) != 0 to u8:
+            mantiq_temp_tracker_consume(reg to cstr)
+
+    public fn flush_statement_temps(self as ptr[LLVMCodegen]):
+        let unconsumed_count as i64 = mantiq_temp_tracker_count()
+        if unconsumed_count == 0 to i64:
+            return
+        var idx as i64 = 0 to i64
+        while idx < unconsumed_count:
+            let r_cstr as cstr = mantiq_temp_tracker_get_unconsumed_reg(idx)
+            let t_cstr as cstr = mantiq_temp_tracker_get_unconsumed_type(idx)
+            if r_cstr != None to cstr:
+                if t_cstr != None to cstr and (strcmp(t_cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(t_cstr, "{ ptr, i32, i32 }" to cstr) == 0):
+                    let p_ex as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, p_ex to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue ")
+                    append_cstr(ref (deref self).main_out, t_cstr)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, r_cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                    append_cstr(ref (deref self).main_out, p_ex to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                else:
+                    append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                    append_cstr(ref (deref self).main_out, r_cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
+            idx = idx + 1 to i64
+        mantiq_temp_tracker_clear()
 
     public fn trimmed(self as ptr[LLVMCodegen], t as String) as cstr:
         let d as ptr[u8] = t.data
@@ -2025,6 +2072,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).type_out, ")\n")
             (deref self).current_struct_name = saved_struct_name
             return
+        extern fn mantiq_temp_tracker_clear()
+        mantiq_temp_tracker_clear()
         var is_main as bool = strcmp(name.data to cstr, "main" to cstr) == 0
         if is_main and strcmp(ret_type.data to cstr, "void" to cstr) == 0:
             ret_type = String.make("i32" to cstr)
@@ -2194,6 +2243,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "  ret i32 0\n")
             elif t_idx >= 0 to i64 and (deref ((out_buf to usize + t_idx to usize) to ptr[u8])) == 58 to u8:
                 append_cstr(ref (deref self).main_out, "  unreachable\n")
+        mantiq_temp_tracker_clear()
         append_cstr(ref (deref self).main_out, "}\n\n")
         (deref self).current_struct_name = saved_struct_name
 
@@ -2477,6 +2527,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", ptr %")
             append_str(ref (deref self).main_out, slot_name)
             append_cstr(ref (deref self).main_out, "\n")
+            self.consume_temp(val_reg)
+            self.consume_temp(final_reg)
         else:
             append_cstr(ref (deref self).main_out, "  store ")
             append_str(ref (deref self).main_out, var_type)
@@ -3766,6 +3818,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, d_slot to cstr)
                 append_cstr(ref (deref self).main_out, "\n")
+                self.consume_temp(val_reg)
                 return
             var val_type as String = type_to_llvm(node_inferred_type(right))
             if node_kind(left) == NodeType.IndexExpr:
@@ -3874,6 +3927,7 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, target_ptr_reg to cstr)
             append_cstr(ref (deref self).main_out, "\n")
+            self.consume_temp(val_reg)
             return
 
         let is_compound as bool = strcmp(op.data to cstr, "+=" to cstr) == 0 or strcmp(op.data to cstr, "-=" to cstr) == 0 or strcmp(op.data to cstr, "*=" to cstr) == 0 or strcmp(op.data to cstr, "/=" to cstr) == 0 or strcmp(op.data to cstr, "%=" to cstr) == 0
@@ -3978,6 +4032,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, target_ptr_reg to cstr)
             append_cstr(ref (deref self).main_out, "\n")
+            self.consume_temp(right_reg)
+            self.consume_temp(res_reg)
             return
 
         let _ as ptr[u8] = self.emit_binary_expr(node)
@@ -4696,7 +4752,20 @@ struct LLVMCodegen:
         return reg
 
     public fn emit_call_stmt(self as ptr[LLVMCodegen], node as ptr[Node]):
-        let _ as ptr[u8] = self.emit_call_expr(node)
+        let ret_reg as ptr[u8] = self.emit_call_expr(node)
+        var ret_llvm as String = self.llvm_type(node_inferred_type(node))
+        if strcmp(ret_llvm.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(ret_llvm.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0:
+            let p_ex as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, p_ex to cstr)
+            append_cstr(ref (deref self).main_out, " = extractvalue ")
+            append_str(ref (deref self).main_out, ret_llvm)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, ret_reg to cstr)
+            append_cstr(ref (deref self).main_out, ", 0\n")
+            append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+            append_cstr(ref (deref self).main_out, p_ex to cstr)
+            append_cstr(ref (deref self).main_out, ")\n")
 
     public fn emit_call_expr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         if node == None to ptr[Node]:
@@ -8023,6 +8092,8 @@ struct LLVMCodegen:
                                 append_cstr(ref (deref self).main_out, ", ptr %")
                                 append_str(ref (deref self).main_out, r_slot)
                                 append_cstr(ref (deref self).main_out, "\n")
+                                self.consume_temp(val_reg)
+                                self.consume_temp(real_val)
                         ei = ei + 1 to i64
                 else:
                     let val_reg as ptr[u8] = self.emit_expr(val)
@@ -8056,7 +8127,10 @@ struct LLVMCodegen:
                             append_cstr(ref (deref self).main_out, ", ptr %")
                             append_str(ref (deref self).main_out, r_slot)
                             append_cstr(ref (deref self).main_out, "\n")
+                            self.consume_temp(val_reg)
+                            self.consume_temp(real_val)
 
+            self.flush_statement_temps()
             if (deref self).active_block_exit.len > 0 to usize:
                 append_cstr(ref (deref self).main_out, "  br label %")
                 append_str(ref (deref self).main_out, (deref self).active_block_exit)
@@ -8179,12 +8253,16 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, real_val to cstr)
                     append_cstr(ref (deref self).main_out, " to i32\n")
                     real_val = tr
+            self.consume_temp(val_reg)
+            self.consume_temp(real_val)
+            self.flush_statement_temps()
             append_cstr(ref (deref self).main_out, "  ret ")
             append_str(ref (deref self).main_out, ret_type)
             append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, real_val to cstr)
             append_cstr(ref (deref self).main_out, "\n")
         else:
+            self.flush_statement_temps()
             let cur_ret as String = (deref self).current_return_type
             if strcmp(cur_ret.data to cstr, "i32" to cstr) == 0:
                 append_cstr(ref (deref self).main_out, "  ret i32 0\n")
@@ -9443,6 +9521,7 @@ struct LLVMCodegen:
         var i as i64 = 0 to i64
         while i < count:
             self.emit_node(get_node_decl(ref stmts, i))
+            self.flush_statement_temps()
             i = i + 1 to i64
 
         var last_is_ret as bool = False
@@ -10249,6 +10328,7 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, " ")
         append_i64(ref (deref self).main_out, buf_size)
         append_cstr(ref (deref self).main_out, ", 2\n")
+        self.register_temp(list_temp3, slice_t to ptr[u8])
         return list_temp3
 
     public fn emit_dict_literal(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
@@ -10488,6 +10568,7 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, len_reg to cstr)
         append_cstr(ref (deref self).main_out, ", 2\n")
 
+        self.register_temp(dict_temp3, coll_st.data)
         return dict_temp3
 
     public fn emit_list_comprehension(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
@@ -10970,6 +11051,7 @@ struct LLVMCodegen:
 
             var new_ptr as ptr[u8] = "null" to ptr[u8]
             var new_len as ptr[u8] = "0" to ptr[u8]
+            var new_ptr_needs_free as bool = False
 
             let pk as TypeKind = (deref part_t).kind
             var is_fat_str as bool = False
@@ -11035,6 +11117,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, len_alloca to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
                 new_ptr = str_temp
+                new_ptr_needs_free = True
 
                 let len_load as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -11058,6 +11141,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, len_alloca to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
                 new_ptr = str_temp
+                new_ptr_needs_free = True
 
                 let len_load as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -11088,6 +11172,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, len_alloca to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
                 new_ptr = str_temp
+                new_ptr_needs_free = True
 
                 let len_load as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -11111,6 +11196,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, len_alloca to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
                 new_ptr = str_temp
+                new_ptr_needs_free = True
 
                 let len_load as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -11164,6 +11250,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, len_alloca to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
                 new_ptr = str_temp
+                new_ptr_needs_free = True
 
                 let len_load as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -11194,6 +11281,17 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", i64 ")
             append_cstr(ref (deref self).main_out, new_len to cstr)
             append_cstr(ref (deref self).main_out, ")\n")
+
+            if i > 0 to i64:
+                append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                append_cstr(ref (deref self).main_out, accum_ptr to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
+
+            if new_ptr_needs_free:
+                append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                append_cstr(ref (deref self).main_out, new_ptr to cstr)
+                append_cstr(ref (deref self).main_out, ")\n")
+
             accum_ptr = concat_temp
 
             let add_temp as ptr[u8] = self.fresh_temp()
@@ -11269,6 +11367,7 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, cap_to_insert to cstr)
         append_cstr(ref (deref self).main_out, ", 2\n")
 
+        self.register_temp(fat3, slice_t to ptr[u8])
         return fat3
 
     public fn emit_spawn_stmt(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
