@@ -38,7 +38,7 @@ fn append_f64(sb as ptr[StringBuilder], val as f64):
     (deref sb).append(buf to cstr)
 
 fn append_str(sb as ptr[StringBuilder], s as String):
-    (deref sb).append(s.data to cstr)
+    (deref sb).append_slice(s.data, s.len)
 
 fn append_cstr(sb as ptr[StringBuilder], s as cstr):
     (deref sb).append(s)
@@ -781,10 +781,10 @@ struct LLVMCodegen:
     public var string_intern_lens as Dict[String, i64]
 
     public fn init_cg(self as ptr[LLVMCodegen]):
-        (deref self).type_out = StringBuilder.make()
-        (deref self).outlined_out = StringBuilder.make()
-        (deref self).metadata_out = StringBuilder.make()
-        (deref self).main_out = StringBuilder.make()
+        (deref self).type_out = StringBuilder.make_with_capacity(262144 to usize)
+        (deref self).outlined_out = StringBuilder.make_with_capacity(65536 to usize)
+        (deref self).metadata_out = StringBuilder.make_with_capacity(65536 to usize)
+        (deref self).main_out = StringBuilder.make_with_capacity(1048576 to usize)
         (deref self).temp_counter = 1
         (deref self).label_counter = 1
         (deref self).string_counter = 1
@@ -820,19 +820,20 @@ struct LLVMCodegen:
         (deref self).string_intern_lens = Dict[String, i64]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
-        let buf as ptr[u8] = make(32 to usize) to ptr[u8]
-        let _ as i32 = sprintf(buf, "%%t.%d" to cstr, (deref self).temp_counter)
+        extern fn mantiq_codegen_temp(counter as i32) as ptr[u8]
+        let buf as ptr[u8] = mantiq_codegen_temp((deref self).temp_counter)
         (deref self).temp_counter = (deref self).temp_counter + 1 to i32
         return buf
 
     public fn fresh_label(self as ptr[LLVMCodegen]) as ptr[u8]:
-        let buf as ptr[u8] = make(32 to usize) to ptr[u8]
-        let _ as i32 = sprintf(buf, "label_%d" to cstr, (deref self).label_counter)
+        extern fn mantiq_codegen_label(counter as i32) as ptr[u8]
+        let buf as ptr[u8] = mantiq_codegen_label((deref self).label_counter)
         (deref self).label_counter = (deref self).label_counter + 1 to i32
         return buf
 
     public fn fresh_closure_name(self as ptr[LLVMCodegen]) as ptr[u8]:
-        let buf as ptr[u8] = make(64 to usize) to ptr[u8]
+        extern fn mantiq_codegen_alloc(size as usize) as ptr[u8]
+        let buf as ptr[u8] = mantiq_codegen_alloc(64 to usize)
         let _ as i32 = sprintf(buf, "__closure_%d" to cstr, (deref self).closure_counter)
         (deref self).closure_counter = (deref self).closure_counter + 1 to i32
         return buf
@@ -852,7 +853,8 @@ struct LLVMCodegen:
         if n == 0 to usize:
             return None to cstr
         extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
-        let buf as ptr[u8] = make[u8](n + 1 to usize) to ptr[u8]
+        extern fn mantiq_codegen_alloc(size as usize) as ptr[u8]
+        let buf as ptr[u8] = mantiq_codegen_alloc(n + 1 to usize)
         let src_addr as usize = (d to usize) + s
         let _m as ptr = memcpy(buf to ptr, src_addr to ptr, n)
         buf[n] = 0 to u8
@@ -1120,7 +1122,7 @@ struct LLVMCodegen:
         if (deref self).target.pointer_size == 4 to usize:
             self.register_builtin_struct("Target", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
-            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 } }")
+            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
@@ -1181,7 +1183,7 @@ struct LLVMCodegen:
         else:
             self.register_builtin_struct("Target", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, i32, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
-            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
@@ -1382,6 +1384,7 @@ struct LLVMCodegen:
         self.register_field_idx("Sema" to cstr, "engine" to cstr, 9 to i32)
         self.register_field_idx("Sema" to cstr, "link_targets" to cstr, 10 to i32)
         self.register_field_idx("Sema" to cstr, "loaded_module_paths" to cstr, 11 to i32)
+        self.register_field_idx("Sema" to cstr, "active_closure_depth" to cstr, 12 to i32)
 
         self.register_field_idx("TypeChecker" to cstr, "sema" to cstr, 0 to i32)
         self.register_field_idx("TypeChecker" to cstr, "current_function_return" to cstr, 1 to i32)
@@ -1555,6 +1558,12 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_realloc" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_free" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_set_profile_active" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_codegen_alloc" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_codegen_arena_reset" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_codegen_arena_destroy" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_codegen_temp" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_codegen_label" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_scope_lookup" to cstr), True)
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_isa(ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_malloc(i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_alloc_box32()\n")
@@ -1573,6 +1582,12 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_alloc(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_reset(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_destroy(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_codegen_alloc(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_codegen_arena_reset()\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_codegen_arena_destroy()\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_codegen_temp(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_codegen_label(i32)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_scope_lookup(ptr, ptr, ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_run_command_direct(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_realloc(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_set_profile_active(i32)\n")
@@ -3122,6 +3137,8 @@ struct LLVMCodegen:
                         field_idx = 10 to i32
                     elif strcmp(f_cstr, "loaded_module_paths" to cstr) == 0:
                         field_idx = 11 to i32
+                    elif strcmp(f_cstr, "active_closure_depth" to cstr) == 0:
+                        field_idx = 12 to i32
                 elif strcmp(s_cstr, "TypeChecker" to cstr) == 0:
                     if strcmp(f_cstr, "sema" to cstr) == 0:
                         field_idx = 0 to i32
@@ -11917,7 +11934,7 @@ struct LLVMCodegen:
         let saved_var_types as Dict[String, String] = (deref self).var_types
         (deref self).var_slots = Dict[String, String]()
         (deref self).var_types = Dict[String, String]()
-        (deref self).main_out = StringBuilder.make()
+        (deref self).main_out = StringBuilder.make_with_capacity(4096 to usize)
 
         append_cstr(ref (deref self).main_out, "define ")
         append_str(ref (deref self).main_out, ret_type)

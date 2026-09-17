@@ -250,6 +250,7 @@ struct Sema:
     public var engine as ptr[DiagnosticEngine]
     public var link_targets as List[String]
     public var loaded_module_paths as List[String]
+    public var active_closure_depth as i32
 
     public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
@@ -262,6 +263,7 @@ struct Sema:
         (deref self).engine = None to ptr[DiagnosticEngine]
         (deref self).link_targets = List[String]()
         (deref self).loaded_module_paths = List[String]()
+        (deref self).active_closure_depth = 0 to i32
         
         let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
@@ -323,24 +325,15 @@ struct Sema:
         return self.report_warning_with_code(code, msg, file_path, node_span(node))
 
     public fn lookup_symbol(self as ptr[Sema], name as String) as ptr[Symbol]:
-        var curr as ptr[Scope] = (deref self).current_scope
-        var visited_global as bool = False
-        while curr != None to ptr[Scope]:
-            if curr == (deref self).global_scope:
-                visited_global = True
-            let sym as ptr[Symbol] = (deref curr).symbols.get(name, None to ptr[Symbol])
-            if sym != None to ptr[Symbol]:
-                return sym
-            curr = (deref curr).parent
-        
-        if not visited_global and (deref self).global_scope != None to ptr[Scope]:
-            let gsym as ptr[Symbol] = (deref (deref self).global_scope).symbols.get(name, None to ptr[Symbol])
-            if gsym != None to ptr[Symbol]:
-                return gsym
-            
-        return None to ptr[Symbol]
+        if name.len == 0 to usize or name.data == None to ptr[u8]:
+            return None to ptr[Symbol]
+        extern fn __mantiq_scope_lookup(curr as ptr[u8], global_scope as ptr[u8], name_ptr as cstr, name_len as usize) as ptr[Symbol]
+        return __mantiq_scope_lookup((deref self).current_scope to ptr[u8], (deref self).global_scope to ptr[u8], name.data to cstr, name.len)
 
     public fn check_closure_capture(self as ptr[Sema], name as String, sym as ptr[Symbol]):
+        if (deref self).active_closure_depth == 0 to i32:
+            return
+
         let decl_node as ptr[Node] = (deref sym).decl_node
         if decl_node == None to ptr[Node]:
             return
@@ -1317,10 +1310,12 @@ struct Sema:
                 let parent_scope as ptr[Scope] = (deref self).current_scope
                 let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
                 (deref self).current_scope = child_scope
+                (deref self).active_closure_depth = (deref self).active_closure_depth + 1 to i32
 
                 if node_body(node) != None to ptr[Node]:
                     self.resolve_pass(node_body(node))
 
+                (deref self).active_closure_depth = (deref self).active_closure_depth - 1 to i32
                 let self_ref_pb2 as ptr[Sema] = self
                 (deref self_ref_pb2).current_scope = parent_scope
         elif nt == NodeType.VarDecl:
@@ -1346,9 +1341,11 @@ struct Sema:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
             (deref self).current_scope = child_scope
+            (deref self).active_closure_depth = (deref self).active_closure_depth + 1 to i32
 
             if node_body(node) != None to ptr[Node]:
                 self.resolve_pass(node_body(node))
+            (deref self).active_closure_depth = (deref self).active_closure_depth - 1 to i32
             let self_ref_ce2 as ptr[Sema] = self
             (deref self_ref_ce2).current_scope = parent_scope
         elif nt == NodeType.Identifier:
