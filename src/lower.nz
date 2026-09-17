@@ -17,23 +17,18 @@ extern fn fflush(f as ptr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 
 // ── String Slice Helper ──────────────────────────────────────────────────
+extern fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]
+
 fn slice_string(s_data as ptr[u8], s_len as usize, start as usize, end as usize) as ptr:
     if end <= start or start >= s_len:
-        let d as ptr[u8] = make[u8](1 to usize) to ptr[u8]
-        d[0] = 0 to u8
+        let d as ptr[u8] = mantiq_intern_string("" to cstr, 0 to usize)
         let res as ptr[String] = make[String](1 to usize) to ptr[String]
         (deref res) = String(data = d, len = 0 to usize, capacity = 1 to usize)
         return res to ptr
     let len as usize = end - start
-    let cap as usize = len + 1
-    let d as ptr[u8] = make[u8](cap) to ptr[u8]
-    var i as usize = 0 to usize
-    while i < len:
-        d[i] = s_data[start + i]
-        i = i + 1 to usize
-    d[len] = 0 to u8
+    let d as ptr[u8] = mantiq_intern_string((s_data to usize + start) to cstr, len)
     let res as ptr[String] = make[String](1 to usize) to ptr[String]
-    (deref res) = String(data = d, len = len, capacity = cap)
+    (deref res) = String(data = d, len = len, capacity = len + 1 to usize)
     return res to ptr
 
 fn strip_quotes(d as ptr[u8], len as usize) as String:
@@ -123,7 +118,7 @@ struct Lowerer:
         return slice_string((deref self).source_code.data, (deref self).source_code.len, start, end) to ptr[String]
 
     public fn lower_type_annotation(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[TypeAnnotation]:
-        let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+        let annot as ptr[TypeAnnotation] = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
         (deref annot).lifetime = Empty
         (deref annot).generics = Empty
         (deref annot).params = Empty
@@ -203,7 +198,7 @@ struct Lowerer:
             return self.lower_binary(ts_node)
         elif strcmp(kind, "super" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-            let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref data).name = String.make("super" to cstr)
             (deref n).data = data to ptr[u8]
             return n
@@ -213,7 +208,7 @@ struct Lowerer:
             drop(slice_ptr to ptr)
             if s_text.len >= 5 to usize and strncmp(s_text.data to cstr, "super" to cstr, 5 to usize) == 0:
                 let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-                let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+                let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
                 (deref data).name = String.make("super" to cstr)
                 (deref n).data = data to ptr[u8]
                 return n
@@ -274,7 +269,7 @@ struct Lowerer:
             return self.lower_try_stmt(ts_node)
         elif strcmp(kind, "pass_stmt" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.NumberLiteral, self.get_span(ts_node))
-            let data as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
+            let data as ptr[NumberLiteralData] = make_ast[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
             (deref data).val = 0 to f64
             (deref n).data = data to ptr[u8]
             return n
@@ -296,7 +291,7 @@ struct Lowerer:
             return self.lower_cast_expr(ts_node)
         elif strcmp(kind, "null_literal" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-            let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref data).name = String.make("None" to cstr)
             (deref n).data = data to ptr[u8]
             return n
@@ -307,7 +302,7 @@ struct Lowerer:
             let val as bool = c0 == 84 to u8 or c0 == 116 to u8
             drop(text to ptr)
             let n as ptr[Node] = make_node(NodeType.BooleanLiteral, self.get_span(ts_node))
-            let data as ptr[BooleanLiteralData] = make[BooleanLiteralData](1 to usize) to ptr[BooleanLiteralData]
+            let data as ptr[BooleanLiteralData] = make_ast[BooleanLiteralData](1 to usize) to ptr[BooleanLiteralData]
             if val:
                 (deref data).val = 1 to f64
             else:
@@ -324,14 +319,14 @@ struct Lowerer:
                     q_val = 1.0
             drop(text to ptr)
             let n as ptr[Node] = make_node(NodeType.CallExpr, self.get_span(ts_node))
-            let data as ptr[CallExprData] = make[CallExprData](1 to usize) to ptr[CallExprData]
+            let data as ptr[CallExprData] = make_ast[CallExprData](1 to usize) to ptr[CallExprData]
             let callee as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-            let cdata as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let cdata as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref cdata).name = String.make("qbit" to cstr)
             (deref callee).data = cdata to ptr[u8]
             (deref data).left = callee
             let arg_n as ptr[Node] = make_node(NodeType.NumberLiteral, self.get_span(ts_node))
-            let arg_d as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
+            let arg_d as ptr[NumberLiteralData] = make_ast[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
             (deref arg_d).val = q_val
             (deref arg_d).is_float = False
             (deref arg_n).data = arg_d to ptr[u8]
@@ -346,7 +341,7 @@ struct Lowerer:
             let name as String = deref slice_ptr
             drop(slice_ptr to ptr)
             let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-            let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref data).name = name
             (deref n).data = data to ptr[u8]
             return n
@@ -380,7 +375,7 @@ struct Lowerer:
             return None to ptr[Node]
 
         let n as ptr[Node] = make_node(NodeType.Identifier, self.get_span(ts_node))
-        let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+        let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
         (deref data).name = String.make("UNSUPPORTED" to cstr)
         (deref n).data = data to ptr[u8]
         return n
@@ -409,7 +404,7 @@ struct Lowerer:
                     if ts_node_is_named_ptr(ref child):
                         let branch as ptr[Node] = self.lower_if_branch(ref child)
                         let if_node as ptr[Node] = make_node(NodeType.IfStmt, self.get_span(ref child))
-                        let if_data as ptr[IfStmtData] = make[IfStmtData](1 to usize) to ptr[IfStmtData]
+                        let if_data as ptr[IfStmtData] = make_ast[IfStmtData](1 to usize) to ptr[IfStmtData]
                         (deref if_data).cond = temp_cond
                         (deref if_data).then_branch = branch
                         (deref if_data).else_branch = Empty
@@ -453,7 +448,7 @@ struct Lowerer:
                         stmts.append(stmt)
                 i = i + 1 to u32
             let n as ptr[Node] = make_node(NodeType.BlockStmt, self.get_span(ts_node))
-            let data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+            let data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
             (deref data).declarations = stmts
             (deref data).auto_drops = List[String]()
             (deref n).data = data to ptr[u8]
@@ -506,7 +501,7 @@ struct Lowerer:
                                     elif saw_is and is_var_node != None to ptr[Node] and is_type_node == None to ptr[Node]:
                                         is_type_node = self.lower_node(ref cc)
                                         let is_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
-                                        let is_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                                        let is_data as ptr[BinaryExprData] = make_ast[BinaryExprData](1 to usize) to ptr[BinaryExprData]
                                         (deref is_data).op = String.make("is" to cstr)
                                         (deref is_data).left = is_var_node
                                         (deref is_data).right = is_type_node
@@ -522,7 +517,7 @@ struct Lowerer:
                             var case_pat as ptr[Node] = pattern
                             if guard != None to ptr[Node]:
                                 let g_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
-                                let g_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                                let g_data as ptr[BinaryExprData] = make_ast[BinaryExprData](1 to usize) to ptr[BinaryExprData]
                                 (deref g_data).op = String.make("if" to cstr)
                                 (deref g_data).left = pattern
                                 (deref g_data).right = guard
@@ -530,7 +525,7 @@ struct Lowerer:
                                 case_pat = g_node
 
                             let c_node as ptr[Node] = make_node(NodeType.BinaryExpr, self.get_span(ref child))
-                            let c_data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+                            let c_data as ptr[BinaryExprData] = make_ast[BinaryExprData](1 to usize) to ptr[BinaryExprData]
                             (deref c_data).op = String.make("case" to cstr)
                             (deref c_data).left = case_pat
                             (deref c_data).right = body
@@ -541,7 +536,7 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.MatchStmt, span)
-        let data as ptr[MatchStmtData] = make[MatchStmtData](1 to usize) to ptr[MatchStmtData]
+        let data as ptr[MatchStmtData] = make_ast[MatchStmtData](1 to usize) to ptr[MatchStmtData]
         (deref data).left = subject
         (deref data).declarations = cases
         (deref n).data = data to ptr[u8]
@@ -558,7 +553,7 @@ struct Lowerer:
         let cond_node as ptr[Node] = self.lower_node(ref cond_child)
         let else_node as ptr[Node] = self.lower_node(ref else_child)
         let n as ptr[Node] = make_node(NodeType.IfStmt, self.get_span(ts_node))
-        let data as ptr[IfStmtData] = make[IfStmtData](1 to usize) to ptr[IfStmtData]
+        let data as ptr[IfStmtData] = make_ast[IfStmtData](1 to usize) to ptr[IfStmtData]
         (deref data).cond = cond_node
         (deref data).then_branch = then_node
         (deref data).else_branch = Some(else_node)
@@ -585,26 +580,26 @@ struct Lowerer:
             idx = idx + 1 to u32
         if strcmp(op_type, "await" to cstr) == 0 or strcmp(op_type, "async" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.AwaitExpr, self.get_span(ts_node))
-            let data as ptr[AwaitExprData] = make[AwaitExprData](1 to usize) to ptr[AwaitExprData]
+            let data as ptr[AwaitExprData] = make_ast[AwaitExprData](1 to usize) to ptr[AwaitExprData]
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "spawn" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.SpawnStmt, self.get_span(ts_node))
-            let data as ptr[SpawnStmtData] = make[SpawnStmtData](1 to usize) to ptr[SpawnStmtData]
+            let data as ptr[SpawnStmtData] = make_ast[SpawnStmtData](1 to usize) to ptr[SpawnStmtData]
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "kw_not" to cstr) == 0 or strcmp(op_type, "not" to cstr) == 0 or strcmp(op_type, "!" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = String.make("not" to cstr)
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "-" to cstr) == 0 or strcmp(op_type, "+" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = String.make(op_type)
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
@@ -630,28 +625,28 @@ struct Lowerer:
             if is_mut:
                 op_str = String.make("ref mut" to cstr)
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = op_str
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "deref" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = String.make("deref" to cstr)
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "~" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = String.make("~" to cstr)
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
             return n
         elif strcmp(op_type, "size" to cstr) == 0:
             let n as ptr[Node] = make_node(NodeType.UnaryExpr, self.get_span(ts_node))
-            let data as ptr[UnaryExprData] = make[UnaryExprData](1 to usize) to ptr[UnaryExprData]
+            let data as ptr[UnaryExprData] = make_ast[UnaryExprData](1 to usize) to ptr[UnaryExprData]
             (deref data).op = String.make("size" to cstr)
             (deref data).left = operand
             (deref n).data = data to ptr[u8]
@@ -670,7 +665,7 @@ struct Lowerer:
                 break
             i = i + 1 to u32
         let n as ptr[Node] = make_node(NodeType.SpawnStmt, self.get_span(ts_node))
-        let data as ptr[SpawnStmtData] = make[SpawnStmtData](1 to usize) to ptr[SpawnStmtData]
+        let data as ptr[SpawnStmtData] = make_ast[SpawnStmtData](1 to usize) to ptr[SpawnStmtData]
         (deref data).left = call_expr
         (deref n).data = data to ptr[u8]
         return n
@@ -703,7 +698,7 @@ struct Lowerer:
                 drop(slice_ptr to ptr)
             elif strcmp(child_type, "type_annotation" to cstr) == 0 and is_for:
                 let annot as ptr[TypeAnnotation] = self.lower_type_annotation(ref child)
-                let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                let wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                 (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                 (deref wrapper).list.append(Some(annot))
             elif strcmp(child_type, "kw_in" to cstr) == 0 or strcmp(child_type, "in" to cstr) == 0:
@@ -729,7 +724,7 @@ struct Lowerer:
 
         if is_for and iterable_node != None to ptr[Node] and yield_expr != None to ptr[Node]:
             let n as ptr[Node] = make_node(NodeType.ListComprehension, self.get_span(ts_node))
-            let data as ptr[ListComprehensionData] = make[ListComprehensionData](1 to usize) to ptr[ListComprehensionData]
+            let data as ptr[ListComprehensionData] = make_ast[ListComprehensionData](1 to usize) to ptr[ListComprehensionData]
             (deref data).name = iter_name
             (deref data).left = iterable_node
             (deref data).cond = condition
@@ -740,7 +735,7 @@ struct Lowerer:
 
         if is_if and if_cond != None to ptr[Node] and if_then != None to ptr[Node]:
             let n as ptr[Node] = make_node(NodeType.IfStmt, self.get_span(ts_node))
-            let data as ptr[IfStmtData] = make[IfStmtData](1 to usize) to ptr[IfStmtData]
+            let data as ptr[IfStmtData] = make_ast[IfStmtData](1 to usize) to ptr[IfStmtData]
             (deref data).cond = if_cond
             (deref data).then_branch = if_then
             if if_else != None to ptr[Node]:
@@ -791,7 +786,7 @@ struct Lowerer:
                 return first_item
 
         let n as ptr[Node] = make_node(NodeType.ListLiteral, self.get_span(ts_node))
-        let data as ptr[ListLiteralData] = make[ListLiteralData](1 to usize) to ptr[ListLiteralData]
+        let data as ptr[ListLiteralData] = make_ast[ListLiteralData](1 to usize) to ptr[ListLiteralData]
         (deref data).declarations = elements
         (deref n).data = data to ptr[u8]
         return n
@@ -838,7 +833,7 @@ struct Lowerer:
                     a = a + 1 to u32
             i = i + 1 to u32
         let n as ptr[Node] = make_node(NodeType.DictLiteral, self.get_span(ts_node))
-        let data as ptr[DictLiteralData] = make[DictLiteralData](1 to usize) to ptr[DictLiteralData]
+        let data as ptr[DictLiteralData] = make_ast[DictLiteralData](1 to usize) to ptr[DictLiteralData]
         (deref data).declarations = items
         (deref n).data = data to ptr[u8]
         return n
@@ -857,7 +852,7 @@ struct Lowerer:
         if iterable == None to ptr[Node]:
             return None to ptr[Node]
         let n as ptr[Node] = make_node(NodeType.SpreadExpr, self.get_span(ts_node))
-        let data as ptr[SpreadExprData] = make[SpreadExprData](1 to usize) to ptr[SpreadExprData]
+        let data as ptr[SpreadExprData] = make_ast[SpreadExprData](1 to usize) to ptr[SpreadExprData]
         (deref data).left = iterable
         (deref n).data = data to ptr[u8]
         return n
@@ -896,7 +891,7 @@ struct Lowerer:
                 let final_text as String = unescaped_sb.to_string()
                 unescaped_sb.deinit()
                 let n as ptr[Node] = make_node(NodeType.StringLiteral, self.get_span(ref child))
-                let data as ptr[StringLiteralData] = make[StringLiteralData](1 to usize) to ptr[StringLiteralData]
+                let data as ptr[StringLiteralData] = make_ast[StringLiteralData](1 to usize) to ptr[StringLiteralData]
                 (deref data).str_val = final_text
                 (deref n).data = data to ptr[u8]
                 parts.append(n)
@@ -914,7 +909,7 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.InterpolatedString, self.get_span(ts_node))
-        let data as ptr[InterpolatedStringData] = make[InterpolatedStringData](1 to usize) to ptr[InterpolatedStringData]
+        let data as ptr[InterpolatedStringData] = make_ast[InterpolatedStringData](1 to usize) to ptr[InterpolatedStringData]
         (deref data).declarations = parts
         (deref n).data = data to ptr[u8]
         return n
@@ -942,7 +937,7 @@ struct Lowerer:
         let object as ptr[Node] = self.lower_node(ref object_node)
         let index as ptr[Node] = self.lower_node(ref index_node)
         let n as ptr[Node] = make_node(NodeType.IndexExpr, self.get_span(ts_node))
-        let data as ptr[IndexExprData] = make[IndexExprData](1 to usize) to ptr[IndexExprData]
+        let data as ptr[IndexExprData] = make_ast[IndexExprData](1 to usize) to ptr[IndexExprData]
         (deref data).left = object
         (deref data).right = index
         (deref n).data = data to ptr[u8]
@@ -967,7 +962,7 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.Program, span)
-        let data as ptr[ProgramData] = make[ProgramData](1 to usize) to ptr[ProgramData]
+        let data as ptr[ProgramData] = make_ast[ProgramData](1 to usize) to ptr[ProgramData]
         (deref data).declarations = decls
         (deref n).data = data to ptr[u8]
         return n
@@ -979,11 +974,11 @@ struct Lowerer:
         let return_names as List[String] = List[String]()
         var has_params_or_returns as bool = False
 
-        let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
         let param_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
 
-        let r_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let r_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref r_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
         let return_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref r_wrapper).list
 
@@ -1011,7 +1006,7 @@ struct Lowerer:
                                 if not ts_node_is_null_ptr(ref p_name_node):
                                     let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref p_name_node) to usize, ts_node_end_byte_ptr(ref p_name_node) to usize) to ptr[String]
                                     let param_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref p_name_node))
-                                    let param_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                    let param_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                     (deref param_data).name = deref p_slice
                                     (deref param_data).left = None to ptr[Node]
                                     (deref param_data).is_mut = False
@@ -1028,7 +1023,7 @@ struct Lowerer:
                             elif strcmp(p_kind, "identifier" to cstr) == 0:
                                 let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref p_child) to usize, ts_node_end_byte_ptr(ref p_child) to usize) to ptr[String]
                                 let param_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref p_child))
-                                let param_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                let param_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                 (deref param_data).name = deref p_slice
                                 (deref param_data).left = None to ptr[Node]
                                 (deref param_data).is_mut = False
@@ -1108,14 +1103,14 @@ struct Lowerer:
             i = i + 1 to u32
 
         let block_body as ptr[Node] = make_node(NodeType.BlockStmt, span)
-        let b_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        let b_data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
         (deref b_data).declarations = stmts
         (deref b_data).auto_drops = List[String]()
         (deref block_body).data = b_data to ptr[u8]
 
         if has_params_or_returns:
             let param_block as ptr[Node] = make_node(NodeType.ParamBlockStmt, span)
-            let pb_data as ptr[ParamBlockStmtData] = make[ParamBlockStmtData](1 to usize) to ptr[ParamBlockStmtData]
+            let pb_data as ptr[ParamBlockStmtData] = make_ast[ParamBlockStmtData](1 to usize) to ptr[ParamBlockStmtData]
             (deref pb_data).params = params
             (deref pb_data).body = block_body
             (deref pb_data).return_names = return_names
@@ -1139,7 +1134,7 @@ struct Lowerer:
         var access_mod as String = String.make("public" to cstr)
         var is_mut as bool = True
         
-        let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
         let annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper).list
         
@@ -1197,7 +1192,7 @@ struct Lowerer:
                 (deref annots_list_ptr).append(Empty)
 
         let n as ptr[Node] = make_node(NodeType.VarDecl, span)
-        let data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+        let data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
         (deref data).name = name
         (deref data).left = left
         (deref data).is_mut = is_mut
@@ -1213,7 +1208,7 @@ struct Lowerer:
         drop(slice_ptr to ptr)
 
         let n as ptr[Node] = make_node(NodeType.Identifier, span)
-        let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+        let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
         (deref data).name = slice_str
         (deref n).data = data to ptr[u8]
         return n
@@ -1226,7 +1221,7 @@ struct Lowerer:
         drop(slice_ptr to ptr)
 
         let n as ptr[Node] = make_node(NodeType.NumberLiteral, span)
-        let data as ptr[NumberLiteralData] = make[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
+        let data as ptr[NumberLiteralData] = make_ast[NumberLiteralData](1 to usize) to ptr[NumberLiteralData]
         (deref data).val = val
         extern fn strchr(s as cstr, c as i32) as cstr
         let is_flt as bool = strchr(num_str.data to cstr, '.' to i32) != None to cstr
@@ -1241,7 +1236,7 @@ struct Lowerer:
         drop(slice_ptr to ptr)
         
         let n as ptr[Node] = make_node(NodeType.StringLiteral, span)
-        let data as ptr[StringLiteralData] = make[StringLiteralData](1 to usize) to ptr[StringLiteralData]
+        let data as ptr[StringLiteralData] = make_ast[StringLiteralData](1 to usize) to ptr[StringLiteralData]
         (deref data).str_val = slice_str
         (deref n).data = data to ptr[u8]
         return n
@@ -1299,7 +1294,7 @@ struct Lowerer:
         drop(slice_ptr to ptr)
         let argb as u64 = ((a to u64) * 16777216 to u64) + ((r to u64) * 65536 to u64) + ((g to u64) * 256 to u64) + (b to u64)
         let n as ptr[Node] = make_node(NodeType.ColorLiteral, span)
-        let data as ptr[ColorLiteralData] = make[ColorLiteralData](1 to usize) to ptr[ColorLiteralData]
+        let data as ptr[ColorLiteralData] = make_ast[ColorLiteralData](1 to usize) to ptr[ColorLiteralData]
         (deref data).val = argb to f64
         (deref data).r = r to u8
         (deref data).g = g to u8
@@ -1331,7 +1326,7 @@ struct Lowerer:
         drop(slice_ptr to ptr)
 
         let n as ptr[Node] = make_node(NodeType.BinaryExpr, span)
-        let data as ptr[BinaryExprData] = make[BinaryExprData](1 to usize) to ptr[BinaryExprData]
+        let data as ptr[BinaryExprData] = make_ast[BinaryExprData](1 to usize) to ptr[BinaryExprData]
         (deref data).op = op_str
         (deref data).left = self.lower_node(ref left)
         (deref data).right = self.lower_node(ref right)
@@ -1394,7 +1389,7 @@ struct Lowerer:
         (deref self).macros[name] = m_def
         
         let n as ptr[Node] = make_node(NodeType.MacroDecl, span)
-        let data as ptr[MacroDeclData] = make[MacroDeclData](1 to usize) to ptr[MacroDeclData]
+        let data as ptr[MacroDeclData] = make_ast[MacroDeclData](1 to usize) to ptr[MacroDeclData]
         (deref data).name = name
         (deref data).params = List[ptr[Node]]()
         (deref data).body = body_ast
@@ -1521,7 +1516,7 @@ struct Lowerer:
         
         if nt == NodeType.Identifier:
             let res as ptr[Node] = make_node(NodeType.Identifier, span_val)
-            let res_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let res_data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref res_data).name = node_name(node)
             (deref res).data = res_data to ptr[u8]
             return res
@@ -1589,7 +1584,7 @@ struct Lowerer:
                 return self.clone_ast(arg)
             
             let res as ptr[Node] = make_node(NodeType.Identifier, span_val)
-            let res_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let res_data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref res_data).name = self.mangle_name(name, hygiene_id, locals)
             (deref res).data = res_data to ptr[u8]
             return res
@@ -1739,7 +1734,7 @@ struct Lowerer:
                 i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.CastExpr, span)
-        let data as ptr[CastExprData] = make[CastExprData](1 to usize) to ptr[CastExprData]
+        let data as ptr[CastExprData] = make_ast[CastExprData](1 to usize) to ptr[CastExprData]
         (deref data).op = target_name
         (deref data).left = operand_node
         (deref n).data = data to ptr[u8]
@@ -1778,11 +1773,11 @@ struct Lowerer:
                         // End of one param — create VarDecl
                         if cur_name.len > 0 to usize:
                             let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref lp_child))
-                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                            let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                             (deref p_data).name = cur_name
                             (deref p_data).left = None to ptr[Node]
                             (deref p_data).is_mut = False
-                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                            let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                             (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                             if cur_annot != None to ptr[TypeAnnotation]:
                                 (deref p_wrapper).list.append(Some(cur_annot))
@@ -1800,11 +1795,11 @@ struct Lowerer:
                 // Handle last param (no trailing comma)
                 if cur_name.len > 0 to usize:
                     let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref child))
-                    let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                    let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                     (deref p_data).name = cur_name
                     (deref p_data).left = None to ptr[Node]
                     (deref p_data).is_mut = False
-                    let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                    let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                     (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                     if cur_annot != None to ptr[TypeAnnotation]:
                         (deref p_wrapper).list.append(Some(cur_annot))
@@ -1823,10 +1818,10 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.ClosureExpr, span)
-        let data as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]
+        let data as ptr[ClosureExprData] = make_ast[ClosureExprData](1 to usize) to ptr[ClosureExprData]
         (deref data).params = params
         (deref data).body = body_ast
-        let annots_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let annots_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref annots_wrapper).list = type_annots_list
         (deref data).type_annots = ref (deref annots_wrapper).list
         (deref data).captured_vars = List[String]()
@@ -1892,11 +1887,11 @@ struct Lowerer:
                                         if strcmp(pd_kind2, "identifier" to cstr) == 0:
                                             let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref pd_child) to usize, ts_node_end_byte_ptr(ref pd_child) to usize) to ptr[String]
                                             let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
-                                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                            let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                             (deref p_data).name = deref p_slice
                                             (deref p_data).left = None to ptr[Node]
                                             (deref p_data).is_mut = False
-                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                                             (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                                             if annot != None to ptr[TypeAnnotation]:
                                                 (deref p_wrapper).list.append(Some(annot))
@@ -1926,7 +1921,7 @@ struct Lowerer:
                         ra_idx = ra_idx + 1 to u32
                     if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
                         let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
-                        ret_type_annot = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                        ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
                         (deref ret_type_annot).name = deref ra_slice
                         drop(ra_slice to ptr)
                         (deref ret_type_annot).lifetime = Empty
@@ -1943,10 +1938,10 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.ClosureExpr, span)
-        let data as ptr[ClosureExprData] = make[ClosureExprData](1 to usize) to ptr[ClosureExprData]
+        let data as ptr[ClosureExprData] = make_ast[ClosureExprData](1 to usize) to ptr[ClosureExprData]
         (deref data).params = params
         (deref data).body = body_ast
-        let annots_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let annots_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref annots_wrapper).list = type_annots_list
         (deref data).type_annots = ref (deref annots_wrapper).list
         (deref data).captured_vars = List[String]()
@@ -2113,12 +2108,12 @@ struct Lowerer:
                                         if strcmp(pd_kind, "identifier" to cstr) == 0 or strcmp(pd_kind, "self_reference" to cstr) == 0:
                                             let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref pd_child) to usize, ts_node_end_byte_ptr(ref pd_child) to usize) to ptr[String]
                                             let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
-                                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                            let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                             (deref p_data).name = deref p_slice
                                             (deref p_data).left = None to ptr[Node]
                                             (deref p_data).is_mut = is_param_mut
 
-                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                                             (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                                             if annot != None to ptr[TypeAnnotation]:
                                                 (deref p_wrapper).list.append(Some(annot))
@@ -2134,12 +2129,12 @@ struct Lowerer:
                             elif strcmp(tp_kind, "identifier" to cstr) == 0 or strcmp(tp_kind, "self" to cstr) == 0:
                                 let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref tp_child) to usize, ts_node_end_byte_ptr(ref tp_child) to usize) to ptr[String]
                                 let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref tp_child))
-                                let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                 (deref p_data).name = deref p_slice
                                 (deref p_data).left = None to ptr[Node]
                                 (deref p_data).is_mut = False
 
-                                let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                                 (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                                 let p_annots_list_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref p_wrapper).list
                                 (deref p_annots_list_ptr).append(Empty)
@@ -2155,7 +2150,7 @@ struct Lowerer:
                     let expr_node as ptr[Node] = self.lower_node(ref child)
                     if expr_node != None to ptr[Node]:
                         let ret_stmt as ptr[Node] = make_node(NodeType.ReturnStmt, self.get_span(ref child))
-                        let ret_data as ptr[ReturnStmtData] = make[ReturnStmtData](1 to usize) to ptr[ReturnStmtData]
+                        let ret_data as ptr[ReturnStmtData] = make_ast[ReturnStmtData](1 to usize) to ptr[ReturnStmtData]
                         (deref ret_data).body = expr_node
                         (deref ret_stmt).data = ret_data to ptr[u8]
                         body_ast = ret_stmt
@@ -2174,7 +2169,7 @@ struct Lowerer:
                         ra_idx = ra_idx + 1 to u32
                     if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
                         let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
-                        ret_type_annot = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                        ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
                         (deref ret_type_annot).name = deref ra_slice
                         drop(ra_slice to ptr)
                         (deref ret_type_annot).lifetime = Empty
@@ -2199,7 +2194,7 @@ struct Lowerer:
                 i2 = i2 + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.FunDecl, span)
-        let data as ptr[FunDeclData] = make[FunDeclData](1 to usize) to ptr[FunDeclData]
+        let data as ptr[FunDeclData] = make_ast[FunDeclData](1 to usize) to ptr[FunDeclData]
         (deref data).name = name
         (deref data).params = params
         if is_extern_fn:
@@ -2439,7 +2434,7 @@ struct Lowerer:
         text_str.deinit()
         
         let n as ptr[Node] = make_node(NodeType.ImportDecl, span)
-        let data as ptr[ImportDeclData] = make[ImportDeclData](1 to usize) to ptr[ImportDeclData]
+        let data as ptr[ImportDeclData] = make_ast[ImportDeclData](1 to usize) to ptr[ImportDeclData]
         (deref data).kind = kind
         (deref data).target = target
         (deref data).imported_symbols = imported_symbols
@@ -2485,13 +2480,13 @@ struct Lowerer:
             i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.CallExpr, span)
-        let data as ptr[CallExprData] = make[CallExprData](1 to usize) to ptr[CallExprData]
+        let data as ptr[CallExprData] = make_ast[CallExprData](1 to usize) to ptr[CallExprData]
         (deref data).left = callee
         (deref data).params = args
         (deref data).type_annots = None to ptr[List[Option[ptr[TypeAnnotation]]]]
         if has_generic and callee_start_byte > 0 to usize and generic_end_byte > callee_start_byte:
             let g_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, callee_start_byte, generic_end_byte) to ptr[String]
-            let g_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+            let g_annot as ptr[TypeAnnotation] = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
             (deref g_annot).name = deref g_slice
             (deref g_annot).lifetime = Empty
             (deref g_annot).generics = Empty
@@ -2500,7 +2495,7 @@ struct Lowerer:
             (deref g_annot).is_ref = False
             (deref g_annot).is_mut = False
             drop(g_slice to ptr)
-            let g_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+            let g_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
             (deref g_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
             let g_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref g_wrapper).list
             (deref g_annots_ptr).append(Some(g_annot))
@@ -2530,7 +2525,7 @@ struct Lowerer:
                         raise_val = self.lower_node(ref child)
                 i = i + 1 to u32
             let n as ptr[Node] = make_node(NodeType.ThrowStmt, span)
-            let data as ptr[ThrowStmtData] = make[ThrowStmtData](1 to usize) to ptr[ThrowStmtData]
+            let data as ptr[ThrowStmtData] = make_ast[ThrowStmtData](1 to usize) to ptr[ThrowStmtData]
             (deref data).left = raise_val
             (deref n).data = data to ptr[u8]
             return n
@@ -2539,7 +2534,7 @@ struct Lowerer:
             let is_break as bool = text_len >= 5 and text_ptr[span.start_byte to usize] == 98 to u8 and text_ptr[span.start_byte to usize + 1] == 114 to u8 and text_ptr[span.start_byte to usize + 2] == 101 to u8 and text_ptr[span.start_byte to usize + 3] == 97 to u8 and text_ptr[span.start_byte to usize + 4] == 107 to u8
             let is_continue as bool = text_len >= 8 and text_ptr[span.start_byte to usize] == 99 to u8 and text_ptr[span.start_byte to usize + 1] == 111 to u8 and text_ptr[span.start_byte to usize + 2] == 110 to u8 and text_ptr[span.start_byte to usize + 3] == 116 to u8
             let n as ptr[Node] = make_node(NodeType.Identifier, span)
-            let data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             if is_break:
                 (deref data).name = String.make("break" to cstr)
             elif is_continue:
@@ -2567,13 +2562,13 @@ struct Lowerer:
             return_val = return_vals[0]
         elif return_vals.length() > 1 to i64:
             let list_node as ptr[Node] = make_node(NodeType.ListLiteral, span)
-            let list_data as ptr[ListLiteralData] = make[ListLiteralData](1 to usize) to ptr[ListLiteralData]
+            let list_data as ptr[ListLiteralData] = make_ast[ListLiteralData](1 to usize) to ptr[ListLiteralData]
             (deref list_data).declarations = return_vals
             (deref list_node).data = list_data to ptr[u8]
             return_val = list_node
         
         let n as ptr[Node] = make_node(NodeType.ReturnStmt, span)
-        let data as ptr[ReturnStmtData] = make[ReturnStmtData](1 to usize) to ptr[ReturnStmtData]
+        let data as ptr[ReturnStmtData] = make_ast[ReturnStmtData](1 to usize) to ptr[ReturnStmtData]
         (deref data).body = return_val
         (deref data).auto_drops = List[String]()
         (deref n).data = data to ptr[u8]
@@ -2601,7 +2596,7 @@ struct Lowerer:
             i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.WhileStmt, span)
-        let data as ptr[WhileStmtData] = make[WhileStmtData](1 to usize) to ptr[WhileStmtData]
+        let data as ptr[WhileStmtData] = make_ast[WhileStmtData](1 to usize) to ptr[WhileStmtData]
         (deref data).cond = cond_node
         (deref data).body = body_node
         (deref n).data = data to ptr[u8]
@@ -2645,7 +2640,7 @@ struct Lowerer:
             i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.ForStmt, span)
-        let data as ptr[ForStmtData] = make[ForStmtData](1 to usize) to ptr[ForStmtData]
+        let data as ptr[ForStmtData] = make_ast[ForStmtData](1 to usize) to ptr[ForStmtData]
         (deref data).name = iter_name
         (deref data).left = iterable_node
         (deref data).body = body_node
@@ -2674,7 +2669,7 @@ struct Lowerer:
             i = i + 1 to u32
         
         let n as ptr[Node] = make_node(NodeType.MemberExpr, span)
-        let data as ptr[MemberExprData] = make[MemberExprData](1 to usize) to ptr[MemberExprData]
+        let data as ptr[MemberExprData] = make_ast[MemberExprData](1 to usize) to ptr[MemberExprData]
         (deref data).left = obj_node
         (deref data).name = prop_name
         (deref n).data = data to ptr[u8]
@@ -2711,7 +2706,7 @@ struct Lowerer:
             i = i + 1 to u32
             
         let n as ptr[Node] = make_node(NodeType.WithStmt, span)
-        let data as ptr[WithStmtData] = make[WithStmtData](1 to usize) to ptr[WithStmtData]
+        let data as ptr[WithStmtData] = make_ast[WithStmtData](1 to usize) to ptr[WithStmtData]
         (deref data).left = expr_node
         (deref data).name = var_name
         (deref data).body = body_node
@@ -2788,7 +2783,7 @@ struct Lowerer:
             i = i + 1 to u32
             
         let n as ptr[Node] = make_node(NodeType.TryStmt, span)
-        let data as ptr[TryStmtData] = make[TryStmtData](1 to usize) to ptr[TryStmtData]
+        let data as ptr[TryStmtData] = make_ast[TryStmtData](1 to usize) to ptr[TryStmtData]
         (deref data).left = body_node
         (deref data).name = err_var
         (deref data).body = catch_body
@@ -2852,13 +2847,13 @@ struct Lowerer:
             i = i + 1 to u32
 
         let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
-        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        let body_data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
         (deref body_data).declarations = body_stmts
         (deref body_data).auto_drops = List[String]()
         (deref body_node).data = body_data to ptr[u8]
 
         let n as ptr[Node] = make_node(NodeType.ClassDecl, span)
-        let data as ptr[ClassDeclData] = make[ClassDeclData](1 to usize) to ptr[ClassDeclData]
+        let data as ptr[ClassDeclData] = make_ast[ClassDeclData](1 to usize) to ptr[ClassDeclData]
         (deref data).name = name
         (deref data).target = base_name
         (deref data).imported_symbols = ifaces
@@ -2901,13 +2896,13 @@ struct Lowerer:
             i = i + 1 to u32
 
         let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
-        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        let body_data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
         (deref body_data).declarations = body_stmts
         (deref body_data).auto_drops = List[String]()
         (deref body_node).data = body_data to ptr[u8]
 
         let n as ptr[Node] = make_node(NodeType.InterfaceDecl, span)
-        let data as ptr[InterfaceDeclData] = make[InterfaceDeclData](1 to usize) to ptr[InterfaceDeclData]
+        let data as ptr[InterfaceDeclData] = make_ast[InterfaceDeclData](1 to usize) to ptr[InterfaceDeclData]
         (deref data).name = name
         (deref data).body = body_node
         (deref data).imported_symbols = List[String]()
@@ -2955,13 +2950,13 @@ struct Lowerer:
 
         // Build a BlockStmt for the body
         let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
-        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        let body_data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
         (deref body_data).declarations = body_stmts
         (deref body_data).auto_drops = List[String]()
         (deref body_node).data = body_data to ptr[u8]
 
         let n as ptr[Node] = make_node(NodeType.StructDecl, span)
-        let data as ptr[StructDeclData] = make[StructDeclData](1 to usize) to ptr[StructDeclData]
+        let data as ptr[StructDeclData] = make_ast[StructDeclData](1 to usize) to ptr[StructDeclData]
         (deref data).name = name
         (deref data).body = body_node
         (deref data).access_modifier = access_mod
@@ -3015,12 +3010,12 @@ struct Lowerer:
                                         if strcmp(pd_kind, "identifier" to cstr) == 0:
                                             let p_slice as ptr[String] = self.slice_string_from_node(ref pd_child)
                                             let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
-                                            let p_data as ptr[VarDeclData] = make[VarDeclData](1 to usize) to ptr[VarDeclData]
+                                            let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                             (deref p_data).name = deref p_slice
                                             (deref p_data).left = None to ptr[Node]
                                             (deref p_data).is_mut = False
 
-                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+                                            let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
                                             (deref p_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
                                             if annot != None to ptr[TypeAnnotation]:
                                                 (deref p_wrapper).list.append(Some(annot))
@@ -3038,7 +3033,7 @@ struct Lowerer:
 
         if params.length() > 0 to i64:
             let fn_node as ptr[Node] = make_node(NodeType.FunDecl, span)
-            let fn_data as ptr[FunDeclData] = make[FunDeclData](1 to usize) to ptr[FunDeclData]
+            let fn_data as ptr[FunDeclData] = make_ast[FunDeclData](1 to usize) to ptr[FunDeclData]
             (deref fn_data).name = name
             (deref fn_data).params = params
             (deref fn_data).body = None to ptr[Node]
@@ -3051,7 +3046,7 @@ struct Lowerer:
             return fn_node
         else:
             let id_node as ptr[Node] = make_node(NodeType.Identifier, span)
-            let id_data as ptr[IdentifierData] = make[IdentifierData](1 to usize) to ptr[IdentifierData]
+            let id_data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
             (deref id_data).name = name
             (deref id_node).data = id_data to ptr[u8]
             return id_node
@@ -3076,7 +3071,7 @@ struct Lowerer:
                     annot = self.lower_type_annotation(ref child)
                 elif strcmp(c_kind, "type_identifier" to cstr) == 0 or strcmp(c_kind, "primitive_type" to cstr) == 0 or strcmp(c_kind, "pointer_type" to cstr) == 0 or strcmp(c_kind, "generic_type" to cstr) == 0 or strcmp(c_kind, "identifier" to cstr) == 0:
                     let t_slice as ptr[String] = self.slice_string_from_node(ref child)
-                    annot = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                    annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
                     (deref annot).name = deref t_slice
                     (deref annot).is_ref = False
                     (deref annot).is_mut = False
@@ -3088,9 +3083,9 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.FieldDecl, span)
-        let data as ptr[FieldDeclData] = make[FieldDeclData](1 to usize) to ptr[FieldDeclData]
+        let data as ptr[FieldDeclData] = make_ast[FieldDeclData](1 to usize) to ptr[FieldDeclData]
         (deref data).name = name
-        let wrapper as ptr[TypeAnnotListWrapper] = make[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        let wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
         (deref wrapper).list = List[Option[ptr[TypeAnnotation]]]()
         if annot != None to ptr[TypeAnnotation]:
             (deref wrapper).list.append(Some(annot))
@@ -3145,7 +3140,7 @@ struct Lowerer:
             i = i + 1 to u32
 
         let n as ptr[Node] = make_node(NodeType.EnumDecl, span)
-        let data as ptr[EnumDeclData] = make[EnumDeclData](1 to usize) to ptr[EnumDeclData]
+        let data as ptr[EnumDeclData] = make_ast[EnumDeclData](1 to usize) to ptr[EnumDeclData]
         (deref data).name = name
         (deref data).declarations = declarations
         (deref n).data = data to ptr[u8]
@@ -3185,13 +3180,13 @@ struct Lowerer:
             i = i + 1 to u32
 
         let body_node as ptr[Node] = make_node(NodeType.BlockStmt, span)
-        let body_data as ptr[BlockStmtData] = make[BlockStmtData](1 to usize) to ptr[BlockStmtData]
+        let body_data as ptr[BlockStmtData] = make_ast[BlockStmtData](1 to usize) to ptr[BlockStmtData]
         (deref body_data).declarations = body_stmts
         (deref body_data).auto_drops = List[String]()
         (deref body_node).data = body_data to ptr[u8]
 
         let n as ptr[Node] = make_node(NodeType.UnionDecl, span)
-        let data as ptr[UnionDeclData] = make[UnionDeclData](1 to usize) to ptr[UnionDeclData]
+        let data as ptr[UnionDeclData] = make_ast[UnionDeclData](1 to usize) to ptr[UnionDeclData]
         (deref data).name = name
         (deref data).body = body_node
         (deref n).data = data to ptr[u8]

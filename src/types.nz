@@ -77,12 +77,12 @@ extern fn memset(ptr as ptr[u8], val as i32, num as usize) as ptr[u8]
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
 fn make_type(kind as TypeKind) as ptr[Type]:
-    let t as ptr[Type] = make[u8](256 to usize) to ptr[Type]
-    let _ as ptr[u8] = memset(t to ptr[u8], 0 to i32, 256 to usize)
+    let t as ptr[Type] = make_ast[Type](1 to usize) to ptr[Type]
     (deref t).kind = kind
     (deref t).payload = None to ptr[Type]
     (deref t).return_type = None to ptr[Type]
     return t
+
 
 fn make_ptr_type(element as ptr[Type]) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.RawPointer)

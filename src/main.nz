@@ -49,7 +49,9 @@ extern fn mantiq_sha256_file_hex(path as cstr, out_buf as ptr[u8]) as i32
 extern fn mantiq_mkdir_p(path as cstr) as i32
 extern fn mantiq_copy_file(src as cstr, dst as cstr) as i32
 extern fn mantiq_ast_arena_reset()
+extern fn mantiq_intern_reset()
 extern fn mantiq_set_profile_active(active as i32)
+
 
 // ── Performance Monitor ─────────────────────────────────────────────────
 extern fn mantiq_perf_now_ns() as i64
@@ -385,7 +387,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                                 let copy_ok as i32 = mantiq_copy_file(bin_full_path.data to cstr, out_file)
                                 if copy_ok != 0:
                                     mantiq_ast_arena_reset()
+                                    mantiq_intern_reset()
                                     return True
+
 
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
@@ -405,7 +409,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
         mantiq_ast_arena_reset()
+        mantiq_intern_reset()
         return False
+
 
     // ── Phase 2: Semantic Analysis ──
     let t1 as i64 = perf_begin(perf, "sema")
@@ -441,7 +447,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     if engine.has_errors():
         engine.emit_all_cached()
         mantiq_ast_arena_reset()
+        mantiq_intern_reset()
         return False
+
 
     // ── Phase 4.5: Dead Code Elimination ──
     let t_dce as i64 = perf_begin(perf, "dce")
@@ -494,7 +502,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         if f_ll == None to ptr:
             let _p2 as i32 = printf("Error: Failed to open LLVM IR file %s\n" to cstr, ll_path)
             mantiq_ast_arena_reset()
+            mantiq_intern_reset()
             return False
+
         let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
         fclose(f_ll)
         perf_end(perf, "write_ir", t5)
@@ -774,7 +784,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         free(pyi_buf to ptr)
 
     mantiq_ast_arena_reset()
+    mantiq_intern_reset()
     return res == 0
+
 
 // ── Check Pipeline (Syntax, Semantic, Types, Borrowck) ───────────────────
 fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr[PerfState]) as bool:
@@ -794,7 +806,9 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
     if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
         mantiq_ast_arena_reset()
+        mantiq_intern_reset()
         return False
+
 
     // ── Phase 2: Semantic Analysis ──
     let t1 as i64 = perf_begin(perf, "sema" to cstr)
@@ -830,10 +844,13 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
     if engine.has_errors():
         engine.emit_all_cached()
         mantiq_ast_arena_reset()
+        mantiq_intern_reset()
         return False
 
     mantiq_ast_arena_reset()
+    mantiq_intern_reset()
     return True
+
 
 // ── CLI Driver ──────────────────────────────────────────────────────────
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
