@@ -1120,7 +1120,7 @@ struct LLVMCodegen:
         if (deref self).target.pointer_size == 4 to usize:
             self.register_builtin_struct("Target", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
-            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 } }")
+            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, ptr, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
@@ -1181,7 +1181,7 @@ struct LLVMCodegen:
         else:
             self.register_builtin_struct("Target", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, i32, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
-            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 } }")
+            self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
             self.register_builtin_struct("BorrowChecker", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, ptr, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
@@ -1381,6 +1381,7 @@ struct LLVMCodegen:
         self.register_field_idx("Sema" to cstr, "root_ast" to cstr, 8 to i32)
         self.register_field_idx("Sema" to cstr, "engine" to cstr, 9 to i32)
         self.register_field_idx("Sema" to cstr, "link_targets" to cstr, 10 to i32)
+        self.register_field_idx("Sema" to cstr, "loaded_module_paths" to cstr, 11 to i32)
 
         self.register_field_idx("TypeChecker" to cstr, "sema" to cstr, 0 to i32)
         self.register_field_idx("TypeChecker" to cstr, "current_function_return" to cstr, 1 to i32)
@@ -1536,6 +1537,13 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_await" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_malloc" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_alloc_box32" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_ast_alloc" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_ast_arena_reset" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_ast_arena_destroy" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_sha256_hex" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_sha256_file_hex" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_mkdir_p" to cstr), True)
+        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_copy_file" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_create" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_alloc" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_reset" to cstr), True)
@@ -1546,6 +1554,13 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_isa(ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_malloc(i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_alloc_box32()\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_ast_alloc(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_ast_arena_reset()\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_ast_arena_destroy()\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_sha256_hex(ptr, i64, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_sha256_file_hex(ptr, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_mkdir_p(ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_copy_file(ptr, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_create(i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_alloc(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_reset(ptr)\n")
@@ -3096,6 +3111,8 @@ struct LLVMCodegen:
                         field_idx = 9 to i32
                     elif strcmp(f_cstr, "link_targets" to cstr) == 0:
                         field_idx = 10 to i32
+                    elif strcmp(f_cstr, "loaded_module_paths" to cstr) == 0:
+                        field_idx = 11 to i32
                 elif strcmp(s_cstr, "TypeChecker" to cstr) == 0:
                     if strcmp(f_cstr, "sema" to cstr) == 0:
                         field_idx = 0 to i32
@@ -5073,7 +5090,8 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, " 0, 2\n")
                         return dict_iv2
                     return "zeroinitializer" to ptr[u8]
-                if strcmp(c_name.data to cstr, "make" to cstr) == 0:
+                let is_make_ast as bool = strcmp(c_name.data to cstr, "make_ast" to cstr) == 0
+                if strcmp(c_name.data to cstr, "make" to cstr) == 0 or is_make_ast:
                     var elem_s as i64 = 256 to i64
                     var elem_t as ptr[Type] = None to ptr[Type]
                     let call_ret_type as ptr[Type] = node_inferred_type(node)
@@ -5118,7 +5136,10 @@ struct LLVMCodegen:
                     let m_reg as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, m_reg to cstr)
-                    append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 ")
+                    if is_make_ast:
+                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_ast_alloc(i64 ")
+                    else:
+                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_malloc(i64 ")
                     append_cstr(ref (deref self).main_out, size_temp to cstr)
                     append_cstr(ref (deref self).main_out, ")\n")
                     return m_reg

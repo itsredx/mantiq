@@ -304,7 +304,7 @@ struct Node:
 
 // ── Node Factory ───────────────────────────────────────────────────────
 fn make_node(kind as NodeType, span as Span) as ptr[Node]:
-    let n as ptr[Node] = make[Node](1 to usize) to ptr[Node]
+    let n as ptr[Node] = make_ast[Node](1 to usize) to ptr[Node]
     let nk as NodeType = kind
     (deref n).kind = nk
     let sp as Span = span
@@ -312,89 +312,89 @@ fn make_node(kind as NodeType, span as Span) as ptr[Node]:
     (deref n).module_name = Empty
     (deref n).inferred_type = None to ptr[Type]
     if nk == NodeType.Program:
-        (deref n).data = make[ProgramData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ProgramData](1 to usize) to ptr[u8]
     elif nk == NodeType.ImportDecl:
-        (deref n).data = make[ImportDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ImportDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.FunDecl:
-        (deref n).data = make[FunDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[FunDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.VarDecl:
-        (deref n).data = make[VarDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[VarDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.IfStmt:
-        (deref n).data = make[IfStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[IfStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ClassDecl:
-        (deref n).data = make[ClassDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ClassDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.InterfaceDecl:
-        (deref n).data = make[InterfaceDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[InterfaceDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.BinaryExpr:
-        (deref n).data = make[BinaryExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[BinaryExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.Identifier:
-        (deref n).data = make[IdentifierData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[IdentifierData](1 to usize) to ptr[u8]
     elif nk == NodeType.NumberLiteral:
-        (deref n).data = make[NumberLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[NumberLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.StringLiteral:
-        (deref n).data = make[StringLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[StringLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.MacroDecl:
-        (deref n).data = make[MacroDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[MacroDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.MacroInvocation:
-        (deref n).data = make[MacroInvocationData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[MacroInvocationData](1 to usize) to ptr[u8]
     elif nk == NodeType.CallExpr:
-        (deref n).data = make[CallExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[CallExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.ReturnStmt:
-        (deref n).data = make[ReturnStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ReturnStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.WhileStmt:
-        (deref n).data = make[WhileStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[WhileStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ForStmt:
-        (deref n).data = make[ForStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ForStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.MemberExpr:
-        (deref n).data = make[MemberExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[MemberExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.UnaryExpr:
-        (deref n).data = make[UnaryExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[UnaryExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.CastExpr:
-        (deref n).data = make[CastExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[CastExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.BlockStmt:
-        (deref n).data = make[BlockStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[BlockStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ParamBlockStmt:
-        (deref n).data = make[ParamBlockStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ParamBlockStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.WithStmt:
-        (deref n).data = make[WithStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[WithStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.MatchStmt:
-        (deref n).data = make[MatchStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[MatchStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.TryStmt:
-        (deref n).data = make[TryStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[TryStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ThrowStmt:
-        (deref n).data = make[ThrowStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ThrowStmtData](1 to usize) to ptr[u8]
     elif nk == NodeType.ListLiteral:
-        (deref n).data = make[ListLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ListLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.DictLiteral:
-        (deref n).data = make[DictLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[DictLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.IndexExpr:
-        (deref n).data = make[IndexExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[IndexExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.SpreadExpr:
-        (deref n).data = make[SpreadExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[SpreadExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.BooleanLiteral:
-        (deref n).data = make[BooleanLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[BooleanLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.AwaitExpr:
-        (deref n).data = make[AwaitExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[AwaitExprData](1 to usize) to ptr[u8]
     elif nk == NodeType.ClosureExpr:
-        (deref n).data = make[ClosureExprData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ClosureExprData](1 to usize) to ptr[u8]
         let cd as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
         (deref cd).captured_vars = List[String]()
     elif nk == NodeType.StructDecl:
-        (deref n).data = make[StructDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[StructDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.EnumDecl:
-        (deref n).data = make[EnumDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[EnumDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.UnionDecl:
-        (deref n).data = make[UnionDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[UnionDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.FieldDecl:
-        (deref n).data = make[FieldDeclData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[FieldDeclData](1 to usize) to ptr[u8]
     elif nk == NodeType.ColorLiteral:
-        (deref n).data = make[ColorLiteralData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ColorLiteralData](1 to usize) to ptr[u8]
     elif nk == NodeType.ListComprehension:
-        (deref n).data = make[ListComprehensionData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[ListComprehensionData](1 to usize) to ptr[u8]
     elif nk == NodeType.InterpolatedString:
-        (deref n).data = make[InterpolatedStringData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[InterpolatedStringData](1 to usize) to ptr[u8]
     elif nk == NodeType.SpawnStmt:
-        (deref n).data = make[SpawnStmtData](1 to usize) to ptr[u8]
+        (deref n).data = make_ast[SpawnStmtData](1 to usize) to ptr[u8]
     else:
         (deref n).data = None to ptr[u8]
     return n

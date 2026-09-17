@@ -34,3 +34,4 @@ research/
 # Build distributions
 dist/
 build/
+.mantiq_cache/

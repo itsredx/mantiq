@@ -1472,7 +1472,7 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.I32)
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "qreg" to cstr) == 0:
                 ret_type = make_type(TypeKind.QReg)
-            elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and strcmp(node_name(callee).data to cstr, "make" to cstr) == 0:
+            elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "make" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "make_ast" to cstr) == 0):
                 ret_type = make_ptr_type(make_type(TypeKind.Any))
             elif callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and (strcmp(node_name(callee).data to cstr, "Channel" to cstr) == 0 or strcmp(node_name(callee).data to cstr, "channel" to cstr) == 0):
                 if generic_ctor_t != None to ptr[Type]:

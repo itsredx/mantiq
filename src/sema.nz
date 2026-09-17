@@ -30,7 +30,7 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
 
 // ── Scope & Symbol Creators ─────────────────────────────────────────────
 fn make_scope_with_capacity(parent as ptr[Scope], closure_node as ptr[Node], capacity as i32) as ptr[Scope]:
-    let s as ptr[Scope] = make[Scope](1 to usize) to ptr[Scope]
+    let s as ptr[Scope] = make_ast[Scope](1 to usize) to ptr[Scope]
     (deref s).parent = parent
     (deref s).symbols = Dict[String, ptr[Symbol]](capacity)
     (deref s).closure_node = closure_node
@@ -40,7 +40,7 @@ fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
     return make_scope_with_capacity(parent, closure_node, 8 to i32)
 
 fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as ptr[Symbol]:
-    let sym as ptr[Symbol] = make[Symbol](1 to usize) to ptr[Symbol]
+    let sym as ptr[Symbol] = make_ast[Symbol](1 to usize) to ptr[Symbol]
     (deref sym).name = name
     (deref sym).kind = kind
     (deref sym).decl_node = decl_node
@@ -249,6 +249,7 @@ struct Sema:
     public var root_ast as ptr[Node]
     public var engine as ptr[DiagnosticEngine]
     public var link_targets as List[String]
+    public var loaded_module_paths as List[String]
 
     public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
@@ -260,6 +261,7 @@ struct Sema:
         (deref self).root_ast = None to ptr[Node]
         (deref self).engine = None to ptr[DiagnosticEngine]
         (deref self).link_targets = List[String]()
+        (deref self).loaded_module_paths = List[String]()
         
         let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
@@ -274,6 +276,7 @@ struct Sema:
         (deref gs).symbols[String.make("Ok")] = make_symbol(String.make("Ok"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Err")] = make_symbol(String.make("Err"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("make")] = make_symbol(String.make("make"), SymbolKind.Function, None to ptr[Node])
+        (deref gs).symbols[String.make("make_ast")] = make_symbol(String.make("make_ast"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("drop")] = make_symbol(String.make("drop"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("range")] = make_symbol(String.make("range"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("print")] = make_symbol(String.make("print"), SymbolKind.Function, None to ptr[Node])
@@ -813,6 +816,7 @@ struct Sema:
         self.declare_pass(root_ast to ptr[Node])
         (deref self).loaded_modules[module_key] = mod_scope
         (deref self).module_asts[module_key] = root_ast
+        (deref self).loaded_module_paths.append(resolved_path)
         
         // Merge module declarations into root AST
         let root_prog as ptr[Node] = (deref self).root_ast
