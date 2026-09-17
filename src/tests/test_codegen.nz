@@ -167,7 +167,7 @@ fn main() -> i32:
     (deref cg13).init_cg()
     cg13.emit_auto_drops(cg_drops)
     let ir13 as String = (deref cg13).main_out.to_string()
-    if strstr(ir13.data to cstr, "mantiq_free" to cstr) != None to cstr:
+    if strstr(ir13.data to cstr, "mantiq_free" to cstr) != None to cstr or strstr(ir13.data to cstr, "__nizam_drop_" to cstr) != None to cstr:
         let p13 as i32 = printf("Test 13 (Scope Auto-Drops IR): PASSED!\n" to cstr)
     else:
         let p13f as i32 = printf("Test 13 (Scope Auto-Drops IR): FAILED!\n" to cstr)

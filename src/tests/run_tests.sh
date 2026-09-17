@@ -58,6 +58,7 @@ TEST_FILES=(
     "src/tests/test_channels_actors.mq"
     "src/tests/test_closures_lambdas.mq"
     "src/tests/test_statement_temporaries.nz"
+    "src/tests/test_recursive_drop_glue.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

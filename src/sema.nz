@@ -1524,6 +1524,7 @@ struct Sema:
                     self.resolve_pass(node_body(node))
                 let self_ref_sd2 as ptr[Sema] = self
                 (deref self_ref_sd2).current_scope = parent_scope
+            self.check_and_register_struct_drop(node)
         elif nt == NodeType.EnumDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             if (deref self).fn_scopes.has(node to usize):
@@ -1725,3 +1726,58 @@ struct Sema:
                 set_node_is_gil_independent(f_node, True)
 
             fi = fi + 1 to i64
+
+    public fn check_and_register_struct_drop(self as ptr[Sema], node as ptr[Node]):
+        let name as String = node_name(node)
+        if name.data == None to ptr[u8] or name.len == 0 to usize:
+            return
+        let s_cstr as cstr = name.data to cstr
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+        extern fn mantiq_type_set_needs_drop(type_name as cstr, needs_drop as i32)
+        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
+
+        if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0 or strcmp(s_cstr, "Set" to cstr) == 0:
+            mantiq_type_set_needs_drop(s_cstr, 1 to i32)
+            return
+
+        var needs_drop as bool = False
+        let body as ptr[Node] = node_body(node)
+        if body != None to ptr[Node]:
+            let decls as List[ptr[Node]] = node_declarations(body)
+            let count as i64 = decls.length()
+            var i as i64 = 0 to i64
+            while i < count and not needs_drop:
+                let decl as ptr[Node] = decls[i]
+                let dk as NodeType = node_kind(decl)
+                if dk == NodeType.FunDecl:
+                    let fn_name as String = node_name(decl)
+                    if fn_name.data != None to ptr[u8]:
+                        let fn_c as cstr = fn_name.data to cstr
+                        if strcmp(fn_c, "__del__" to cstr) == 0 or strcmp(fn_c, "deinit" to cstr) == 0:
+                            needs_drop = True
+                elif dk == NodeType.VarDecl or dk == NodeType.FieldDecl:
+                    let f_inf as ptr[Type] = node_inferred_type(decl)
+                    if f_inf != None to ptr[Type]:
+                        let fk as TypeKind = (deref f_inf).kind
+                        if fk == TypeKind.String or fk == TypeKind.List or fk == TypeKind.Dict:
+                            needs_drop = True
+                        elif fk == TypeKind.Struct:
+                            let f_sn as ptr[u8] = (deref f_inf).name.data
+                            if f_sn != None to ptr[u8] and mantiq_type_needs_drop(f_sn to cstr) != 0 to i32:
+                                needs_drop = True
+                    if not needs_drop:
+                        let ann_p as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(decl)
+                        if ann_p != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref ann_p).length() > 0 to i64:
+                            let opt_a as Option[ptr[TypeAnnotation]] = (deref ann_p)[0 to i64]
+                            let a_ref as ptr[OptionLayout] = (ref opt_a) to ptr[OptionLayout]
+                            if (deref a_ref).has_val == 1 to u8:
+                                let pa as ptr[TypeAnnotation] = (deref a_ref).val_ptr to ptr[TypeAnnotation]
+                                if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None to ptr[u8]:
+                                    let an as cstr = (deref pa).name.data to cstr
+                                    if strncmp(an, "String" to cstr, 6 to usize) == 0 or strncmp(an, "List" to cstr, 4 to usize) == 0 or strncmp(an, "Dict" to cstr, 4 to usize) == 0 or strncmp(an, "StringBuilder" to cstr, 13 to usize) == 0 or mantiq_type_needs_drop(an) != 0 to i32:
+                                        needs_drop = True
+                i = i + 1 to i64
+
+        if needs_drop:
+            mantiq_type_set_needs_drop(s_cstr, 1 to i32)

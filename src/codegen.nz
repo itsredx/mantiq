@@ -1730,11 +1730,21 @@ struct LLVMCodegen:
         if (deref self).target.pointer_size == 4 to usize:
             append_cstr(ref out, "declare ptr @malloc(i32)\n")
             append_cstr(ref out, "declare void @free(ptr)\n")
-            append_cstr(ref out, "declare void @mantiq_free(ptr)\n\n")
+            append_cstr(ref out, "declare void @mantiq_free(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_String(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_StringBuilder(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_Dict(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_List_flat(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_List(ptr, i32, ptr)\n\n")
         else:
             append_cstr(ref out, "declare ptr @malloc(i64)\n")
             append_cstr(ref out, "declare void @free(ptr)\n")
-            append_cstr(ref out, "declare void @mantiq_free(ptr)\n\n")
+            append_cstr(ref out, "declare void @mantiq_free(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_String(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_StringBuilder(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_Dict(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_List_flat(ptr)\n")
+            append_cstr(ref out, "declare void @__nizam_drop_List(ptr, i64, ptr)\n\n")
         if (deref self).type_out.buffer != None to ptr[u8]:
             append_cstr(ref out, (deref self).type_out.buffer to cstr)
         if (deref self).main_out.buffer != None to ptr[u8]:
@@ -2198,6 +2208,13 @@ struct LLVMCodegen:
             free(p_buf to ptr)
             set_dict_str(ref (deref self).type_aliases, p_key.to_string(), p_type)
             p_key.deinit()
+            let p_sem_t as String = self.compute_sem_type_name(node_inferred_type(p), p)
+            if p_sem_t.len > 0 to usize:
+                let p_sem_k as StringBuilder = StringBuilder.make()
+                append_cstr(ref p_sem_k, "__sem_type_" to cstr)
+                append_str(ref p_sem_k, p_name)
+                set_dict_str(ref (deref self).type_aliases, p_sem_k.to_string(), p_sem_t)
+                p_sem_k.deinit()
             let is_bv_p as bool = is_struct_byval(p_type)
             append_cstr(ref (deref self).main_out, "  %")
             append_str(ref (deref self).main_out, p_name)
@@ -2246,6 +2263,74 @@ struct LLVMCodegen:
         mantiq_temp_tracker_clear()
         append_cstr(ref (deref self).main_out, "}\n\n")
         (deref self).current_struct_name = saved_struct_name
+
+    public fn compute_sem_type_name(self as ptr[LLVMCodegen], t as ptr[Type], node as ptr[Node]) as String:
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+        extern fn strstr(haystack as cstr, needle as cstr) as cstr
+        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
+
+        if t != None to ptr[Type]:
+            let k as TypeKind = (deref t).kind
+            if k == TypeKind.String:
+                return String.make("String" to cstr)
+            if k == TypeKind.Dict:
+                return String.make("Dict" to cstr)
+            if k == TypeKind.List:
+                let pl as ptr[Type] = (deref t).payload
+                if pl != None to ptr[Type]:
+                    if (deref pl).kind == TypeKind.String:
+                        return String.make("List_String" to cstr)
+                    elif (deref pl).kind == TypeKind.Struct:
+                        let pl_n as String = (deref pl).name
+                        if pl_n.data != None to ptr[u8] and mantiq_type_needs_drop(pl_n.data to cstr) != 0 to i32:
+                            let b as StringBuilder = StringBuilder.make()
+                            append_cstr(ref b, "List_" to cstr)
+                            append_str(ref b, pl_n)
+                            let res as String = b.to_string()
+                            b.deinit()
+                            return res
+                        else:
+                            return String.make("List_flat" to cstr)
+                    else:
+                        return String.make("List_flat" to cstr)
+                return String.make("List_flat" to cstr)
+            if k == TypeKind.Struct:
+                let st_n as String = (deref t).name
+                if st_n.data != None to ptr[u8]:
+                    let st_c as cstr = st_n.data to cstr
+                    if strcmp(st_c, "StringBuilder" to cstr) == 0:
+                        return String.make("StringBuilder" to cstr)
+                    if strcmp(st_c, "String" to cstr) == 0:
+                        return String.make("String" to cstr)
+                    if strcmp(st_c, "Dict" to cstr) == 0:
+                        return String.make("Dict" to cstr)
+                    if mantiq_type_needs_drop(st_c) != 0 to i32:
+                        return st_n
+
+        if node != None to ptr[Node]:
+            let ann_p as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+            if ann_p != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref ann_p).length() > 0 to i64:
+                let opt_a as Option[ptr[TypeAnnotation]] = (deref ann_p)[0 to i64]
+                let a_ref as ptr[OptionLayout] = (ref opt_a) to ptr[OptionLayout]
+                if (deref a_ref).has_val == 1 to u8:
+                    let pa as ptr[TypeAnnotation] = (deref a_ref).val_ptr to ptr[TypeAnnotation]
+                    if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None to ptr[u8]:
+                        let an as cstr = (deref pa).name.data to cstr
+                        if strcmp(an, "String" to cstr) == 0:
+                            return String.make("String" to cstr)
+                        if strcmp(an, "StringBuilder" to cstr) == 0:
+                            return String.make("StringBuilder" to cstr)
+                        if strncmp(an, "Dict" to cstr, 4 to usize) == 0:
+                            return String.make("Dict" to cstr)
+                        if strncmp(an, "List" to cstr, 4 to usize) == 0:
+                            if strstr(an, "String" to cstr) != None to cstr:
+                                return String.make("List_String" to cstr)
+                            return String.make("List_flat" to cstr)
+                        if mantiq_type_needs_drop(an) != 0 to i32:
+                            return (deref pa).name
+
+        return String.make("" to cstr)
 
     public fn emit_var_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name_ptr as ptr[String] = node_name_ptr(node)
@@ -2352,6 +2437,22 @@ struct LLVMCodegen:
             slot_name = String.make(slot_buf to cstr)
         set_dict_str(ref (deref self).var_slots, var_name, slot_name)
         set_dict_str(ref (deref self).var_types, var_name, var_type)
+        set_dict_str(ref (deref self).var_types, slot_name, var_type)
+        var sem_t as String = self.compute_sem_type_name(node_inferred_type(node), node)
+        if sem_t.len == 0 to usize and init_node != None to ptr[Node]:
+            sem_t = self.compute_sem_type_name(node_inferred_type(init_node), init_node)
+        if sem_t.len > 0 to usize:
+            let sem_k as StringBuilder = StringBuilder.make()
+            append_cstr(ref sem_k, "__sem_type_" to cstr)
+            append_str(ref sem_k, slot_name)
+            set_dict_str(ref (deref self).type_aliases, sem_k.to_string(), sem_t)
+            sem_k.deinit()
+            if strcmp(slot_name.data to cstr, var_name.data to cstr) != 0:
+                let sem_k2 as StringBuilder = StringBuilder.make()
+                append_cstr(ref sem_k2, "__sem_type_" to cstr)
+                append_str(ref sem_k2, var_name)
+                set_dict_str(ref (deref self).type_aliases, sem_k2.to_string(), sem_t)
+                sem_k2.deinit()
         var is_pyobj as bool = False
         let v_inf_t as ptr[Type] = node_inferred_type(node)
         if v_inf_t != None to ptr[Type] and (deref v_inf_t).kind == TypeKind.PyObject:
@@ -5876,6 +5977,7 @@ struct LLVMCodegen:
                                     if elem_type != None to ptr[Type]:
                                         elem_s = type_size(elem_type)
                                     let elem_val as ptr[u8] = self.emit_expr(elem_node)
+                                    self.consume_temp(elem_val)
                                     var elem_t as String = String.make("ptr" to cstr)
                                     if elem_type != None to ptr[Type]:
                                         elem_t = type_to_llvm(elem_type)
@@ -5920,6 +6022,7 @@ struct LLVMCodegen:
                     if r_node != None to ptr[Node]:
                         arg_node = r_node
             var arg_val as ptr[u8] = self.emit_expr(arg_node)
+            self.consume_temp(arg_val)
             var arg_type as String = type_to_llvm(node_inferred_type(arg_node))
             let orig_arg_type as String = arg_type
             if strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
@@ -12259,6 +12362,10 @@ struct LLVMCodegen:
         return ret_reg
 
     public fn emit_auto_drops(self as ptr[LLVMCodegen], drops as List[String]):
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
+
         let count as i64 = drops.length()
         var i as i64 = 0 to i64
         while i < count:
@@ -12267,20 +12374,104 @@ struct LLVMCodegen:
             if (deref self).var_slots.has(var_name):
                 var_name = (deref self).var_slots[var_name]
             let is_py as bool = (deref self).pyobject_vars.has(var_name) or (deref self).pyobject_vars.has(orig_name)
-            let load_reg as ptr[u8] = self.fresh_temp()
-            append_cstr(ref (deref self).main_out, "  ")
-            append_cstr(ref (deref self).main_out, load_reg to cstr)
-            append_cstr(ref (deref self).main_out, " = load ptr, ptr %")
-            append_str(ref (deref self).main_out, var_name)
-            append_cstr(ref (deref self).main_out, "\n")
             if is_py:
+                let load_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, load_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = load ptr, ptr %")
+                append_str(ref (deref self).main_out, var_name)
+                append_cstr(ref (deref self).main_out, "\n")
                 append_cstr(ref (deref self).main_out, "  call void @mantiq_py_decref(ptr ")
                 append_cstr(ref (deref self).main_out, load_reg to cstr)
                 append_cstr(ref (deref self).main_out, ")\n")
             else:
-                append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
-                append_cstr(ref (deref self).main_out, load_reg to cstr)
-                append_cstr(ref (deref self).main_out, ")\n")
+                let sem_key as StringBuilder = StringBuilder.make()
+                append_cstr(ref sem_key, "__sem_type_" to cstr)
+                append_str(ref sem_key, var_name)
+                let sem_ks as String = sem_key.to_string()
+                sem_key.deinit()
+
+                var sem_t as String = String.make("" to cstr)
+                if (deref self).type_aliases.has(sem_ks):
+                    sem_t = (deref self).type_aliases[sem_ks]
+                else:
+                    let sem_key2 as StringBuilder = StringBuilder.make()
+                    append_cstr(ref sem_key2, "__sem_type_" to cstr)
+                    append_str(ref sem_key2, orig_name)
+                    let sem_ks2 as String = sem_key2.to_string()
+                    sem_key2.deinit()
+                    if (deref self).type_aliases.has(sem_ks2):
+                        sem_t = (deref self).type_aliases[sem_ks2]
+
+                var llvm_t as String = String.make("" to cstr)
+                if (deref self).var_types.has(var_name):
+                    llvm_t = (deref self).var_types[var_name]
+                elif (deref self).var_types.has(orig_name):
+                    llvm_t = (deref self).var_types[orig_name]
+
+                if sem_t.len > 0 to usize:
+                    let st_c as cstr = sem_t.data to cstr
+                    if strcmp(st_c, "String" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_String(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(st_c, "StringBuilder" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_StringBuilder(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(st_c, "Dict" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_Dict(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(st_c, "List_flat" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List_flat(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(st_c, "List_String" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        let elem_sz as i64 = if (deref self).target.pointer_size == 4 to usize: 12 to i64 else: 24 to i64
+                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_i64(ref (deref self).main_out, elem_sz)
+                        append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_String)\n")
+                    elif strncmp(st_c, "List_", 5 to usize) == 0:
+                        let elem_st_name as cstr = (sem_t.data to usize + 5 to usize) to cstr
+                        let elem_sz as i64 = self.resolve_struct_size(String.make(elem_st_name))
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_i64(ref (deref self).main_out, elem_sz)
+                        append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_")
+                        append_cstr(ref (deref self).main_out, elem_st_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif mantiq_type_needs_drop(st_c) != 0 to i32:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
+                        append_str(ref (deref self).main_out, sem_t)
+                        append_cstr(ref (deref self).main_out, "(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                elif llvm_t.len > 0 to usize and (deref llvm_t.data) == 37 to u8:
+                    let st_name as cstr = (llvm_t.data to usize + 1 to usize) to cstr
+                    if mantiq_type_needs_drop(st_name) != 0 to i32:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
+                        append_cstr(ref (deref self).main_out, st_name)
+                        append_cstr(ref (deref self).main_out, "(ptr %")
+                        append_str(ref (deref self).main_out, var_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                elif llvm_t.len > 0 to usize and (strcmp(llvm_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(llvm_t.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0):
+                    append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_String(ptr %")
+                    append_str(ref (deref self).main_out, var_name)
+                    append_cstr(ref (deref self).main_out, ")\n")
+                elif llvm_t.len == 0 to usize or strcmp(llvm_t.data to cstr, "ptr" to cstr) == 0:
+                    let load_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, load_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = load ptr, ptr %")
+                    append_str(ref (deref self).main_out, var_name)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
+                    append_cstr(ref (deref self).main_out, load_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ")\n")
             i = i + 1 to i64
 
     public fn populate_auto_drops_from_borrowck(self as ptr[LLVMCodegen], borroWck_auto_drops as Dict[usize, List[ptr[Symbol]]]):
@@ -12425,6 +12616,141 @@ struct LLVMCodegen:
             self.emit_struct_fields(node, name)
 
         self.emit_struct_methods(node)
+        self.emit_struct_drop_glue(node, name)
+
+    public fn emit_struct_drop_glue(self as ptr[LLVMCodegen], node as ptr[Node], name as String):
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+        extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
+
+        let n_cstr as cstr = name.data to cstr
+        if strcmp(n_cstr, "String" to cstr) == 0 or strcmp(n_cstr, "StringBuilder" to cstr) == 0 or strcmp(n_cstr, "List" to cstr) == 0 or strcmp(n_cstr, "Dict" to cstr) == 0 or strcmp(n_cstr, "Set" to cstr) == 0:
+            return
+
+        let glue_marker as StringBuilder = StringBuilder.make()
+        append_cstr(ref glue_marker, "__drop_emitted_" to cstr)
+        append_str(ref glue_marker, name)
+        let glue_m_s as String = glue_marker.to_string()
+        glue_marker.deinit()
+
+        if (deref self).defined_types.has(glue_m_s):
+            return
+        set_dict_bool(ref (deref self).defined_types, glue_m_s, True)
+
+        // Find body and check for custom destructor
+        var body_node as ptr[Node] = node_body(node)
+        if body_node == None to ptr[Node]:
+            body_node = node
+        let decls_list as List[ptr[Node]] = node_declarations(body_node)
+        let decls_ptr as ptr[List[ptr[Node]]] = ref decls_list
+        let count as i64 = (deref decls_ptr).length()
+
+        var has_custom_del as bool = False
+        var custom_del_name as String = String.make("" to cstr)
+
+        var d_i as i64 = 0 to i64
+        while d_i < count:
+            let d as ptr[Node] = get_node_decl(decls_ptr, d_i)
+            if d != None to ptr[Node] and node_kind(d) == NodeType.FunDecl:
+                let fn_n as String = node_name(d)
+                if fn_n.data != None to ptr[u8]:
+                    if strcmp(fn_n.data to cstr, "__del__" to cstr) == 0:
+                        has_custom_del = True
+                        let cdn_b as StringBuilder = StringBuilder.make()
+                        append_str(ref cdn_b, name)
+                        append_cstr(ref cdn_b, "___del__" to cstr)
+                        custom_del_name = cdn_b.to_string()
+                        cdn_b.deinit()
+                    elif strcmp(fn_n.data to cstr, "deinit" to cstr) == 0 and not has_custom_del:
+                        has_custom_del = True
+                        let cdn_b as StringBuilder = StringBuilder.make()
+                        append_str(ref cdn_b, name)
+                        append_cstr(ref cdn_b, "_deinit" to cstr)
+                        custom_del_name = cdn_b.to_string()
+                        cdn_b.deinit()
+            d_i = d_i + 1 to i64
+
+        // Begin drop function definition
+        append_cstr(ref (deref self).main_out, "define void @__nizam_drop_")
+        append_str(ref (deref self).main_out, name)
+        append_cstr(ref (deref self).main_out, "(ptr %self) {\nentry:\n")
+        append_cstr(ref (deref self).main_out, "  %is_null = icmp eq ptr %self, null\n")
+        append_cstr(ref (deref self).main_out, "  br i1 %is_null, label %exit, label %body\n\nbody:\n")
+
+        if has_custom_del:
+            append_cstr(ref (deref self).main_out, "  call void @")
+            append_str(ref (deref self).main_out, custom_del_name)
+            append_cstr(ref (deref self).main_out, "(ptr %self)\n")
+
+        var d_i2 as i64 = 0 to i64
+        while d_i2 < count:
+            let d as ptr[Node] = get_node_decl(decls_ptr, d_i2)
+            if d != None to ptr[Node] and (node_kind(d) == NodeType.VarDecl or node_kind(d) == NodeType.FieldDecl):
+                let f_sem_t as String = self.compute_sem_type_name(node_inferred_type(d), d)
+                if f_sem_t.len > 0 to usize:
+                    let f_st_c as cstr = f_sem_t.data to cstr
+                    let f_nm as String = node_name(d)
+                    var f_idx as i32 = 0 to i32
+                    let f_key as StringBuilder = StringBuilder.make()
+                    append_str(ref f_key, name)
+                    append_cstr(ref f_key, "." to cstr)
+                    append_str(ref f_key, f_nm)
+                    let f_ks as String = f_key.to_string()
+                    f_key.deinit()
+                    if (deref self).struct_field_indices.has(f_ks):
+                        f_idx = (deref self).struct_field_indices[f_ks]
+
+                    let f_gep_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = getelementptr inbounds %")
+                    append_str(ref (deref self).main_out, name)
+                    append_cstr(ref (deref self).main_out, ", ptr %self, i32 0, i32 ")
+                    append_i64(ref (deref self).main_out, f_idx to i64)
+                    append_cstr(ref (deref self).main_out, "\n")
+
+                    if strcmp(f_st_c, "String" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_String(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(f_st_c, "StringBuilder" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_StringBuilder(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(f_st_c, "Dict" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_Dict(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(f_st_c, "List_flat" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List_flat(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif strcmp(f_st_c, "List_String" to cstr) == 0:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        let elem_sz as i64 = if (deref self).target.pointer_size == 4 to usize: 12 to i64 else: 24 to i64
+                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_i64(ref (deref self).main_out, elem_sz)
+                        append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_String)\n")
+                    elif strncmp(f_st_c, "List_", 5 to usize) == 0:
+                        let elem_st_name as cstr = (f_sem_t.data to usize + 5 to usize) to cstr
+                        let elem_sz as i64 = self.resolve_struct_size(String.make(elem_st_name))
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_i64(ref (deref self).main_out, elem_sz)
+                        append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_")
+                        append_cstr(ref (deref self).main_out, elem_st_name)
+                        append_cstr(ref (deref self).main_out, ")\n")
+                    elif mantiq_type_needs_drop(f_st_c) != 0 to i32:
+                        append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
+                        append_str(ref (deref self).main_out, f_sem_t)
+                        append_cstr(ref (deref self).main_out, "(ptr ")
+                        append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
+                        append_cstr(ref (deref self).main_out, ")\n")
+            d_i2 = d_i2 + 1 to i64
+
+        append_cstr(ref (deref self).main_out, "  br label %exit\n\nexit:\n  ret void\n}\n\n")
 
     public fn compute_type_id(self as ptr[LLVMCodegen], type_name as String) as i32:
         if type_name.data == None to ptr[u8] or type_name.len == 0 to usize:
@@ -12598,6 +12924,7 @@ struct LLVMCodegen:
             self.emit_class_fields(node, name)
 
         self.emit_class_methods(node, name)
+        self.emit_struct_drop_glue(node, name)
 
     public fn emit_class_fields(self as ptr[LLVMCodegen], node as ptr[Node], name as String):
         let fields_str as StringBuilder = StringBuilder.make()

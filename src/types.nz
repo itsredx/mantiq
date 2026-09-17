@@ -219,7 +219,10 @@ fn is_copy_type(t as ptr[Type]) as bool:
         let sn as ptr[u8] = (deref t).name.data
         if sn != None to ptr[u8]:
             let s_cstr as cstr = sn to cstr
-            if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0:
+            extern fn mantiq_type_needs_drop(type_name as cstr) as i32
+            if mantiq_type_needs_drop(s_cstr) != 0 to i32:
+                return False
+            if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0:
                 return False
         return True
     return False

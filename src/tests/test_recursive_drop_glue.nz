@@ -1,0 +1,64 @@
+// ── Recursive Drop Glue & Composite Destruction Tests ─────────────────
+
+extern fn printf(fmt as cstr, ...) as i32
+extern fn puts(s as cstr) as i32
+
+struct Resource:
+    var id as i64
+    var name as String
+
+    public fn __del__(self as ptr[Resource]):
+        let n_str as cstr = (deref self).name.data to cstr
+        printf("Resource.__del__ called for id=%lld, name=%s\n" to cstr, (deref self).id, n_str)
+
+struct Container:
+    var tag as String
+    var res as Resource
+
+    public fn __del__(self as ptr[Container]):
+        let t_str as cstr = (deref self).tag.data to cstr
+        printf("Container.__del__ called for tag=%s\n" to cstr, t_str)
+
+struct StructWithList:
+    var title as String
+    var entries as List[String]
+
+    public fn __del__(self as ptr[StructWithList]):
+        let t_str as cstr = (deref self).title.data to cstr
+        printf("StructWithList.__del__ called for title=%s, len=%lld\n" to cstr, t_str, (deref self).entries.length())
+
+fn test_custom_drop_and_nesting():
+    puts("--- Testing Nested Drop Glue ---" to cstr)
+    var c as Container
+    c.tag = f"outer_container"
+    c.res.id = 42 to i64
+    c.res.name = f"inner_resource"
+
+    let tag_data as cstr = c.tag.data to cstr
+    let res_name_data as cstr = c.res.name.data to cstr
+    printf("Container created with tag=%s, res.name=%s\n" to cstr, tag_data, res_name_data)
+
+fn test_list_string_drop():
+    puts("--- Testing List[String] Drop Glue ---" to cstr)
+    var list as List[String] = List[String]()
+    list.append(f"alpha")
+    list.append(f"beta")
+    list.append(f"gamma")
+    printf("List created with length=%lld\n" to cstr, list.length())
+
+fn test_struct_with_list():
+    puts("--- Testing Struct with List[String] Field ---" to cstr)
+    var swl as StructWithList
+    swl.title = f"Document"
+    swl.entries = List[String]()
+    swl.entries.append(f"Chapter 1")
+    swl.entries.append(f"Chapter 2")
+    printf("Struct created with title=%s, entries=%lld\n" to cstr, swl.title.data to cstr, swl.entries.length())
+
+fn main() as i32:
+    puts("=== Nizam Stage 2 Drop Glue Test ===" to cstr)
+    test_custom_drop_and_nesting()
+    test_list_string_drop()
+    test_struct_with_list()
+    puts("=== Completed Successfully ===" to cstr)
+    return 0 to i32
