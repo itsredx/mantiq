@@ -49,6 +49,7 @@ extern fn mantiq_sha256_file_hex(path as cstr, out_buf as ptr[u8]) as i32
 extern fn mantiq_mkdir_p(path as cstr) as i32
 extern fn mantiq_copy_file(src as cstr, dst as cstr) as i32
 extern fn mantiq_ast_arena_reset()
+extern fn mantiq_set_profile_active(active as i32)
 
 // ── Performance Monitor ─────────────────────────────────────────────────
 extern fn mantiq_perf_now_ns() as i64
@@ -521,7 +522,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         let extra_flags_c as cstr = extra_flags_str.data to cstr
 
         let opt_flag as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
-        let wasm_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-O2" to cstr
+        let wasm_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-Oz" to cstr
         let py_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
 
         var has_rt_obj as bool = False
@@ -533,10 +534,39 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             has_rt_obj = access(rt_o_str.data to cstr, 0 to i32) == 0 to i32
             rt_o_sb.deinit()
 
+        var has_wasm_rt_obj as bool = False
+        var wasm_rt_obj_path as String = String.make("" to cstr)
+        if lib_dir != None to cstr:
+            let w_sb as StringBuilder = StringBuilder.make()
+            w_sb.append(lib_dir)
+            w_sb.append("/runtime_wasm.o" to cstr)
+            wasm_rt_obj_path = w_sb.to_string()
+            has_wasm_rt_obj = access(wasm_rt_obj_path.data to cstr, 0 to i32) == 0 to i32
+            w_sb.deinit()
+        if not has_wasm_rt_obj:
+            if access("stage3/runtime_wasm.o" to cstr, 0 to i32) == 0 to i32:
+                wasm_rt_obj_path = String.make("stage3/runtime_wasm.o" to cstr)
+                has_wasm_rt_obj = True
+            elif access("runtime_wasm.o" to cstr, 0 to i32) == 0 to i32:
+                wasm_rt_obj_path = String.make("runtime_wasm.o" to cstr)
+                has_wasm_rt_obj = True
+
         var _sp as i32 = 0
         if target.is_wasm():
+            var wasm_rt_src as String = String.make("" to cstr)
+            if not has_wasm_rt_obj:
+                if lib_dir != None to cstr:
+                    let wrt_sb as StringBuilder = StringBuilder.make()
+                    wrt_sb.append(lib_dir)
+                    wrt_sb.append("/runtime.c" to cstr)
+                    wasm_rt_src = wrt_sb.to_string()
+                    wrt_sb.deinit()
+                else:
+                    wasm_rt_src = String.make("../mantiqz/mantiq-compiler/src/runtime.c" to cstr)
+            let wasm_rt_arg as cstr = if has_wasm_rt_obj: wasm_rt_obj_path.data to cstr else: wasm_rt_src.data to cstr
+
             if lib_dir == None to cstr:
-                _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, wasm_rt_arg, out_file, extra_flags_c)
             else:
                 let ts_a_path as StringBuilder = StringBuilder.make()
                 ts_a_path.append(lib_dir)
@@ -545,9 +575,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 let has_ts_a as bool = access(ts_a_str.data to cstr, 0 to i32) == 0 to i32
                 ts_a_path.deinit()
                 if has_ts_a:
-                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s/runtime.c\" \"%s/libtree-sitter-mantiq.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" \"%s/libtree-sitter-mantiq.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, lib_dir, out_file, extra_flags_c)
                 else:
-                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s/runtime.c\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
+                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, out_file, extra_flags_c)
         elif target.is_python_ext():
             if lib_dir == None to cstr:
                 _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, out_file, extra_flags_c, py_opt, ll_path, out_file, extra_flags_c)
@@ -631,10 +661,21 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 d_argv[di] = rp_str.data to cstr
                 di = di + 1 to usize
             else:
-                d_argv[di] = "tree_sitter_helper.c" to cstr
-                di = di + 1 to usize
-                d_argv[di] = "../mantiqz/mantiq-compiler/src/runtime.c" to cstr
-                di = di + 1 to usize
+                if access("tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32 and access("runtime.o" to cstr, 0 to i32) == 0 to i32:
+                    d_argv[di] = "tree_sitter_helper.o" to cstr
+                    di = di + 1 to usize
+                    d_argv[di] = "runtime.o" to cstr
+                    di = di + 1 to usize
+                elif access("stage3/tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32 and access("stage3/runtime.o" to cstr, 0 to i32) == 0 to i32:
+                    d_argv[di] = "stage3/tree_sitter_helper.o" to cstr
+                    di = di + 1 to usize
+                    d_argv[di] = "stage3/runtime.o" to cstr
+                    di = di + 1 to usize
+                else:
+                    d_argv[di] = "tree_sitter_helper.c" to cstr
+                    di = di + 1 to usize
+                    d_argv[di] = "../mantiqz/mantiq-compiler/src/runtime.c" to cstr
+                    di = di + 1 to usize
                 d_argv[di] = "-Wl,-rpath,'$ORIGIN'" to cstr
                 di = di + 1 to usize
             d_argv[di] = "-o" to cstr
@@ -813,6 +854,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         if strcmp(get_arg(argv, ai), "--profile" to cstr) == 0:
             prof_flag = True
         ai = ai + 1 to i32
+    if prof_flag:
+        mantiq_set_profile_active(1 to i32)
 
     if argc < 2:
         let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--release|--debug] [--profile]\n  run <file.nz> [--target <triple>] [--release|--debug] [--profile]\n  check <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
