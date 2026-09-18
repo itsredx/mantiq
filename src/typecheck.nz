@@ -239,10 +239,10 @@ struct TypeChecker:
             if comma_pos != None to cstr:
                 var v_len as usize = (inner_buf to usize + inner_len to usize) - (comma_pos to usize + 1 to usize)
                 var v_off as usize = 0 to usize
-                while v_len > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off) to ptr[u8])) == 32 to u8:
+                while v_len > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off) to ptr[u8])) <= 32 to u8:
                     v_off = v_off + 1 to usize
                     v_len = v_len - 1 to usize
-                while v_len > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off + v_len - 1 to usize) to ptr[u8])) == 32 to u8:
+                while v_len > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off + v_len - 1 to usize) to ptr[u8])) <= 32 to u8:
                     v_len = v_len - 1 to usize
                 if v_len > 0 to usize:
                     let v_buf as ptr[u8] = make[u8](v_len + 1 to usize) to ptr[u8]
@@ -257,10 +257,10 @@ struct TypeChecker:
                     let v_type as ptr[Type] = self.resolve_type_annotation(v_annot)
                     let k_len as usize = (comma_pos to usize) - (inner_buf to usize)
                     var k_off as usize = 0 to usize
-                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off) to ptr[u8])) == 32 to u8:
+                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off) to ptr[u8])) <= 32 to u8:
                         k_off = k_off + 1 to usize
                         k_len = k_len - 1 to usize
-                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off + k_len - 1 to usize) to ptr[u8])) == 32 to u8:
+                    while k_len > 0 to usize and (deref ((inner_buf to usize + k_off + k_len - 1 to usize) to ptr[u8])) <= 32 to u8:
                         k_len = k_len - 1 to usize
                     let t2 as ptr[Type] = make_type(TypeKind.Dict)
                     if k_len > 0 to usize:
@@ -361,10 +361,10 @@ struct TypeChecker:
             if comma_pos != None to cstr:
                 let k_len as usize = (comma_pos to usize) - (inner_buf to usize)
                 var k_off as usize = 0 to usize
-                while k_len > 0 to usize and (deref ((inner_buf to usize + k_off) to ptr[u8])) == 32 to u8:
+                while k_len > 0 to usize and (deref ((inner_buf to usize + k_off) to ptr[u8])) <= 32 to u8:
                     k_off = k_off + 1 to usize
                     k_len = k_len - 1 to usize
-                while k_len > 0 to usize and (deref ((inner_buf to usize + k_off + k_len - 1 to usize) to ptr[u8])) == 32 to u8:
+                while k_len > 0 to usize and (deref ((inner_buf to usize + k_off + k_len - 1 to usize) to ptr[u8])) <= 32 to u8:
                     k_len = k_len - 1 to usize
                 if k_len > 0 to usize:
                     let k_buf as ptr[u8] = make[u8](k_len + 1 to usize) to ptr[u8]
@@ -383,13 +383,24 @@ struct TypeChecker:
                     let t as ptr[Type] = make_type(TypeKind.List)
                     (deref t).payload = elem_type
                     return t
+            var i_len as usize = inner_len
+            var i_off as usize = 0 to usize
+            while i_len > 0 to usize and (deref ((inner_buf to usize + i_off) to ptr[u8])) <= 32 to u8:
+                i_off = i_off + 1 to usize
+                i_len = i_len - 1 to usize
+            while i_len > 0 to usize and (deref ((inner_buf to usize + i_off + i_len - 1 to usize) to ptr[u8])) <= 32 to u8:
+                i_len = i_len - 1 to usize
+            let i_buf as ptr[u8] = make[u8](i_len + 1 to usize) to ptr[u8]
+            let _mi as ptr = memcpy(i_buf to ptr, (inner_buf to usize + i_off) to ptr, i_len)
+            i_buf[i_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String.make(i_buf to cstr)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(i_buf to ptr)
             free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.List)
@@ -401,13 +412,24 @@ struct TypeChecker:
             let inner_buf as ptr[u8] = make[u8](inner_len + 1 to usize) to ptr[u8]
             let _m3 as ptr = memcpy(inner_buf to ptr, (name_data to usize + 7 to usize) to ptr, inner_len)
             inner_buf[inner_len] = 0 to u8
+            var o_len as usize = inner_len
+            var o_off as usize = 0 to usize
+            while o_len > 0 to usize and (deref ((inner_buf to usize + o_off) to ptr[u8])) <= 32 to u8:
+                o_off = o_off + 1 to usize
+                o_len = o_len - 1 to usize
+            while o_len > 0 to usize and (deref ((inner_buf to usize + o_off + o_len - 1 to usize) to ptr[u8])) <= 32 to u8:
+                o_len = o_len - 1 to usize
+            let o_buf as ptr[u8] = make[u8](o_len + 1 to usize) to ptr[u8]
+            let _mo as ptr = memcpy(o_buf to ptr, (inner_buf to usize + o_off) to ptr, o_len)
+            o_buf[o_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String.make(o_buf to cstr)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
+            free(o_buf to ptr)
             free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Option)

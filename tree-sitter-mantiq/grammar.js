@@ -37,6 +37,10 @@ module.exports = grammar({
     [$.param_decl, $._type_desc],
     [$.primary, $.const_generic],
     [$.typed_var, $.var_decl],
+    [$.typed_params],
+    [$.type_list],
+    [$.tuple_type_list],
+    [$.return_annotation, $._base_type],
   ],
 
   rules: {
@@ -478,20 +482,24 @@ module.exports = grammar({
       field('function', $._call),
       optional($.generic_params),
       '(',
-      optional($.arguments),
+      optional($._nl),
+      optional(seq($.arguments, optional($._nl))),
       ')'
     )),
 
     index_expression: $ => prec.left(17, seq(
       $._call,
       '[',
+      optional($._nl),
       $.expression,
+      optional($._nl),
       ']'
     )),
 
     member_expression: $ => prec.left(17, seq(
       field('object', $._call),
       choice('.', '?.'),
+      optional($._nl),
       field('property', $.identifier)
     )),
 
@@ -543,7 +551,8 @@ module.exports = grammar({
         $.identifier,
         optional($.generic_params),
         '(',
-        optional($.typed_params),
+        optional($._nl),
+        optional(seq($.typed_params, optional($._nl))),
         ')',
         optional($.return_annotation),
       optional(choice(
@@ -554,7 +563,8 @@ module.exports = grammar({
 
     anonymous_function: $ => seq(
       '(',
-      optional($.typed_params),
+      optional($._nl),
+      optional(seq($.typed_params, optional($._nl))),
       ')',
       optional($.return_annotation),
       optional(choice(
@@ -563,15 +573,21 @@ module.exports = grammar({
       ))
     ),
 
-    typed_params: $ => seq($.param_decl, repeat(seq(',', $.param_decl))),
+    typed_params: $ => seq(
+      $.param_decl,
+      repeat(seq(optional($._nl), ',', optional($._nl), $.param_decl)),
+      optional(seq(optional($._nl), ','))
+    ),
 
     // Lambda-specific typed params: requires type annotation to avoid conflict with primary expression
     lambda_typed_params: $ => seq(
         seq(field('name', $.identifier), field('type', $.type_annotation)),
-        repeat(seq(',', seq(field('name', $.identifier), field('type', $.type_annotation))))
+        repeat(seq(optional($._nl), ',', optional($._nl), seq(field('name', $.identifier), field('type', $.type_annotation)))),
+        optional(seq(optional($._nl), ','))
     ),
 
     param_decl: $ => choice(
+      '...',
       seq(
           optional(repeat(choice('ref', 'mut', seq('life', '[', field('lifetime_args', commaSep1($.expression)), ']')))),
           field('name', $.self_reference),
@@ -604,7 +620,7 @@ module.exports = grammar({
     dict_arguments: $ => seq($.dict_item, repeat(seq(optional($._nl), ',', optional($._nl), $.dict_item)), optional(seq(optional($._nl), ','))),
 
     dict_item: $ => choice(
-        seq($.expression, ':', $.expression),
+        seq($.expression, optional($._nl), ':', optional($._nl), $.expression),
         $.spread_expr,
         seq('if', $.expression, ':', $.dict_item, optional(seq('else', ':', $.dict_item))),
         seq('for', $.identifier, optional($.type_annotation), $.kw_in, $.expression, ':', $.dict_item)
@@ -620,20 +636,25 @@ module.exports = grammar({
 
     _base_type: $ => choice(
         seq($.identifier, optional($.generic_params), optional('?')),
-      seq('(', optional($.tuple_type_list), ')'),
-        seq('fn', '(', $.type_list, ')', choice('->', 'as'), $._type_desc)
+      seq('(', optional($._nl), optional(seq($.tuple_type_list, optional($._nl))), ')'),
+        seq('fn', '(', optional($._nl), optional(seq($.type_list, optional($._nl))), ')', choice('->', 'as'), $._type_desc)
     ),
 
-    tuple_type_list: $ => seq($.tuple_type, repeat(seq(',', $.tuple_type))),
+    tuple_type_list: $ => seq(
+      $.tuple_type,
+      repeat(seq(optional($._nl), ',', optional($._nl), $.tuple_type)),
+      optional(seq(optional($._nl), ','))
+    ),
     tuple_type: $ => choice(
         seq($.identifier, 'as', $._type_desc),
         $._type_desc
     ),
 
-    generic_params: $ => seq('[', $.type_list, ']'),
+    generic_params: $ => seq('[', optional($._nl), optional(seq($.type_list, optional($._nl))), ']'),
     type_list: $ => seq(
       choice($._type_desc, $.const_generic),
-      repeat(seq(',', choice($._type_desc, $.const_generic)))
+      repeat(seq(optional($._nl), ',', optional($._nl), choice($._type_desc, $.const_generic))),
+      optional(seq(optional($._nl), ','))
     ),
     const_generic: $ => choice($.number, $.string, $.boolean_literal),
 
@@ -770,22 +791,24 @@ module.exports = grammar({
 
     interpolation: $ => seq(
         '{',
+        optional($._nl),
         $.expression,
+        optional($._nl),
         '}'
     ),
-_bin_expr_2: $ => prec.left(2, seq(field('left', $._null_coalesce), field('operator', '??'), field('right', $._logic_or))),
-    _bin_expr_3: $ => prec.left(3, seq(field('left', $._logic_or), field('operator', $.kw_or), field('right', $._logic_and))),
-    _bin_expr_4: $ => prec.left(4, seq(field('left', $._logic_and), field('operator', $.kw_and), field('right', $._bitwise_or))),
-    _bin_expr_5: $ => prec.left(5, seq(field('left', $._bitwise_or), field('operator', '|'), field('right', $._bitwise_xor))),
-    _bin_expr_6: $ => prec.left(6, seq(field('left', $._bitwise_xor), field('operator', '^'), field('right', $._bitwise_and))),
-    _bin_expr_7: $ => prec.left(7, seq(field('left', $._bitwise_and), field('operator', '&'), field('right', $._equality))),
-    _bin_expr_8: $ => prec.left(8, seq(field('left', $._equality), field('operator', choice('!=', '==')), field('right', $._comparison))),
-    _bin_expr_9: $ => prec.left(9, seq(field('left', $._comparison), field('operator', choice('>', '>=', '<', '<=', $.kw_is, seq($.kw_is, $.kw_not), $.kw_in, seq($.kw_not, $.kw_in))), field('right', $._range_expr))),
-    _bin_expr_10: $ => prec.left(10, seq(field('left', $._range_expr), field('operator', '..'), field('right', $._bitwise_sh))),
-    _bin_expr_11: $ => prec.left(11, seq(field('left', $._bitwise_sh), field('operator', choice('<<', '>>')), field('right', $._term))),
-    _bin_expr_12: $ => prec.left(12, seq(field('left', $._term), field('operator', choice('-', '+')), field('right', $._factor))),
-    _bin_expr_14: $ => prec.left(14, seq(field('left', $._factor), field('operator', choice('*', '/', '%')), field('right', $._unary))),
-    _bin_expr_16_r: $ => prec.right(16, seq(field('left', $._postfix), field('operator', '**'), field('right', $._unary)))
+    _bin_expr_2: $ => prec.left(2, seq(field('left', $._null_coalesce), field('operator', '??'), optional($._nl), field('right', $._logic_or))),
+    _bin_expr_3: $ => prec.left(3, seq(field('left', $._logic_or), field('operator', $.kw_or), optional($._nl), field('right', $._logic_and))),
+    _bin_expr_4: $ => prec.left(4, seq(field('left', $._logic_and), field('operator', $.kw_and), optional($._nl), field('right', $._bitwise_or))),
+    _bin_expr_5: $ => prec.left(5, seq(field('left', $._bitwise_or), field('operator', '|'), optional($._nl), field('right', $._bitwise_xor))),
+    _bin_expr_6: $ => prec.left(6, seq(field('left', $._bitwise_xor), field('operator', '^'), optional($._nl), field('right', $._bitwise_and))),
+    _bin_expr_7: $ => prec.left(7, seq(field('left', $._bitwise_and), field('operator', '&'), optional($._nl), field('right', $._equality))),
+    _bin_expr_8: $ => prec.left(8, seq(field('left', $._equality), field('operator', choice('!=', '==')), optional($._nl), field('right', $._comparison))),
+    _bin_expr_9: $ => prec.left(9, seq(field('left', $._comparison), field('operator', choice('>', '>=', '<', '<=', $.kw_is, seq($.kw_is, $.kw_not), $.kw_in, seq($.kw_not, $.kw_in))), optional($._nl), field('right', $._range_expr))),
+    _bin_expr_10: $ => prec.left(10, seq(field('left', $._range_expr), field('operator', '..'), optional($._nl), field('right', $._bitwise_sh))),
+    _bin_expr_11: $ => prec.left(11, seq(field('left', $._bitwise_sh), field('operator', choice('<<', '>>')), optional($._nl), field('right', $._term))),
+    _bin_expr_12: $ => prec.left(12, seq(field('left', $._term), field('operator', choice('-', '+')), optional($._nl), field('right', $._factor))),
+    _bin_expr_14: $ => prec.left(14, seq(field('left', $._factor), field('operator', choice('*', '/', '%')), optional($._nl), field('right', $._unary))),
+    _bin_expr_16_r: $ => prec.right(16, seq(field('left', $._postfix), field('operator', '**'), optional($._nl), field('right', $._unary)))
   }
 });
 

@@ -13669,7 +13669,7 @@ struct LLVMCodegen:
         full_buf_t_name.deinit()
 
         let buf_t_name_c as ptr[u8] = make[u8](512 to usize) to ptr[u8]
-        _sp = sprintf(buf_t_name_c, "@__nizam_py_str_type_name_MantiqBuffer = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n@__nizam_py_str_name_MantiqBuffer = private unnamed_addr constant [13 x i8] c\"MantiqBuffer\\00\"\n@__nizam_py_str_name_Buffer = private unnamed_addr constant [7 x i8] c\"Buffer\\00\"\n", (full_buf_t_str.len to i64) + 1 to i64, full_buf_t_str.data to cstr)
+        _sp = sprintf(buf_t_name_c, "@__nizam_py_str_type_name_MantiqBuffer = private unnamed_addr constant [%lld x i8] c\"%s\\00\"\n@__nizam_py_str_name_MantiqBuffer = private unnamed_addr constant [13 x i8] c\"MantiqBuffer\\00\"\n@__nizam_py_str_name_Buffer = private unnamed_addr constant [7 x i8] c\"Buffer\\00\"\n" to cstr, (full_buf_t_str.len to i64) + 1 to i64, full_buf_t_str.data to cstr)
         append_cstr(ref (deref self).type_out, buf_t_name_c to cstr)
         free(buf_t_name_c to ptr)
 

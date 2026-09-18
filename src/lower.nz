@@ -15,6 +15,8 @@ extern fn strtod(str as cstr, endptr as ptr) as f64
 extern fn printf(format as cstr, ...) as i32
 extern fn fflush(f as ptr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
+extern fn malloc(size as usize) as ptr
+extern fn free(p as ptr)
 
 // ── String Slice Helper ──────────────────────────────────────────────────
 extern fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]
@@ -30,6 +32,43 @@ fn slice_string(s_data as ptr[u8], s_len as usize, start as usize, end as usize)
     let res as ptr[String] = make[String](1 to usize) to ptr[String]
     (deref res) = String(data = d, len = len, capacity = len + 1 to usize)
     return res to ptr
+
+fn normalize_type_str(raw as ptr[String]) as String:
+    if raw == None to ptr[String] or (deref raw).data == None to ptr[u8]:
+        return String.make("" to cstr)
+    let d as ptr[u8] = (deref raw).data
+    let len as usize = (deref raw).len
+    let buf as ptr[u8] = make[u8](len + 1 to usize) to ptr[u8]
+    var out_idx as usize = 0 to usize
+    var i as usize = 0 to usize
+    while i < len:
+        let c as u8 = d[i]
+        if c == 10 to u8 or c == 13 to u8 or c == 9 to u8:
+            i = i + 1 to usize
+        elif c == 32 to u8:
+            if out_idx > 0 to usize:
+                let prev as u8 = buf[out_idx - 1 to usize]
+                if prev == 91 to u8 or prev == 44 to u8 or prev == 40 to u8 or prev == 32 to u8:
+                    i = i + 1 to usize
+                else:
+                    buf[out_idx] = c
+                    out_idx = out_idx + 1 to usize
+                    i = i + 1 to usize
+            else:
+                i = i + 1 to usize
+        else:
+            if c == 93 to u8 or c == 41 to u8 or c == 44 to u8:
+                while out_idx > 0 to usize and buf[out_idx - 1 to usize] == 32 to u8:
+                    out_idx = out_idx - 1 to usize
+            buf[out_idx] = c
+            out_idx = out_idx + 1 to usize
+            i = i + 1 to usize
+    while out_idx > 0 to usize and buf[out_idx - 1 to usize] == 32 to u8:
+        out_idx = out_idx - 1 to usize
+    buf[out_idx] = 0 to u8
+    let res as String = String.make(buf to cstr)
+    free(buf to ptr)
+    return res
 
 fn strip_quotes(d as ptr[u8], len as usize) as String:
     if len >= 2 to usize:
@@ -174,7 +213,7 @@ struct Lowerer:
                 end_pos = end_pos - 1 to usize
             if end_pos > first_name_start:
                 let full_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, first_name_start, end_pos) to ptr[String]
-                (deref annot).name = deref full_slice
+                (deref annot).name = normalize_type_str(full_slice)
                 drop(full_slice to ptr)
         
         return annot

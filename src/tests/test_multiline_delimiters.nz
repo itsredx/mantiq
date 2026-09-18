@@ -1,0 +1,90 @@
+// ── Multiline Open and Close Delimiters Test Suite ────────────────────
+import std.collections
+import std.string
+import std.mem
+
+from std.string import String
+from std.collections import List, Dict
+from std.mem import make, drop
+
+extern fn printf(format as cstr, ...) as i32
+
+// ── 1. Multiline Function Declaration ─────────────────────────────────
+fn multiline_add(
+    a as i64,
+    b as i64,
+    c as i64,
+) -> i64:
+    return (
+        a +
+        b +
+        c
+    )
+
+fn main() -> i32:
+    let _h as i32 = printf("=== Running test_multiline_delimiters.nz ===\n\n" to cstr)
+
+    // ── 2. Multiline Call Expression ──────────────────────────────────
+    let sum as i64 = multiline_add(
+        10 to i64,
+        20 to i64,
+        30 to i64,
+    )
+    if sum != 60 to i64:
+        let _err as i32 = printf("FAILED: multiline_add returned %ld, expected 60\n" to cstr, sum)
+        return 1 to i64 to i32
+    let _p1 as i32 = printf("Test 1 (Multiline Function Decl & Call): PASSED!\n" to cstr)
+
+    // ── 3. Multiline List Literal & Indexing ──────────────────────────
+    let mut list as List[
+        i64
+    ] = [
+        100 to i64,
+        200 to i64,
+        300 to i64,
+    ]
+    let elem as i64 = list[
+        1 to i64
+    ]
+    if list.length() != 3 to i64 or elem != 200 to i64:
+        let _err as i32 = printf("FAILED: multiline list literal or indexing\n" to cstr)
+        return 1 to i64 to i32
+    let _p2 as i32 = printf("Test 2 (Multiline List Literal & Indexing): PASSED!\n" to cstr)
+
+    // ── 4. Multiline Dict Literal ─────────────────────────────────────
+    let mut dict as Dict[
+        i64,
+        i64
+    ] = {
+        1 to i64:
+            10 to i64,
+        2 to i64:
+            20 to i64,
+    }
+    if dict.length() != 2 to i64:
+        let _err as i32 = printf("FAILED: multiline dict literal\n" to cstr)
+        return 1 to i64 to i32
+    let _p3 as i32 = printf("Test 3 (Multiline Dict Literal & Generics): PASSED!\n" to cstr)
+
+    // ── 5. Multiline Parenthesized Expression ─────────────────────────
+    let calc as i64 = (
+        (10 to i64 * 2 to i64) +
+        (30 to i64 * 3 to i64)
+    )
+    if calc != 110 to i64:
+        let _err as i32 = printf("FAILED: multiline parenthesized expr\n" to cstr)
+        return 1 to i64 to i32
+    let _p4 as i32 = printf("Test 4 (Multiline Parenthesized Expressions): PASSED!\n" to cstr)
+
+    // ── 6. Multiline F-String Interpolation ───────────────────────────
+    let num as i64 = 42 to i64
+    let s as String = f"the answer is {
+        num
+    }."
+    if s.len != 17 to usize:
+        let _err as i32 = printf("FAILED: multiline f-string\n" to cstr)
+        return 1 to i64 to i32
+    let _p5 as i32 = printf("Test 5 (Multiline F-String Interpolation): PASSED!\n" to cstr)
+
+    let _done as i32 = printf("\nAll multiline delimiter tests PASSED successfully!\n" to cstr)
+    return 0 to i64 to i32
