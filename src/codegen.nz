@@ -908,11 +908,14 @@ struct LLVMCodegen:
         return buf to cstr
 
     public fn resolve_struct_size(self as ptr[LLVMCodegen], t as String) as i64:
-        if t.data == None to ptr[u8] or t.len < 2 to usize:
+        if t.data == None to ptr[u8] or t.len == 0 to usize:
             return 1024 to i64
-        let nm as String = String.make((t.data to usize + 1 to usize) to cstr)
-        if (deref self).struct_sizes.has(nm):
-            return (deref self).struct_sizes[nm]
+        if (deref self).struct_sizes.has(t):
+            return (deref self).struct_sizes[t]
+        if (deref t.data) == 37 to u8 and t.len > 1 to usize:
+            let nm as String = String.make((t.data to usize + 1 to usize) to cstr)
+            if (deref self).struct_sizes.has(nm):
+                return (deref self).struct_sizes[nm]
         return 1024 to i64
 
     public fn llvm_type(self as ptr[LLVMCodegen], t as ptr[Type]) as String:
@@ -2221,6 +2224,7 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, " = alloca ")
             append_str(ref (deref self).main_out, p_type)
             append_cstr(ref (deref self).main_out, "\n")
+
             if is_bv_p:
                 let tmp_bv as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
@@ -5975,7 +5979,10 @@ struct LLVMCodegen:
                                                 elem_type = make_ptr_type(make_struct_type(String.make("Diagnostic" to cstr)))
                                     var elem_s as i64 = 8 to i64
                                     if elem_type != None to ptr[Type]:
-                                        elem_s = type_size(elem_type)
+                                        if (deref elem_type).kind == TypeKind.Struct and (deref elem_type).name.data != None:
+                                            elem_s = self.resolve_struct_size((deref elem_type).name)
+                                        else:
+                                            elem_s = type_size(elem_type)
                                     let elem_val as ptr[u8] = self.emit_expr(elem_node)
                                     self.consume_temp(elem_val)
                                     var elem_t as String = String.make("ptr" to cstr)
@@ -12409,6 +12416,40 @@ struct LLVMCodegen:
                 elif (deref self).var_types.has(orig_name):
                     llvm_t = (deref self).var_types[orig_name]
 
+                let div_key as StringBuilder = StringBuilder.make()
+                append_cstr(ref div_key, "__divergent_" to cstr)
+                append_str(ref div_key, var_name)
+                let is_div as bool = (deref self).type_aliases.has(div_key.to_string())
+                div_key.deinit()
+                var is_div_eff as bool = is_div
+                if not is_div_eff and strcmp(var_name.data to cstr, orig_name.data to cstr) != 0:
+                    let div_key2 as StringBuilder = StringBuilder.make()
+                    append_cstr(ref div_key2, "__divergent_" to cstr)
+                    append_str(ref div_key2, orig_name)
+                    is_div_eff = (deref self).type_aliases.has(div_key2.to_string())
+                    div_key2.deinit()
+
+                var drop_lbl as ptr[u8] = None to ptr[u8]
+                var cont_lbl as ptr[u8] = None to ptr[u8]
+                if is_div_eff:
+                    let flag_reg as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, flag_reg to cstr)
+                    append_cstr(ref (deref self).main_out, " = load i1, ptr %")
+                    append_str(ref (deref self).main_out, var_name)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
+                    drop_lbl = self.fresh_label()
+                    cont_lbl = self.fresh_label()
+                    append_cstr(ref (deref self).main_out, "  br i1 ")
+                    append_cstr(ref (deref self).main_out, flag_reg to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, drop_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, ", label %")
+                    append_cstr(ref (deref self).main_out, cont_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    append_cstr(ref (deref self).main_out, drop_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, ":\n")
+
                 if sem_t.len > 0 to usize:
                     let st_c as cstr = sem_t.data to cstr
                     if strcmp(st_c, "String" to cstr) == 0:
@@ -12472,6 +12513,30 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, "  call void @mantiq_free(ptr ")
                     append_cstr(ref (deref self).main_out, load_reg to cstr)
                     append_cstr(ref (deref self).main_out, ")\n")
+
+                if is_div_eff:
+                    append_cstr(ref (deref self).main_out, "  store i1 0, ptr %")
+                    append_str(ref (deref self).main_out, var_name)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
+                    append_cstr(ref (deref self).main_out, "  br label %")
+                    append_cstr(ref (deref self).main_out, cont_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    append_cstr(ref (deref self).main_out, cont_lbl to cstr)
+                    append_cstr(ref (deref self).main_out, ":\n")
+            i = i + 1 to i64
+
+    public fn populate_divergent_vars(self as ptr[LLVMCodegen], div_vars as List[String]):
+        let cnt as i64 = div_vars.length()
+        var i as i64 = 0 to i64
+        while i < cnt:
+            let v_nm as String = div_vars[i]
+            if v_nm.data != None to ptr[u8] and v_nm.len > 0 to usize:
+                let dk as StringBuilder = StringBuilder.make()
+                append_cstr(ref dk, "__divergent_" to cstr)
+                append_str(ref dk, v_nm)
+                let dks as String = dk.to_string()
+                set_dict_str(ref (deref self).type_aliases, dks, String.make("1" to cstr))
+                dk.deinit()
             i = i + 1 to i64
 
     public fn populate_auto_drops_from_borrowck(self as ptr[LLVMCodegen], borroWck_auto_drops as Dict[usize, List[ptr[Symbol]]]):

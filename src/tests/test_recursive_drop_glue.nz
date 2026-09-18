@@ -1,64 +1,105 @@
-// ── Recursive Drop Glue & Composite Destruction Tests ─────────────────
+// ── Imports ─────────────────────────────────────────────────────────────
+from std.string import String, StringBuilder
+from std.collections import List
 
-extern fn printf(fmt as cstr, ...) as i32
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
 extern fn puts(s as cstr) as i32
 
+// ── Global Counters for Drop Tracking ────────────────────────────────────
+var g_inner_del_count as i32 = 0 to i32
+var g_outer_del_count as i32 = 0 to i32
+var g_custom_del_count as i32 = 0 to i32
+
+// ── Struct Definitions ───────────────────────────────────────────────────
+struct Inner:
+    public var tag as String
+    public var value as i64
+
+    public fn __del__(self as ptr[Inner]):
+        g_inner_del_count = g_inner_del_count + 1 to i32
+        let _ = printf("  [Inner.__del__] tag=%s val=%ld\n" to cstr, (deref self).tag.data, (deref self).value)
+
+struct Outer:
+    public var title as String
+    public var inner as Inner
+
+    public fn __del__(self as ptr[Outer]):
+        g_outer_del_count = g_outer_del_count + 1 to i32
+        let _ = printf("  [Outer.__del__] title=%s\n" to cstr, (deref self).title.data)
+
 struct Resource:
-    var id as i64
-    var name as String
+    public var id as i32
 
     public fn __del__(self as ptr[Resource]):
-        let n_str as cstr = (deref self).name.data to cstr
-        printf("Resource.__del__ called for id=%lld, name=%s\n" to cstr, (deref self).id, n_str)
+        g_custom_del_count = g_custom_del_count + 1 to i32
+        let _ = printf("  [Resource.__del__] id=%d\n" to cstr, (deref self).id)
 
-struct Container:
-    var tag as String
-    var res as Resource
+// ── Test Cases ───────────────────────────────────────────────────────────
 
-    public fn __del__(self as ptr[Container]):
-        let t_str as cstr = (deref self).tag.data to cstr
-        printf("Container.__del__ called for tag=%s\n" to cstr, t_str)
+fn test_nested_struct_destruction():
+    let _ = puts("--- test_nested_struct_destruction ---" to cstr)
+    let s1 as String = String.make("inner_tag_alpha" to cstr)
+    let s2 as String = String.make("outer_title_beta" to cstr)
+    var in_obj as Inner
+    in_obj.tag = s1
+    in_obj.value = 42 to i64
 
-struct StructWithList:
-    var title as String
-    var entries as List[String]
+    var out_obj as Outer
+    out_obj.title = s2
+    out_obj.inner = in_obj
+    // At scope exit, out_obj should be dropped via __nizam_drop_Outer:
+    // Outer.__del__ called first, then inner dropped (Inner.__del__ then inner.tag), then out_obj.title dropped
 
-    public fn __del__(self as ptr[StructWithList]):
-        let t_str as cstr = (deref self).title.data to cstr
-        printf("StructWithList.__del__ called for title=%s, len=%lld\n" to cstr, t_str, (deref self).entries.length())
-
-fn test_custom_drop_and_nesting():
-    puts("--- Testing Nested Drop Glue ---" to cstr)
-    var c as Container
-    c.tag = f"outer_container"
-    c.res.id = 42 to i64
-    c.res.name = f"inner_resource"
-
-    let tag_data as cstr = c.tag.data to cstr
-    let res_name_data as cstr = c.res.name.data to cstr
-    printf("Container created with tag=%s, res.name=%s\n" to cstr, tag_data, res_name_data)
-
-fn test_list_string_drop():
-    puts("--- Testing List[String] Drop Glue ---" to cstr)
+fn test_list_string_recursive_drop():
+    let _ = puts("--- test_list_string_recursive_drop ---" to cstr)
     var list as List[String] = List[String]()
-    list.append(f"alpha")
-    list.append(f"beta")
-    list.append(f"gamma")
-    printf("List created with length=%lld\n" to cstr, list.length())
+    list.append(String.make("element_zero" to cstr))
+    list.append(String.make("element_one" to cstr))
+    list.append(String.make("element_two" to cstr))
+    let _ = printf("  List length: %ld\n" to cstr, list.length())
+    // At scope exit, list drops each String via __nizam_drop_List(list, 24, @__nizam_drop_String)
 
-fn test_struct_with_list():
-    puts("--- Testing Struct with List[String] Field ---" to cstr)
-    var swl as StructWithList
-    swl.title = f"Document"
-    swl.entries = List[String]()
-    swl.entries.append(f"Chapter 1")
-    swl.entries.append(f"Chapter 2")
-    printf("Struct created with title=%s, entries=%lld\n" to cstr, swl.title.data to cstr, swl.entries.length())
+fn test_custom_destructor_call():
+    let _ = puts("--- test_custom_destructor_call ---" to cstr)
+    var r1 as Resource
+    r1.id = 101 to i32
+    var r2 as Resource
+    r2.id = 202 to i32
+
+fn make_inner(tag_str as cstr, val as i64) as Inner:
+    var res as Inner
+    res.tag = String.make(tag_str)
+    res.value = val
+    return res
+
+fn test_list_struct_recursive_drop():
+    let _ = puts("--- test_list_struct_recursive_drop ---" to cstr)
+    var list as List[Inner] = List[Inner]()
+    list.append(make_inner("item_1" to cstr, 100 to i64))
+    list.append(make_inner("item_2" to cstr, 200 to i64))
+    let _ = printf("  List[Inner] length: %ld\n" to cstr, list.length())
 
 fn main() as i32:
-    puts("=== Nizam Stage 2 Drop Glue Test ===" to cstr)
-    test_custom_drop_and_nesting()
-    test_list_string_drop()
-    test_struct_with_list()
-    puts("=== Completed Successfully ===" to cstr)
+    let _ = puts("=== Starting Recursive Drop Glue & Composite Destruction Tests ===" to cstr)
+
+    test_nested_struct_destruction()
+    if g_outer_del_count != 1 to i32:
+        let _ = printf("ERROR: g_outer_del_count expected 1, got %d\n" to cstr, g_outer_del_count)
+        return 1 to i32
+    if g_inner_del_count != 1 to i32:
+        let _ = printf("ERROR: g_inner_del_count expected 1, got %d\n" to cstr, g_inner_del_count)
+        return 2 to i32
+
+    test_list_string_recursive_drop()
+
+    test_custom_destructor_call()
+    if g_custom_del_count != 2 to i32:
+        let _ = printf("ERROR: g_custom_del_count expected 2, got %d\n" to cstr, g_custom_del_count)
+        return 3 to i32
+
+    test_list_struct_recursive_drop()
+
+    let _ = puts("=== All Recursive Drop Glue Tests Passed Successfully! ===" to cstr)
     return 0 to i32
+
