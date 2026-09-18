@@ -57,7 +57,10 @@ fn normalize_type_str(raw as ptr[String]) as String:
             else:
                 i = i + 1 to usize
         else:
-            if c == 93 to u8 or c == 41 to u8 or c == 44 to u8:
+            if c == 93 to u8 or c == 41 to u8:
+                while out_idx > 0 to usize and (buf[out_idx - 1 to usize] == 32 to u8 or buf[out_idx - 1 to usize] == 44 to u8):
+                    out_idx = out_idx - 1 to usize
+            elif c == 44 to u8:
                 while out_idx > 0 to usize and buf[out_idx - 1 to usize] == 32 to u8:
                     out_idx = out_idx - 1 to usize
             buf[out_idx] = c

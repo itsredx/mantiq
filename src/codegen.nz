@@ -2484,6 +2484,19 @@ struct LLVMCodegen:
         append_str(ref (deref self).main_out, var_type)
         append_cstr(ref (deref self).main_out, "\n")
 
+        let div_k as StringBuilder = StringBuilder.make()
+        append_cstr(ref div_k, "__divergent_" to cstr)
+        append_str(ref div_k, var_name)
+        let div_ks as String = div_k.to_string()
+        if (deref self).type_aliases.has(div_ks):
+            append_cstr(ref (deref self).main_out, "  %")
+            append_str(ref (deref self).main_out, var_name)
+            append_cstr(ref (deref self).main_out, "_drop_flag = alloca i1\n")
+            append_cstr(ref (deref self).main_out, "  store i1 1, ptr %")
+            append_str(ref (deref self).main_out, var_name)
+            append_cstr(ref (deref self).main_out, "_drop_flag\n")
+        div_k.deinit()
+
         if init_node != None to ptr[Node]:
             if (node_inferred_type(init_node) == None to ptr[Type] or (deref (node_inferred_type(init_node))).kind == TypeKind.Any) and node_inferred_type(node) != None to ptr[Type]:
                 set_node_inferred_type(init_node, node_inferred_type(node))

@@ -20,6 +20,8 @@ import codegen
 from codegen import LLVMCodegen
 import layout
 from layout import Target
+import cfg
+from cfg import CFGAnalyzer
 import error
 from error import DiagnosticEngine
 
@@ -444,6 +446,13 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     (deref bc).walk_ast(root)
     perf_end(perf, "borrowck", t3)
 
+    // ── Phase 4.2: CFG Analysis & Drop Elaboration ──
+    let t_cfg as i64 = perf_begin(perf, "cfg")
+    let cfg_an as ptr[CFGAnalyzer] = make[CFGAnalyzer](1 to usize) to ptr[CFGAnalyzer]
+    (deref cfg_an).init_cfg(engine, (deref sema).current_file)
+    let _cfg_ok as bool = (deref cfg_an).analyze_program(root)
+    perf_end(perf, "cfg", t_cfg)
+
     if engine.has_errors():
         engine.emit_all_cached()
         mantiq_ast_arena_reset()
@@ -466,6 +475,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     if target.is_python_ext():
         (deref cg).python_ext_module_name = get_module_name_from_path(out_file)
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
+    (deref cg).populate_divergent_vars((deref cfg_an).divergent_vars)
     let ir_str as String = (deref cg).generate(root)
     perf_end(perf, "codegen", t4)
 

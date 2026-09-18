@@ -1,0 +1,601 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+import std.string
+import std.option
+import std.mem
+import symbols
+import types
+import sema
+import error
+
+from std.string import String, StringBuilder
+from std.collections import List, Dict
+from std.option import Option, Empty, Some
+from std.mem import make, drop
+from symbols import Node, NodeType, Span, Symbol, Scope, SymbolKind, TypeAnnotation
+from symbols import node_kind, node_name, node_name_ptr, node_body, node_declarations
+from symbols import node_cond, node_then_branch, node_else_branch, node_left, node_right
+from symbols import node_span, node_inferred_type, node_is_extern, node_return_type_annot
+from symbols import set_node_auto_drops
+from types import Type, TypeKind, is_copy_type
+from sema import Sema
+from error import DiagnosticEngine, Diagnostic, err_missing_return, err_unreachable_code
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+extern fn strlen(s as cstr) as usize
+extern fn malloc(size as usize) as ptr
+extern fn free(p as ptr)
+
+// ── Option Helper ────────────────────────────────────────────────────────
+struct OptionLayout:
+    public var has_val as u8
+    public var val_ptr as ptr[u8]
+
+fn option_has_value(opt as ptr[u8]) as bool:
+    if opt == None to ptr[u8]:
+        return False
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).has_val == 1 to u8
+
+fn option_value(opt as ptr[u8]) as ptr[u8]:
+    if opt == None to ptr[u8]:
+        return None to ptr[u8]
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).val_ptr
+
+// ── Terminator Representation ────────────────────────────────────────────
+enum TerminatorKind:
+    Return
+    Branch
+    BranchIf
+    Throw
+    Unreachable
+
+struct Terminator:
+    public var kind as TerminatorKind
+    public var target_bb as i64
+    public var then_bb as i64
+    public var else_bb as i64
+    public var expr as ptr[Node]
+    public var span as Span
+
+fn make_terminator(kind as TerminatorKind) as Terminator:
+    return Terminator(
+        kind = kind,
+        target_bb = -1 to i64,
+        then_bb = -1 to i64,
+        else_bb = -1 to i64,
+        expr = None to ptr[Node],
+        span = Span(start_byte = 0 to u32, end_byte = 0 to u32, start_row = 0 to u32, start_col = 0 to u32, end_row = 0 to u32, end_col = 0 to u32)
+    )
+
+// ── Basic Block Representation ───────────────────────────────────────────
+struct BasicBlock:
+    public var id as i64
+    public var name as String
+    public var statements as List[ptr[Node]]
+    public var terminator as Terminator
+    public var predecessors as List[i64]
+    public var successors as List[i64]
+    public var auto_drops as List[String]
+    public var is_sealed as bool
+
+fn make_basic_block(id as i64, name as String) as ptr[BasicBlock]:
+    let bb as ptr[BasicBlock] = make[BasicBlock](1 to usize) to ptr[BasicBlock]
+    (deref bb).id = id
+    (deref bb).name = name
+    (deref bb).statements = List[ptr[Node]]()
+    (deref bb).terminator = make_terminator(TerminatorKind.Unreachable)
+    (deref bb).predecessors = List[i64]()
+    (deref bb).successors = List[i64]()
+    (deref bb).auto_drops = List[String]()
+    (deref bb).is_sealed = False
+    return bb
+
+// ── Control Flow Graph Representation ────────────────────────────────────
+struct ControlFlowGraph:
+    public var func_name as String
+    public var blocks as List[ptr[BasicBlock]]
+    public var entry_id as i64
+    public var exit_ids as List[i64]
+    public var ret_type_name as String
+    public var is_extern as bool
+    public var span as Span
+
+fn make_cfg(func_name as String, ret_type as String, is_extern as bool, span as Span) as ptr[ControlFlowGraph]:
+    let g as ptr[ControlFlowGraph] = make[ControlFlowGraph](1 to usize) to ptr[ControlFlowGraph]
+    (deref g).func_name = func_name
+    (deref g).blocks = List[ptr[BasicBlock]]()
+    (deref g).entry_id = 0 to i64
+    (deref g).exit_ids = List[i64]()
+    (deref g).ret_type_name = ret_type
+    (deref g).is_extern = is_extern
+    (deref g).span = span
+    return g
+
+// ── Polonius Origin & Loan Data Structures ───────────────────────────────
+struct LoanRecord:
+    public var loan_id as i64
+    public var source_var as String
+    public var is_mut as bool
+    public var span as Span
+    public var issued_bb as i64
+    public var issued_stmt as i64
+
+struct Point:
+    public var bb_id as i64
+    public var stmt_idx as i64
+
+// ── CFG Builder & Analyzer ───────────────────────────────────────────────
+struct CFGAnalyzer:
+    public var cfgs as Dict[String, ptr[ControlFlowGraph]]
+    public var engine as ptr[DiagnosticEngine]
+    public var current_file as String
+    public var divergent_vars as List[String]
+    public var next_bb_id as i64
+    public var loans as List[LoanRecord]
+    public var var_moves as Dict[String, List[Point]]
+    public var var_borrows as Dict[String, List[i64]]
+
+    public fn init_cfg(self as ptr[CFGAnalyzer], engine as ptr[DiagnosticEngine], current_file as String):
+        (deref self).cfgs = Dict[String, ptr[ControlFlowGraph]]()
+        (deref self).engine = engine
+        (deref self).current_file = current_file
+        (deref self).divergent_vars = List[String]()
+        (deref self).next_bb_id = 0 to i64
+        (deref self).loans = List[LoanRecord]()
+        (deref self).var_moves = Dict[String, List[Point]]()
+        (deref self).var_borrows = Dict[String, List[i64]]()
+
+    public fn new_block(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], prefix as cstr) as ptr[BasicBlock]:
+        let bid as i64 = (deref cfg).blocks.length()
+        let name_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        let _s as i32 = sprintf(name_buf, "%s_%lld" to cstr, prefix, bid)
+        let bb as ptr[BasicBlock] = make_basic_block(bid, String.make(name_buf to cstr))
+        free(name_buf to ptr)
+        (deref cfg).blocks.append(bb)
+        return bb
+
+    public fn add_edge(self as ptr[CFGAnalyzer], from_bb as ptr[BasicBlock], to_bb as ptr[BasicBlock]):
+        if from_bb == None to ptr[BasicBlock] or to_bb == None to ptr[BasicBlock]:
+            return
+        (deref from_bb).successors.append((deref to_bb).id)
+        (deref to_bb).predecessors.append((deref from_bb).id)
+
+    public fn build_function_cfg(self as ptr[CFGAnalyzer], fn_node as ptr[Node]) as ptr[ControlFlowGraph]:
+        let fn_name as String = node_name(fn_node)
+        let is_ext as bool = node_is_extern(fn_node)
+        var ret_type_name as String = String.make("" to cstr)
+        let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
+        if ret_annot != None to ptr[TypeAnnotation]:
+            ret_type_name = (deref ret_annot).name
+
+        let cfg as ptr[ControlFlowGraph] = make_cfg(fn_name, ret_type_name, is_ext, node_span(fn_node))
+        (deref self).cfgs[fn_name] = cfg
+
+        if is_ext:
+            return cfg
+
+        let entry_bb as ptr[BasicBlock] = self.new_block(cfg, "entry" to cstr)
+        (deref cfg).entry_id = (deref entry_bb).id
+
+        let body as ptr[Node] = node_body(fn_node)
+        if body == None to ptr[Node]:
+            return cfg
+
+        var current_bb as ptr[BasicBlock] = entry_bb
+        current_bb = self.build_statements(cfg, current_bb, body)
+
+        // Seal remaining open block
+        if current_bb != None to ptr[BasicBlock] and (deref current_bb).is_sealed == False:
+            (deref current_bb).terminator = make_terminator(TerminatorKind.Return)
+            (deref current_bb).is_sealed = True
+            (deref cfg).exit_ids.append((deref current_bb).id)
+
+        return cfg
+
+    public fn build_statements(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], block_node as ptr[Node]) as ptr[BasicBlock]:
+        if block_node == None to ptr[Node] or current_bb == None to ptr[BasicBlock]:
+            return current_bb
+
+        let decls_raw as List[ptr[Node]] = node_declarations(block_node)
+        let decls as ptr[List[ptr[Node]]] = ref decls_raw
+        let count as i64 = (deref decls).length()
+
+        var bb as ptr[BasicBlock] = current_bb
+        var already_returned as bool = False
+
+        var i as i64 = 0 to i64
+        while i < count:
+            let stmt as ptr[Node] = (deref decls)[i]
+            if stmt != None to ptr[Node]:
+                let k as NodeType = node_kind(stmt)
+
+                if already_returned:
+                    // Report unreachable code detected after return/throw
+                    if (deref self).engine != None to ptr[DiagnosticEngine]:
+                        let s as Span = node_span(stmt)
+                        let _d as ptr[Diagnostic] = (deref (deref self).engine).report_error(
+                            err_unreachable_code(),
+                            String.make("unreachable code detected after guaranteed return" to cstr),
+                            (deref self).current_file,
+                            s
+                        )
+                elif k == NodeType.ReturnStmt:
+                    (deref bb).statements.append(stmt)
+                    var term as Terminator = make_terminator(TerminatorKind.Return)
+                    term.expr = node_left(stmt)
+                    term.span = node_span(stmt)
+                    (deref bb).terminator = term
+                    (deref bb).is_sealed = True
+                    (deref cfg).exit_ids.append((deref bb).id)
+                    already_returned = True
+                elif k == NodeType.ThrowStmt:
+                    (deref bb).statements.append(stmt)
+                    var term as Terminator = make_terminator(TerminatorKind.Throw)
+                    term.expr = node_left(stmt)
+                    term.span = node_span(stmt)
+                    (deref bb).terminator = term
+                    (deref bb).is_sealed = True
+                    (deref cfg).exit_ids.append((deref bb).id)
+                    already_returned = True
+                elif k == NodeType.IfStmt:
+                    bb = self.build_if(cfg, bb, stmt)
+                elif k == NodeType.WhileStmt:
+                    bb = self.build_while(cfg, bb, stmt)
+                elif k == NodeType.ForStmt:
+                    bb = self.build_for(cfg, bb, stmt)
+                elif k == NodeType.BlockStmt or k == NodeType.ParamBlockStmt:
+                    bb = self.build_statements(cfg, bb, stmt)
+                else:
+                    (deref bb).statements.append(stmt)
+            i = i + 1 to i64
+
+        return bb
+
+    public fn build_if(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], if_node as ptr[Node]) as ptr[BasicBlock]:
+        let cond_node as ptr[Node] = node_cond(if_node)
+        let then_node as ptr[Node] = node_then_branch(if_node)
+        var else_node as ptr[Node] = None to ptr[Node]
+        let opt_eb as Option[ptr[Node]] = node_else_branch(if_node)
+        let opt_ref as ptr[u8] = (ref opt_eb) to ptr[u8]
+        if option_has_value(opt_ref):
+            else_node = option_value(opt_ref) to ptr[Node]
+
+        let then_bb as ptr[BasicBlock] = self.new_block(cfg, "then" to cstr)
+        let else_bb as ptr[BasicBlock] = self.new_block(cfg, "else" to cstr)
+        let join_bb as ptr[BasicBlock] = self.new_block(cfg, "join" to cstr)
+
+        // Seal current block with BranchIf
+        var term as Terminator = make_terminator(TerminatorKind.BranchIf)
+        term.then_bb = (deref then_bb).id
+        term.else_bb = (deref else_bb).id
+        term.expr = cond_node
+        term.span = node_span(if_node)
+        (deref current_bb).terminator = term
+        (deref current_bb).is_sealed = True
+        self.add_edge(current_bb, then_bb)
+        self.add_edge(current_bb, else_bb)
+
+        // Build Then branch
+        var then_exit as ptr[BasicBlock] = then_bb
+        if then_node != None to ptr[Node]:
+            if node_kind(then_node) == NodeType.BlockStmt or node_kind(then_node) == NodeType.ParamBlockStmt:
+                then_exit = self.build_statements(cfg, then_bb, then_node)
+            else:
+                (deref then_bb).statements.append(then_node)
+
+        if then_exit != None to ptr[BasicBlock] and (deref then_exit).is_sealed == False:
+            var b_term as Terminator = make_terminator(TerminatorKind.Branch)
+            b_term.target_bb = (deref join_bb).id
+            (deref then_exit).terminator = b_term
+            (deref then_exit).is_sealed = True
+            self.add_edge(then_exit, join_bb)
+
+        // Build Else branch
+        var else_exit as ptr[BasicBlock] = else_bb
+        if else_node != None to ptr[Node]:
+            if node_kind(else_node) == NodeType.BlockStmt or node_kind(else_node) == NodeType.ParamBlockStmt:
+                else_exit = self.build_statements(cfg, else_bb, else_node)
+            else:
+                (deref else_bb).statements.append(else_node)
+
+        if else_exit != None to ptr[BasicBlock] and (deref else_exit).is_sealed == False:
+            var b_term as Terminator = make_terminator(TerminatorKind.Branch)
+            b_term.target_bb = (deref join_bb).id
+            (deref else_exit).terminator = b_term
+            (deref else_exit).is_sealed = True
+            self.add_edge(else_exit, join_bb)
+
+        // If both branches terminate with Return/Throw, join_bb is unreachable
+        if (deref join_bb).predecessors.length() == 0 to i64:
+            return None to ptr[BasicBlock]
+
+        return join_bb
+
+    public fn build_while(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], while_node as ptr[Node]) as ptr[BasicBlock]:
+        let cond_node as ptr[Node] = node_cond(while_node)
+        let body_node as ptr[Node] = node_body(while_node)
+
+        let cond_bb as ptr[BasicBlock] = self.new_block(cfg, "while_cond" to cstr)
+        let body_bb as ptr[BasicBlock] = self.new_block(cfg, "while_body" to cstr)
+        let exit_bb as ptr[BasicBlock] = self.new_block(cfg, "while_exit" to cstr)
+
+        // Branch from current_bb to cond_bb
+        var to_cond as Terminator = make_terminator(TerminatorKind.Branch)
+        to_cond.target_bb = (deref cond_bb).id
+        (deref current_bb).terminator = to_cond
+        (deref current_bb).is_sealed = True
+        self.add_edge(current_bb, cond_bb)
+
+        // Condition block branches to body_bb or exit_bb
+        var if_term as Terminator = make_terminator(TerminatorKind.BranchIf)
+        if_term.then_bb = (deref body_bb).id
+        if_term.else_bb = (deref exit_bb).id
+        if_term.expr = cond_node
+        if_term.span = node_span(while_node)
+        (deref cond_bb).terminator = if_term
+        (deref cond_bb).is_sealed = True
+        self.add_edge(cond_bb, body_bb)
+        self.add_edge(cond_bb, exit_bb)
+
+        // Build while body
+        var body_exit as ptr[BasicBlock] = body_bb
+        if body_node != None to ptr[Node]:
+            if node_kind(body_node) == NodeType.BlockStmt or node_kind(body_node) == NodeType.ParamBlockStmt:
+                body_exit = self.build_statements(cfg, body_bb, body_node)
+            else:
+                (deref body_bb).statements.append(body_node)
+
+        // Loop back to condition block
+        if body_exit != None to ptr[BasicBlock] and (deref body_exit).is_sealed == False:
+            var back_term as Terminator = make_terminator(TerminatorKind.Branch)
+            back_term.target_bb = (deref cond_bb).id
+            (deref body_exit).terminator = back_term
+            (deref body_exit).is_sealed = True
+            self.add_edge(body_exit, cond_bb)
+
+        return exit_bb
+
+    public fn build_for(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], for_node as ptr[Node]) as ptr[BasicBlock]:
+        let body_node as ptr[Node] = node_body(for_node)
+
+        let cond_bb as ptr[BasicBlock] = self.new_block(cfg, "for_cond" to cstr)
+        let body_bb as ptr[BasicBlock] = self.new_block(cfg, "for_body" to cstr)
+        let exit_bb as ptr[BasicBlock] = self.new_block(cfg, "for_exit" to cstr)
+
+        var to_cond as Terminator = make_terminator(TerminatorKind.Branch)
+        to_cond.target_bb = (deref cond_bb).id
+        (deref current_bb).terminator = to_cond
+        (deref current_bb).is_sealed = True
+        self.add_edge(current_bb, cond_bb)
+
+        var if_term as Terminator = make_terminator(TerminatorKind.BranchIf)
+        if_term.then_bb = (deref body_bb).id
+        if_term.else_bb = (deref exit_bb).id
+        if_term.span = node_span(for_node)
+        (deref cond_bb).terminator = if_term
+        (deref cond_bb).is_sealed = True
+        self.add_edge(cond_bb, body_bb)
+        self.add_edge(cond_bb, exit_bb)
+
+        var body_exit as ptr[BasicBlock] = body_bb
+        if body_node != None to ptr[Node]:
+            if node_kind(body_node) == NodeType.BlockStmt or node_kind(body_node) == NodeType.ParamBlockStmt:
+                body_exit = self.build_statements(cfg, body_bb, body_node)
+            else:
+                (deref body_bb).statements.append(body_node)
+
+        if body_exit != None to ptr[BasicBlock] and (deref body_exit).is_sealed == False:
+            var back_term as Terminator = make_terminator(TerminatorKind.Branch)
+            back_term.target_bb = (deref cond_bb).id
+            (deref body_exit).terminator = back_term
+            (deref body_exit).is_sealed = True
+            self.add_edge(body_exit, cond_bb)
+
+        return exit_bb
+
+    // ── Return-Path Completeness Validation ───────────────────────────────
+    public fn validate_return_paths(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]) as bool:
+        if (deref cfg).is_extern:
+            return True
+
+        let rt as String = (deref cfg).ret_type_name
+        if rt.len == 0 to usize:
+            return True
+        let rtc as cstr = rt.data to cstr
+        if strcmp(rtc, "void" to cstr) == 0 or strcmp(rtc, "Empty" to cstr) == 0:
+            return True
+
+        // Verify that all REACHABLE exit blocks terminate in Return or Throw
+        let block_cnt as i64 = (deref cfg).blocks.length()
+        var reachable as List[bool] = List[bool]()
+        var b as i64 = 0 to i64
+        while b < block_cnt:
+            reachable.append(False)
+            b = b + 1 to i64
+
+        var worklist as List[i64] = List[i64]()
+        if block_cnt > 0 to i64:
+            worklist.append((deref cfg).entry_id)
+            if (deref cfg).entry_id >= 0 to i64 and (deref cfg).entry_id < block_cnt:
+                reachable[(deref cfg).entry_id] = True
+
+        var q_head as i64 = 0 to i64
+        while q_head < worklist.length():
+            let curr_id as i64 = worklist[q_head]
+            q_head = q_head + 1 to i64
+            let curr_bb as ptr[BasicBlock] = (deref cfg).blocks[curr_id]
+            let succ_cnt as i64 = (deref curr_bb).successors.length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < succ_cnt:
+                let s_id as i64 = (deref curr_bb).successors[s_idx]
+                if s_id >= 0 to i64 and s_id < block_cnt:
+                    if reachable[s_id] == False:
+                        reachable[s_id] = True
+                        worklist.append(s_id)
+                s_idx = s_idx + 1 to i64
+
+        var i as i64 = 0 to i64
+        while i < block_cnt:
+            if reachable[i]:
+                let bb as ptr[BasicBlock] = (deref cfg).blocks[i]
+                if (deref bb).successors.length() == 0 to i64:
+                    let term as Terminator = (deref bb).terminator
+                    if term.kind != TerminatorKind.Return and term.kind != TerminatorKind.Throw:
+                        if (deref self).engine != None to ptr[DiagnosticEngine]:
+                            let s as Span = (deref cfg).span
+                            var msg as StringBuilder = StringBuilder.make()
+                            msg.append("missing return statement in function '" to cstr)
+                            msg.append_slice((deref cfg).func_name.data, (deref cfg).func_name.len)
+                            msg.append("' on one or more execution paths" to cstr)
+                            let _d as ptr[Diagnostic] = (deref (deref self).engine).report_error(
+                                err_missing_return(),
+                                msg.to_string(),
+                                (deref self).current_file,
+                                s
+                            )
+                            msg.deinit()
+                            return False
+            i = i + 1 to i64
+
+        return True
+
+    // ── Polonius Origin & Loan Safety Check ───────────────────────────────
+    public fn analyze_polonius_borrows(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]):
+        // Scans basic blocks for borrow creation (&var / ref var) and invalidating moves
+        let block_cnt as i64 = (deref cfg).blocks.length()
+        var b_idx as i64 = 0 to i64
+        while b_idx < block_cnt:
+            let bb as ptr[BasicBlock] = (deref cfg).blocks[b_idx]
+            let stmt_cnt as i64 = (deref bb).statements.length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < stmt_cnt:
+                let stmt as ptr[Node] = (deref bb).statements[s_idx]
+                if stmt != None to ptr[Node]:
+                    let k as NodeType = node_kind(stmt)
+                    if k == NodeType.VarDecl:
+                        let v_name as String = node_name(stmt)
+                        let init_expr as ptr[Node] = node_left(stmt)
+                        if init_expr != None to ptr[Node] and node_kind(init_expr) == NodeType.UnaryExpr:
+                            let u_op as String = symbols.node_op(init_expr)
+                            if u_op.data != None and strcmp(u_op.data to cstr, "ref" to cstr) == 0:
+                                let borrowed_var as ptr[Node] = node_left(init_expr)
+                                if borrowed_var != None to ptr[Node] and node_kind(borrowed_var) == NodeType.Identifier:
+                                    let src_nm as String = node_name(borrowed_var)
+                                    let lid as i64 = (deref self).loans.length()
+                                    let lr as LoanRecord = LoanRecord(
+                                        loan_id = lid,
+                                        source_var = src_nm,
+                                        is_mut = False,
+                                        span = node_span(stmt),
+                                        issued_bb = (deref bb).id,
+                                        issued_stmt = s_idx
+                                    )
+                                    (deref self).loans.append(lr)
+                    elif k == NodeType.CallExpr:
+                        // Check arguments for moves
+                        let args_node as ptr[Node] = node_right(stmt)
+                        if args_node != None to ptr[Node]:
+                            let decls_raw as List[ptr[Node]] = node_declarations(args_node)
+                            let decls as ptr[List[ptr[Node]]] = ref decls_raw
+                            var a_idx as i64 = 0 to i64
+                            while a_idx < (deref decls).length():
+                                let arg as ptr[Node] = (deref decls)[a_idx]
+                                if arg != None to ptr[Node] and node_kind(arg) == NodeType.Identifier:
+                                    let moved_nm as String = node_name(arg)
+                                    // Record move at point
+                                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = s_idx)
+                                    if not (deref self).var_moves.has(moved_nm):
+                                        (deref self).var_moves[moved_nm] = List[Point]()
+                                    var mv_list as List[Point] = (deref self).var_moves[moved_nm]
+                                    mv_list.append(pt)
+                                a_idx = a_idx + 1 to i64
+                s_idx = s_idx + 1 to i64
+            b_idx = b_idx + 1 to i64
+
+    // ── Path-Sensitive Drop Elaboration ───────────────────────────────────
+    public fn elaborate_branch_divergent_drops(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]):
+        // Detect variables moved along some paths to exit, but not all paths
+        let block_cnt as i64 = (deref cfg).blocks.length()
+        if block_cnt < 2 to i64:
+            return
+
+        // Inspect var moves across branch blocks
+        var k_idx as i64 = 0 to i64
+        let move_keys as List[String] = (deref self).var_moves.keys()
+        while k_idx < move_keys.length():
+            let v_nm as String = move_keys[k_idx]
+            let mvs as List[Point] = (deref self).var_moves[v_nm]
+            if mvs.length() > 0 to i64:
+                // Check if moved in some block with multiple successors / siblings
+                var has_unmoved_path as bool = False
+                var m_i as i64 = 0 to i64
+                while m_i < mvs.length():
+                    let pt as Point = mvs[m_i]
+                    // If the move occurred in a block with a sibling block that has no moves
+                    var b_i as i64 = 0 to i64
+                    while b_i < block_cnt:
+                        let other_bb as ptr[BasicBlock] = (deref cfg).blocks[b_i]
+                        if (deref other_bb).id != pt.bb_id and (deref other_bb).successors.length() > 0 to i64:
+                            has_unmoved_path = True
+                        b_i = b_i + 1 to i64
+                    m_i = m_i + 1 to i64
+
+                if has_unmoved_path:
+                    // Variable requires a dynamic stack drop flag
+                    var already_added as bool = False
+                    var d_i as i64 = 0 to i64
+                    while d_i < (deref self).divergent_vars.length():
+                        if strcmp((deref self).divergent_vars[d_i].data to cstr, v_nm.data to cstr) == 0:
+                            already_added = True
+                        d_i = d_i + 1 to i64
+                    if not already_added:
+                        (deref self).divergent_vars.append(v_nm)
+            k_idx = k_idx + 1 to i64
+
+    // ── Program-Level Entry Point ─────────────────────────────────────────
+    public fn analyze_program(self as ptr[CFGAnalyzer], root as ptr[Node]) as bool:
+        if root == None to ptr[Node]:
+            return True
+
+        let decls_raw as List[ptr[Node]] = node_declarations(root)
+        let decls as ptr[List[ptr[Node]]] = ref decls_raw
+        let count as i64 = (deref decls).length()
+
+        var all_ok as bool = True
+        var i as i64 = 0 to i64
+        while i < count:
+            let decl as ptr[Node] = (deref decls)[i]
+            if decl != None to ptr[Node]:
+                let k as NodeType = node_kind(decl)
+                if k == NodeType.FunDecl:
+                    let cfg as ptr[ControlFlowGraph] = self.build_function_cfg(decl)
+                    let ret_ok as bool = self.validate_return_paths(cfg)
+                    if not ret_ok:
+                        all_ok = False
+                    self.analyze_polonius_borrows(cfg)
+                    self.elaborate_branch_divergent_drops(cfg)
+                elif k == NodeType.ClassDecl or k == NodeType.StructDecl:
+                    let b as ptr[Node] = node_body(decl)
+                    if b != None to ptr[Node]:
+                        let m_decls_raw as List[ptr[Node]] = node_declarations(b)
+                        let m_decls as ptr[List[ptr[Node]]] = ref m_decls_raw
+                        var m_idx as i64 = 0 to i64
+                        while m_idx < (deref m_decls).length():
+                            let m_decl as ptr[Node] = (deref m_decls)[m_idx]
+                            if m_decl != None to ptr[Node] and node_kind(m_decl) == NodeType.FunDecl:
+                                let m_cfg as ptr[ControlFlowGraph] = self.build_function_cfg(m_decl)
+                                let m_ret_ok as bool = self.validate_return_paths(m_cfg)
+                                if not m_ret_ok:
+                                    all_ok = False
+                                self.analyze_polonius_borrows(m_cfg)
+                                self.elaborate_branch_divergent_drops(m_cfg)
+                            m_idx = m_idx + 1 to i64
+            i = i + 1 to i64
+
+        return all_ok

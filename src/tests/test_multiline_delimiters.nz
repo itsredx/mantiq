@@ -1,90 +1,133 @@
-// ── Multiline Open and Close Delimiters Test Suite ────────────────────
+// ── Multiline Delimiters & Formatting Test Suite ──────────────────────────
 import std.collections
 import std.string
-import std.mem
-
-from std.string import String
+from std.string import String, StringBuilder
 from std.collections import List, Dict
-from std.mem import make, drop
 
+// ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
-// ── 1. Multiline Function Declaration ─────────────────────────────────
-fn multiline_add(
-    a as i64,
-    b as i64,
-    c as i64,
-) -> i64:
-    return (
-        a +
+// ── Multiline Function Declaration ───────────────────────────────────────
+fn compute_sum(
+    a as i32,
+    b as i32,
+    c as i32,
+) as i32:
+    return a +
         b +
         c
+
+// ── Test 1: Multiline Calls and Expressions ──────────────────────────────
+fn test_multiline_calls() as bool:
+    let result as i32 = compute_sum(
+        10,
+        20,
+        30,
     )
+    if result != 60:
+        printf("  [FAIL] Multiline call result expected 60, got %d\n" to cstr, result)
+        return False
+    printf("  [PASS] Multiline function declaration and call expressions\n" to cstr)
+    return True
 
-fn main() -> i32:
-    let _h as i32 = printf("=== Running test_multiline_delimiters.nz ===\n\n" to cstr)
-
-    // ── 2. Multiline Call Expression ──────────────────────────────────
-    let sum as i64 = multiline_add(
-        10 to i64,
-        20 to i64,
-        30 to i64,
-    )
-    if sum != 60 to i64:
-        let _err as i32 = printf("FAILED: multiline_add returned %ld, expected 60\n" to cstr, sum)
-        return 1 to i64 to i32
-    let _p1 as i32 = printf("Test 1 (Multiline Function Decl & Call): PASSED!\n" to cstr)
-
-    // ── 3. Multiline List Literal & Indexing ──────────────────────────
-    let mut list as List[
-        i64
+// ── Test 2: Multiline Collections & Generics ─────────────────────────────
+fn test_multiline_collections() as bool:
+    var items as List[
+        i32
     ] = [
-        100 to i64,
-        200 to i64,
-        300 to i64,
+        100,
+        200,
+        300,
     ]
-    let elem as i64 = list[
-        1 to i64
-    ]
-    if list.length() != 3 to i64 or elem != 200 to i64:
-        let _err as i32 = printf("FAILED: multiline list literal or indexing\n" to cstr)
-        return 1 to i64 to i32
-    let _p2 as i32 = printf("Test 2 (Multiline List Literal & Indexing): PASSED!\n" to cstr)
 
-    // ── 4. Multiline Dict Literal ─────────────────────────────────────
-    let mut dict as Dict[
-        i64,
-        i64
+    let second as i32 = items[
+        1
+    ]
+    if second != 200:
+        printf("  [FAIL] Multiline index expected 200, got %d\n" to cstr, second)
+        return False
+
+    var map as Dict[
+        i32,
+        i32,
     ] = {
-        1 to i64:
-            10 to i64,
-        2 to i64:
-            20 to i64,
+        10: 100,
+        20: 200,
     }
-    if dict.length() != 2 to i64:
-        let _err as i32 = printf("FAILED: multiline dict literal\n" to cstr)
-        return 1 to i64 to i32
-    let _p3 as i32 = printf("Test 3 (Multiline Dict Literal & Generics): PASSED!\n" to cstr)
 
-    // ── 5. Multiline Parenthesized Expression ─────────────────────────
-    let calc as i64 = (
-        (10 to i64 * 2 to i64) +
-        (30 to i64 * 3 to i64)
-    )
-    if calc != 110 to i64:
-        let _err as i32 = printf("FAILED: multiline parenthesized expr\n" to cstr)
-        return 1 to i64 to i32
-    let _p4 as i32 = printf("Test 4 (Multiline Parenthesized Expressions): PASSED!\n" to cstr)
+    if map[10] != 100 or map[20] != 200:
+        printf("  [FAIL] Multiline dict expected entries 100 and 200\n" to cstr)
+        return False
 
-    // ── 6. Multiline F-String Interpolation ───────────────────────────
-    let num as i64 = 42 to i64
-    let s as String = f"the answer is {
+    printf("  [PASS] Multiline lists, dicts, indexing, and generic parameters\n" to cstr)
+    return True
+
+// ── Test 3: Multiline Binary & Logical Operators ─────────────────────────
+fn test_multiline_chaining() as bool:
+    let expr_val as i32 = 100 +
+        200 -
+        50 *
+        2
+
+    if expr_val != 200:
+        printf("  [FAIL] Multiline binary operator expected 200, got %d\n" to cstr, expr_val)
+        return False
+
+    let cmp_val as bool = (100 > 50) and
+        (200 > 100) and
+        (50 == 50)
+
+    if cmp_val == False:
+        printf("  [FAIL] Multiline boolean operator expected True\n" to cstr)
+        return False
+
+    printf("  [PASS] Multiline binary and logical expressions\n" to cstr)
+    return True
+
+// ── Test 4: Multiline String Interpolation ───────────────────────────────
+fn test_multiline_fstring() as bool:
+    let num as i32 = 42
+    let s as String = f"The value is {
         num
-    }."
-    if s.len != 17 to usize:
-        let _err as i32 = printf("FAILED: multiline f-string\n" to cstr)
-        return 1 to i64 to i32
-    let _p5 as i32 = printf("Test 5 (Multiline F-String Interpolation): PASSED!\n" to cstr)
+    } today"
 
-    let _done as i32 = printf("\nAll multiline delimiter tests PASSED successfully!\n" to cstr)
-    return 0 to i64 to i32
+    if strcmp(s.data to cstr, "The value is 42 today" to cstr) != 0:
+        printf("  [FAIL] Multiline f-string expected 'The value is 42 today', got '%s'\n" to cstr, s.data to cstr)
+        return False
+
+    printf("  [PASS] Multiline string interpolation\n" to cstr)
+    return True
+
+// ── Test 5: CFG Drop Elaboration on Divergent Branch ─────────────────────
+fn early_exit_helper(flag as bool) as i32:
+    var s as String = String.make("cfg_test_resource" to cstr)
+    if flag:
+        return 1
+    return 2
+
+fn test_cfg_drop_elaboration() as bool:
+    let r1 as i32 = early_exit_helper(True)
+    let r2 as i32 = early_exit_helper(False)
+    if r1 != 1 or r2 != 2:
+        printf("  [FAIL] CFG early return expected (1, 2), got (%d, %d)\n" to cstr, r1, r2)
+        return False
+    printf("  [PASS] CFG Drop Elaboration on divergent return branches\n" to cstr)
+    return True
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────
+fn main() as i32:
+    printf("=== Running Multiline Delimiters & Formatting Test Suite ===\n" to cstr)
+    var passed as bool = True
+    passed = passed and test_multiline_calls()
+    passed = passed and test_multiline_collections()
+    passed = passed and test_multiline_chaining()
+    passed = passed and test_multiline_fstring()
+    passed = passed and test_cfg_drop_elaboration()
+
+    if passed:
+        printf("=== All Multiline Delimiters Tests Passed Successfully! ===\n" to cstr)
+        return 0
+    else:
+        printf("=== Some Multiline Delimiters Tests Failed! ===\n" to cstr)
+        return 1

@@ -53,6 +53,9 @@ fn err_return_mismatch() as cstr:
 fn err_missing_return() as cstr:
     return "E0310" to cstr
 
+fn err_unreachable_code() as cstr:
+    return "E0311" to cstr
+
 fn err_arg_count_mismatch() as cstr:
     return "E0314" to cstr
 
