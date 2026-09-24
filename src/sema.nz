@@ -432,7 +432,7 @@ struct Sema:
             var sym_name as String = target
             if option_has_value((ref opt_al) to ptr[u8]):
                 let al_p as ptr[String] = option_value((ref opt_al) to ptr[u8]) to ptr[String]
-                if al_p != None to ptr[String]:
+                if (al_p to ptr[u8]) != (None to ptr[u8]):
                     sym_name = deref al_p
             let py_sym as ptr[Symbol] = make_symbol(sym_name, SymbolKind.Variable, node)
             (deref py_sym).resolved_type = make_type(TypeKind.PyObject)

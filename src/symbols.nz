@@ -445,7 +445,7 @@ fn node_file_path(n as ptr[Node], default_file as String) as String:
     let opt_ref as ptr[OptionLayout] = (ref opt_raw) to ptr[OptionLayout]
     if (deref opt_ref).has_val == 1 to u8 and (deref opt_ref).val_ptr != None to ptr[u8]:
         let s_ptr as ptr[String] = (deref opt_ref).val_ptr to ptr[String]
-        if s_ptr != None to ptr[String] and (deref s_ptr).data != None to ptr[u8] and (deref s_ptr).len > 0 to usize:
+        if (s_ptr to ptr[u8]) != (None to ptr[u8]) and (deref s_ptr).data != None to ptr[u8] and (deref s_ptr).len > 0 to usize:
             return deref s_ptr
     return default_file
 

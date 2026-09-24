@@ -73,9 +73,11 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         self.needs_printf: bool = False
         self.needs_math: bool = False
         self.has_main: bool = False
+        self.user_defined_main: bool = False
         self.top_level_stmts: List[ast.stmt] = []
         self.current_class: Optional[str] = None
         self.current_class_fields: Set[str] = set()
+        self._list_iter_counter: int = 0
 
     def emit(self, line: str = ""):
         if not line:
@@ -129,6 +131,19 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
                 self.visit(stmt)
             elif isinstance(stmt, ast.If) and self._is_main_guard(stmt):
+                glue_only = (
+                    len(stmt.body) == 1
+                    and isinstance(stmt.body[0], ast.Expr)
+                    and isinstance(stmt.body[0].value, ast.Call)
+                    and isinstance(stmt.body[0].value.func, ast.Name)
+                    and stmt.body[0].value.func.id == "main"
+                    and not stmt.body[0].value.args
+                    and not stmt.body[0].value.keywords
+                )
+                if self.user_defined_main and glue_only:
+                    # user `fn main():` IS the entrypoint; the guard just
+                    # invokes it, so nothing more to emit.
+                    continue
                 # if __name__ == '__main__': ...
                 self.has_main = True
                 self.emit()
@@ -142,7 +157,44 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             else:
                 script_stmts.append(stmt)
 
+        # Drop the Python "call main at the end" glue when the user already
+        # defined `def main` — that user main IS the Nizam application entry
+        # (single `fn main():`), so emitting a script wrapper would duplicate it.
+        if self.has_main and any(
+            isinstance(s, ast.Expr) and isinstance(s.value, ast.Call)
+            and isinstance(s.value.func, ast.Name)
+            and s.value.func.id == "main"
+            and not s.value.args
+            and not s.value.keywords
+            for s in script_stmts
+        ):
+            script_stmts = [
+                s for s in script_stmts
+                if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Call)
+                        and isinstance(s.value.func, ast.Name)
+                        and s.value.func.id == "main"
+                        and not s.value.args and not s.value.keywords)
+            ]
+
         # If there are top-level script statements and no main was generated:
+        # If there are top-level script statements and no main was generated,
+        # but the user already defined `def main` (single `fn main():`):
+        # a trailing bare `main()` is just the Python glue call — the user's
+        # `fn main():` IS the application entry, so drop the glue instead of
+        # wrapping it in a second `fn main() as i32:`.
+        if script_stmts and not self.has_main and self.user_defined_main:
+            script_stmts = [
+                stmt for stmt in script_stmts
+                if not (
+                    isinstance(stmt, ast.Expr)
+                    and isinstance(stmt.value, ast.Call)
+                    and isinstance(stmt.value.func, ast.Name)
+                    and stmt.value.func.id == "main"
+                    and not stmt.value.args
+                    and not stmt.value.keywords
+                )
+            ]
+
         if script_stmts and not self.has_main:
             self.has_main = True
             self.emit()
@@ -351,6 +403,8 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                     params_strs.append(f"{arg.arg} as {arg_type}")
 
         ret_type = self.type_env.resolve_annotation(node.returns) if node.returns else "void"
+        if node.name == "main" and not self.current_class:
+            self.user_defined_main = True
         param_str = ", ".join(params_strs)
 
         if self.syntax == "nz" and self.current_class:
@@ -503,6 +557,18 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
                 stop_str = self.visit_expr(args[1])
                 self.emit(f"for {target_str} in {start_str}..{stop_str}:")
         else:
+            iter_type = self.type_env.infer_expression_type(iter_node)
+            if iter_type.startswith("List[") or iter_type == "list":
+                iter_str = self.visit_expr(iter_node)
+                self._list_iter_counter += 1
+                idx_name = f"__list_idx_{self._list_iter_counter}"
+                self.emit(f"for {idx_name} in 0..{iter_str}.len():")
+                self.indent_level += 1
+                self.emit(f"let {target_str} = {iter_str}[{idx_name}]")
+                for stmt in node.body:
+                    self.visit(stmt)
+                self.indent_level -= 1
+                return
             iter_str = self.visit_expr(iter_node)
             self.emit(f"for {target_str} in {iter_str}:")
 
@@ -592,11 +658,43 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
         if isinstance(node.op, ast.Pow):
             self.needs_math = True
             return f"pow({left}, {right})"
+        left_t = self.type_env.infer_expression_type(node.left)
+        right_t = self.type_env.infer_expression_type(node.right)
+        left_is_list = left_t.startswith("List[") or left_t == "list"
+        right_is_list = right_t.startswith("List[") or right_t == "list"
+        if isinstance(node.op, ast.Mult):
+            if left_t == "String":
+                return f"({left}).__mul__({right})"
+            if right_t == "String":
+                return f"({right}).__mul__({left})"
+            if left_is_list or right_is_list:
+                if left_is_list:
+                    return f"({left}).__mul__({right})"
+                return f"({right}).__mul__({left})"
+        if isinstance(node.op, ast.Add):
+            if left_is_list:
+                return f"({left}).__add__({right})"
+            if right_is_list:
+                return f"({right}).__add__({left})"
         op_str = BIN_OP_MAP.get(type(node.op), "+")
         return f"({left} {op_str} {right})"
 
     def _format_compare(self, node: ast.Compare) -> str:
         left = self.visit_expr(node.left)
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
+            comp_str = self.visit_expr(node.comparators[0])
+            call = f"{comp_str}.__contains__({left})"
+            return f"not {call}" if isinstance(node.ops[0], ast.NotIn) else call
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.NotEq)):
+            right = self.visit_expr(node.comparators[0])
+            left_t = self.type_env.infer_expression_type(node.left)
+            right_t = self.type_env.infer_expression_type(node.comparators[0])
+            left_is_list = left_t.startswith("List[") or left_t == "list"
+            right_is_list = right_t.startswith("List[") or right_t == "list"
+            if left_is_list or right_is_list:
+                if isinstance(node.ops[0], ast.Eq):
+                    return f"({left}).__eq__({right})"
+                return f"({left}).__ne__({right})"
         parts = [left]
         for op, comp in zip(node.ops, node.comparators):
             op_sym = CMP_OP_MAP.get(type(op), "==")
@@ -677,14 +775,45 @@ class NizamTranspilerVisitor(ast.NodeVisitor):
             default_str = self.visit_expr(node.args[1]) if len(node.args) == 2 else "None"
             return f"({obj_str}[{key_str}] if {obj_str}.has({key_str}) else {default_str})"
 
+        # Check str.format(*args) -> String.format(List[String])
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "format" and not node.keywords:
+            fmt_args = []
+            for a in node.args:
+                s = self.visit_expr(a)
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    fmt_args.append(f"String.make({s})")
+                else:
+                    at = self.type_env.infer_expression_type(a)
+                    if at in ("String", "cstr", "str"):
+                        fmt_args.append(s)
+                    else:
+                        fmt_args.append(f"({s}).to_string()")
+            args_str = ", ".join(fmt_args)
+            recv_node = node.func.value
+            if isinstance(recv_node, ast.Constant) and isinstance(recv_node.value, str):
+                recv_str = f"String.make({self.visit_expr(recv_node)})"
+            else:
+                recv_str = self.visit_expr(recv_node)
+                recv_at = self.type_env.infer_expression_type(recv_node)
+                if recv_at not in ("String", "cstr", "str"):
+                    recv_str = f"({recv_str}).to_string()"
+            return f"{recv_str}.format([{args_str}])"
+
         # Check pop(...)
         if isinstance(node.func, ast.Attribute) and node.func.attr == "pop":
             obj_str = self.visit_expr(node.func.value)
+            obj_at = self.type_env.infer_expression_type(node.func.value)
+            if obj_at == "dict":
+                if node.args:
+                    arg_str = self.visit_expr(node.args[0])
+                    return f"{obj_str}.remove({arg_str})"
+                else:
+                    return f"{obj_str}.remove({obj_str}.len() - 1)"
             if node.args:
                 arg_str = self.visit_expr(node.args[0])
-                return f"{obj_str}.remove({arg_str})"
+                return f"{obj_str}.pop({arg_str})"
             else:
-                return f"{obj_str}.remove({obj_str}.len() - 1)"
+                return f"{obj_str}.pop()"
 
         target = None
         if isinstance(node.func, ast.Name):

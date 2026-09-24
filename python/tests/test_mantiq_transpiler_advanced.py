@@ -109,6 +109,20 @@ def test_strings(s: str) -> bool:
         self.assertIn('s.replace("foo" to cstr, "bar" to cstr)', mq_code)
         self.assertIn('s.split("," to cstr)', mq_code)
 
+    # ── Test 4b: str.format Lowering ────────────────────────────────────
+    def test_str_format_lowering(self):
+        py_code = """
+def greet(name: str, count: int) -> str:
+    msg: str = "Hello {} ({} yrs)".format(name, count)
+    fallback: str = "{}".format("x")
+    return msg
+"""
+        transpiler = Transpiler(syntax="mq")
+        mq_code = transpiler.transpile(py_code)
+
+        self.assertIn('String.make("Hello {} ({} yrs)" to cstr).format([name, (count).to_string()])', mq_code)
+        self.assertIn('String.make("{}" to cstr).format([String.make("x" to cstr)])', mq_code)
+
     # ── Test 5: Dict Items Iteration Lowering ───────────────────────────
     def test_dict_items_lowering(self):
         py_code = """
@@ -136,7 +150,55 @@ def check_dict(d: dict):
         self.assertIn('(d["key" to cstr] if d.has("key" to cstr) else 100)', mq_code)
         self.assertIn('d.remove("key" to cstr)', mq_code)
 
-    # ── Test 7: Project Transpiler Mantiq Mode and Compiler Check ──────
+    # ── Test 7: List method Pass-Through Mapping ───────────────────────
+    def test_list_count_and_reverse_mapping(self):
+        py_code = """
+def tally(items: list, needle: int) -> int:
+    n: int = items.count(needle)
+    items.reverse()
+    return n
+"""
+        transpiler = Transpiler(syntax="mq")
+        mq_code = transpiler.transpile(py_code)
+
+        self.assertIn("items.count(needle)", mq_code)
+        self.assertIn("items.reverse()", mq_code)
+
+    # ── Test 8: List index/remove/insert Pass-Through Mapping ──────────
+    def test_list_index_remove_insert_mapping(self):
+        py_code = """
+def edit(items: list, needle: int):
+    pos: int = items.index(needle)
+    items.remove(needle)
+    items.insert(0, needle)
+"""
+        transpiler = Transpiler(syntax="mq")
+        mq_code = transpiler.transpile(py_code)
+
+        self.assertIn("items.index(needle)", mq_code)
+        self.assertIn("items.remove(needle)", mq_code)
+        self.assertIn("items.insert(0, needle)", mq_code)
+
+    # ── Test 8b: List copy/pop/sort/data Pass-Through Mapping ─────────
+    def test_list_copy_pop_sort_mapping(self):
+        py_code = """
+def mangle(items: list, needle: int):
+    dup = items.copy()
+    last: int = items.pop()
+    first: int = items.pop(0)
+    items.sort()
+    items.append(needle)
+"""
+        transpiler = Transpiler(syntax="mq")
+        mq_code = transpiler.transpile(py_code)
+
+        self.assertIn("items.copy()", mq_code)
+        self.assertIn("last as i64 = items.pop()", mq_code)
+        self.assertIn("first as i64 = items.pop(0)", mq_code)
+        self.assertIn("items.sort()", mq_code)
+        self.assertIn("items.append(needle)", mq_code)
+
+    # ── Test 9: Project Transpiler Mantiq Mode and Compiler Check ──────
     def test_project_transpiler_mantiq_mode_and_compiler_check(self):
         # 1. base.py
         with open(os.path.join(self.src_dir, "base.py"), "w") as f:

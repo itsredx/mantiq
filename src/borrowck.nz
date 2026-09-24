@@ -122,6 +122,58 @@ struct BorrowChecker:
     public fn mark_owned(self as ptr[BorrowChecker], name as String, var_type as ptr[Type]):
         (deref self).symbol_states[name] = VarInfo(state = ObjectState.Owned, var_type = var_type)
 
+    public fn snapshot_symbol_states(self as ptr[BorrowChecker]) as Dict[String, VarInfo]:
+        var snap as Dict[String, VarInfo] = Dict[String, VarInfo]()
+        let ss_ref as ptr[Dict[String, VarInfo]] = ref (deref self).symbol_states
+        let keys as List[String] = (deref ss_ref).keys()
+        let k_count as i64 = keys.length()
+        var i as i64 = 0 to i64
+        while i < k_count:
+            let k as String = keys[i]
+            snap[k] = (deref ss_ref)[k]
+            i = i + 1 to i64
+        return snap
+
+    public fn restore_symbol_states(self as ptr[BorrowChecker], snap as Dict[String, VarInfo]):
+        let ss_ref as ptr[Dict[String, VarInfo]] = ref (deref self).symbol_states
+        let cur_keys as List[String] = (deref ss_ref).keys()
+        let cc as i64 = cur_keys.length()
+        var i as i64 = 0 to i64
+        while i < cc:
+            let k as String = cur_keys[i]
+            if not snap.has(k):
+                let _rm as bool = (deref ss_ref).remove(k)
+            i = i + 1 to i64
+        let snap_keys as List[String] = snap.keys()
+        let sc as i64 = snap_keys.length()
+        var j as i64 = 0 to i64
+        while j < sc:
+            let k2 as String = snap_keys[j]
+            (deref ss_ref)[k2] = snap[k2]
+            j = j + 1 to i64
+
+    public fn var_infos_equal(self as ptr[BorrowChecker], a as VarInfo, b as VarInfo) as bool:
+        return (a.state == b.state) and (a.var_type == b.var_type)
+
+    public fn merge_branch_states(self as ptr[BorrowChecker], then_s as Dict[String, VarInfo], else_s as Dict[String, VarInfo]):
+        let ss_ref as ptr[Dict[String, VarInfo]] = ref (deref self).symbol_states
+        let t_keys as List[String] = then_s.keys()
+        let t_count as i64 = t_keys.length()
+        var i as i64 = 0 to i64
+        while i < t_count:
+            let k as String = t_keys[i]
+            if else_s.has(k):
+                let tv as VarInfo = then_s[k]
+                let ev as VarInfo = else_s[k]
+                if tv.state == ev.state:
+                    if self.var_infos_equal(tv, ev):
+                        (deref ss_ref)[k] = tv
+                    else:
+                        if (deref ss_ref).has(k):
+                            let cur as VarInfo = (deref ss_ref)[k]
+                            (deref ss_ref)[k] = VarInfo(state = tv.state, var_type = cur.var_type)
+            i = i + 1 to i64
+
     public fn push_scope(self as ptr[BorrowChecker]):
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
         let depth as i64 = (deref self).scope_depth to i64
@@ -764,12 +816,17 @@ struct BorrowChecker:
             
         elif nt == NodeType.IfStmt: // IfStmt
             self.walk_ast(node_cond(node))
+            let pre_if as Dict[String, VarInfo] = self.snapshot_symbol_states()
             self.walk_ast(node_then_branch(node))
+            let then_if as Dict[String, VarInfo] = self.snapshot_symbol_states()
+            self.restore_symbol_states(pre_if)
             let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
             let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
             if option_has_value(else_opt):
                 let else_node as ptr[Node] = option_value(else_opt) to ptr[Node]
                 self.walk_ast(else_node)
+                let else_if as Dict[String, VarInfo] = self.snapshot_symbol_states()
+                self.merge_branch_states(then_if, else_if)
         elif nt == NodeType.CastExpr:
             self.walk_ast(node_left(node))
         elif nt == NodeType.UnaryExpr:

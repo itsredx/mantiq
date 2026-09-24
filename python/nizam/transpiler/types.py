@@ -172,6 +172,10 @@ class TypeEnvironment:
         if isinstance(node, ast.BinOp):
             left_t = self.infer_expression_type(node.left)
             right_t = self.infer_expression_type(node.right)
+            if isinstance(node.op, ast.BoolOp):
+                return "bool"
+            if left_t.startswith("List[") or right_t.startswith("List[") or left_t == "list" or right_t == "list":
+                return left_t if left_t.startswith("List[") or left_t == "list" else right_t
             if left_t == "String" or right_t == "String":
                 return "String"
             if left_t == "f64" or right_t == "f64":
@@ -182,6 +186,9 @@ class TypeEnvironment:
 
         if isinstance(node, ast.UnaryOp):
             return self.infer_expression_type(node.operand)
+
+        if isinstance(node, ast.BoolOp):
+            return "bool"
 
         if isinstance(node, ast.Compare):
             return "bool"
@@ -236,6 +243,12 @@ class TypeEnvironment:
                     return sig["return_type"]
                 if method_name in ("startswith", "endswith", "has") or method_name.startswith("is_") or method_name.startswith("has_"):
                     return "bool"
+                if method_name in ("__contains__", "__eq__", "__ne__"):
+                    return "bool"
+                if method_name in ("__add__", "__mul__"):
+                    return self.infer_expression_type(node.func.value)
+                if method_name in ("to_string", "__str__", "__repr__"):
+                    return "String"
                 if method_name in ("lower", "upper", "strip", "replace", "join"):
                     return "String"
                 if method_name == "split":

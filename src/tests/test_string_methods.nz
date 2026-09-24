@@ -1,0 +1,274 @@
+// ── Imports ─────────────────────────────────────────────────────────────
+import std.collections
+import std.string
+from std.string import String
+from std.collections import List, Dict
+
+// ── C FFI Declarations ───────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+// ── Main String Method Parity Test Runner ───────────────────────────────
+fn main() -> i32:
+    let _h as i32 = printf("String Method Parity Tests\n\n" to cstr)
+
+    // ── Test 1: strip / lstrip / rstrip (default + explicit chars) ───────
+    let ws as String = String.make("   hello world \r\n\t " to cstr)
+    let loud as String = String.make("xxHixx" to cstr)
+    let t1a as String = ws.strip()
+    let t1b as String = ws.lstrip()
+    let t1c as String = ws.rstrip()
+    let t1d as String = loud.strip("x" to cstr)
+    if strcmp(t1a.data to cstr, "hello world" to cstr) == 0 and strcmp(t1b.data to cstr, "hello world \r\n\t " to cstr) == 0 and strcmp(t1c.data to cstr, "   hello world" to cstr) == 0 and strcmp(t1d.data to cstr, "Hi" to cstr) == 0:
+        let _r as i32 = printf("Test 1 (strip / lstrip / rstrip): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 1 (strip / lstrip / rstrip): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 2: find / rfind with default and partial args ──────────────
+    let banana as String = String.make("banana" to cstr)
+    let t2a as i64 = banana.find("na" to cstr)
+    let t2b as i64 = banana.find("na" to cstr, 2 to i64)
+    let t2c as i64 = banana.rfind("na" to cstr)
+    let t2d as i64 = banana.rfind("na" to cstr, 2 to i64)
+    let t2e as i64 = banana.find("zz" to cstr)
+    if t2a == 2 to i64 and t2b == 2 to i64 and t2c == 4 to i64 and t2d == 4 to i64 and t2e == -1 to i64:
+        let _r as i32 = printf("Test 2 (find / rfind): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 2 (find / rfind): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 3: index / rindex ───────────────────────────────────────────
+    let phrase as String = String.make("hello world" to cstr)
+    let t3a as i64 = phrase.index("world" to cstr)
+    let t3b as i64 = phrase.rindex("o" to cstr)
+    let t3c as i64 = phrase.index("o" to cstr, 5 to i64)
+    if t3a == 6 to i64 and t3b == 7 to i64 and t3c == 7 to i64:
+        let _r as i32 = printf("Test 3 (index / rindex): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 3 (index / rindex): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 4: count with default start / end args ──────────────────────
+    let abra as String = String.make("abracadabra" to cstr)
+    let t4a as i64 = abra.count("a" to cstr)
+    let t4b as i64 = abra.count("a" to cstr, 2 to i64)
+    let t4c as i64 = abra.count("a" to cstr, 1 to i64, 6 to i64)
+    let t4d as i64 = abra.count("x" to cstr)
+    if t4a == 5 to i64 and t4b == 4 to i64 and t4c == 2 to i64 and t4d == 0 to i64:
+        let _r as i32 = printf("Test 4 (count): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 4 (count): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 5: startswith / endswith ────────────────────────────────────
+    let url as String = String.make("https://example.com" to cstr)
+    let t5a as bool = url.startswith("https" to cstr)
+    let t5b as bool = url.startswith("https" to cstr, 0 to i64)
+    let t5c as bool = url.startswith("http" to cstr, 1 to i64)
+    let t5d as bool = url.endswith("com" to cstr)
+    let t5e as bool = url.endswith("example" to cstr)
+    if t5a and t5b and not t5c and t5d and not t5e:
+        let _r as i32 = printf("Test 5 (startswith / endswith): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 5 (startswith / endswith): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 6: lower / upper / capitalize / swapcase ───────────────────
+    let mixed as String = String.make("Hello WORLD" to cstr)
+    let t6a as String = mixed.lower()
+    let t6b as String = mixed.upper()
+    let t6c as String = mixed.capitalize()
+    let t6d as String = mixed.swapcase()
+    if strcmp(t6a.data to cstr, "hello world" to cstr) == 0 and strcmp(t6b.data to cstr, "HELLO WORLD" to cstr) == 0 and strcmp(t6c.data to cstr, "Hello world" to cstr) == 0 and strcmp(t6d.data to cstr, "hELLO world" to cstr) == 0:
+        let _r as i32 = printf("Test 6 (lower / upper / capitalize / swapcase): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 6 (lower / upper / capitalize / swapcase): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 7: replace with default count ──────────────────────────────
+    let story as String = String.make("one two one two" to cstr)
+    let t7a as String = story.replace("one" to cstr, "1" to cstr)
+    let t7b as String = story.replace("one" to cstr, "1" to cstr, 1 to i64)
+    let t7c as String = story.replace("zz" to cstr, "qq" to cstr)
+    if strcmp(t7a.data to cstr, "1 two 1 two" to cstr) == 0 and strcmp(t7b.data to cstr, "1 two one two" to cstr) == 0 and strcmp(t7c.data to cstr, story.data to cstr) == 0:
+        let _r as i32 = printf("Test 7 (replace): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 7 (replace): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 8: split / join ─────────────────────────────────────────────
+    let csv as String = String.make("  a, b ,c  " to cstr)
+    let words as List[String] = csv.split("," to cstr)
+    let pipe as String = String.make("|" to cstr)
+    let t8a as String = pipe.join(words)
+    if words.length() == 3 to i64 and strcmp(t8a.data to cstr, "  a| b |c  " to cstr) == 0:
+        let _r as i32 = printf("Test 8 (split / join): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 8 (split / join): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 9: chained default-arg method calls ────────────────────────
+    let base as String = String.make("  HeLLo WorLD  " to cstr)
+    let t9a as String = base.strip().lower()
+    if strcmp(t9a.data to cstr, "hello world" to cstr) == 0:
+        let _r as i32 = printf("Test 9 (chained calls): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 9 (chained calls): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 10: partial trailing default filling (2 defaults) ──────────
+    let detect as String = String.make("mississippi" to cstr)
+    let t10a as i64 = detect.find("iss" to cstr, 2 to i64)
+    let t10b as i64 = detect.rfind("is" to cstr, 1 to i64, 6 to i64)
+    let t10c as bool = detect.startswith("miss" to cstr, 0 to i64)
+    if t10a == 4 to i64 and t10b == 4 to i64 and t10c:
+        let _r as i32 = printf("Test 10 (partial default filling): PASSED!\n" to cstr)
+    else:
+        let _r as i32 = printf("Test 10 (partial default filling): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 11: casefold / title ────────────────────────────────────────
+    let cf0 as String = String.make("HeLLo WORLD" to cstr).casefold()
+    let cf1 as String = String.make("hello world" to cstr).title()
+    if strcmp(cf0.data to cstr, "hello world" to cstr) == 0 and strcmp(cf1.data to cstr, "Hello World" to cstr) == 0:
+        let _p11 as i32 = printf("Test 11 (casefold / title): PASSED!\n" to cstr)
+    else:
+        let _p11 as i32 = printf("Test 11 (casefold / title): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 12: center / ljust / rjust ──────────────────────────────────
+    let ctr0 as String = String.make("ab" to cstr).center(6)
+    let ctr1 as String = String.make("ab" to cstr).center(7)
+    let ctr2 as String = String.make("ab" to cstr).ljust(5, "*" to cstr)
+    let ctr3 as String = String.make("ab" to cstr).rjust(5)
+    if strcmp(ctr0.data to cstr, "  ab  " to cstr) == 0 and strcmp(ctr1.data to cstr, "  ab   " to cstr) == 0 and strcmp(ctr2.data to cstr, "ab***" to cstr) == 0 and strcmp(ctr3.data to cstr, "   ab" to cstr) == 0:
+        let _p12 as i32 = printf("Test 12 (center / ljust / rjust): PASSED!\n" to cstr)
+    else:
+        let _p12 as i32 = printf("Test 12 (center / ljust / rjust): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 13: zfill ───────────────────────────────────────────────────
+    let zf0 as String = String.make("42" to cstr).zfill(5)
+    let zf1 as String = String.make("-42" to cstr).zfill(5)
+    let zf2 as String = String.make("abc" to cstr).zfill(5)
+    if strcmp(zf0.data to cstr, "00042" to cstr) == 0 and strcmp(zf1.data to cstr, "-0042" to cstr) == 0 and strcmp(zf2.data to cstr, "00abc" to cstr) == 0:
+        let _p13 as i32 = printf("Test 13 (zfill): PASSED!\n" to cstr)
+    else:
+        let _p13 as i32 = printf("Test 13 (zfill): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 14: expandtabs ──────────────────────────────────────────────
+    let et0 as String = String.make("a\tb" to cstr).expandtabs(4)
+    let et1 as String = String.make("ab\tc" to cstr).expandtabs(4)
+    if strcmp(et0.data to cstr, "a   b" to cstr) == 0 and strcmp(et1.data to cstr, "ab  c" to cstr) == 0:
+        let _p14 as i32 = printf("Test 14 (expandtabs): PASSED!\n" to cstr)
+    else:
+        let _p14 as i32 = printf("Test 14 (expandtabs): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 15: predicate methods (is*) ─────────────────────────────────
+    let pr0 as String = String.make("abc123" to cstr)
+    let pr1 as String = String.make("abc def" to cstr)
+    let pr2 as String = String.make("Hello World" to cstr)
+    let pr3 as String = String.make("foo_bar1" to cstr)
+    let pr4 as String = String.make("1foo" to cstr)
+    let pr5 as String = String.make("123" to cstr)
+    let pr6 as String = String.make("12.3" to cstr)
+    let pr7 as String = String.make(" \t\n" to cstr)
+    if pr0.isalnum() and not pr1.isalnum() and pr0.isalpha() == False and pr1.isalpha() == False and String.make("abc" to cstr).isalpha() and String.make("abc" to cstr).isascii() and pr5.isdecimal() and not pr6.isdecimal() and pr5.isdigit() and pr5.isnumeric() and pr3.isidentifier() and not pr4.isidentifier() and String.make("abc" to cstr).islower() and not String.make("Abc" to cstr).islower() and String.make("ABC" to cstr).isupper() and not String.make("AbC" to cstr).isupper() and pr2.istitle() and not String.make("Hello world" to cstr).istitle() and pr7.isspace() and not String.make(" x" to cstr).isspace() and String.make("abc" to cstr).isprintable():
+        let _p15 as i32 = printf("Test 15 (is* predicates): PASSED!\n" to cstr)
+    else:
+        let _p15 as i32 = printf("Test 15 (is* predicates): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 16: partition ───────────────────────────────────────────────
+    let pt0 as List[String] = String.make("a-b-c" to cstr).partition("-" to cstr)
+    let pt1 as List[String] = String.make("abc" to cstr).partition("-" to cstr)
+    if pt0.length() == 3 to i64 and strcmp(pt0[0].data to cstr, "a" to cstr) == 0 and strcmp(pt0[1].data to cstr, "-" to cstr) == 0 and strcmp(pt0[2].data to cstr, "b-c" to cstr) == 0 and pt1.length() == 3 to i64 and strcmp(pt1[0].data to cstr, "abc" to cstr) == 0 and pt1[1].len == 0 to usize and pt1[2].len == 0 to usize:
+        let _p16 as i32 = printf("Test 16 (partition): PASSED!\n" to cstr)
+    else:
+        let _p16 as i32 = printf("Test 16 (partition): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 17: rpartition ──────────────────────────────────────────────
+    let rp0 as List[String] = String.make("a-b-c" to cstr).rpartition("-" to cstr)
+    let rp1 as List[String] = String.make("abc" to cstr).rpartition("-" to cstr)
+    if rp0.length() == 3 to i64 and strcmp(rp0[0].data to cstr, "a-b" to cstr) == 0 and strcmp(rp0[1].data to cstr, "-" to cstr) == 0 and strcmp(rp0[2].data to cstr, "c" to cstr) == 0 and rp1.length() == 3 to i64 and rp1[0].len == 0 to usize and rp1[1].len == 0 to usize and strcmp(rp1[2].data to cstr, "abc" to cstr) == 0:
+        let _p17 as i32 = printf("Test 17 (rpartition): PASSED!\n" to cstr)
+    else:
+        let _p17 as i32 = printf("Test 17 (rpartition): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 18: rsplit ──────────────────────────────────────────────────
+    let rs0 as List[String] = String.make("a,b,c" to cstr).rsplit("," to cstr, 1 to i64)
+    let rs1 as List[String] = String.make("a,b,c" to cstr).rsplit("," to cstr)
+    if rs0.length() == 2 to i64 and strcmp(rs0[0].data to cstr, "a,b" to cstr) == 0 and strcmp(rs0[1].data to cstr, "c" to cstr) == 0 and rs1.length() == 3 to i64:
+        let _p18 as i32 = printf("Test 18 (rsplit): PASSED!\n" to cstr)
+    else:
+        let _p18 as i32 = printf("Test 18 (rsplit): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 19: splitlines ──────────────────────────────────────────────
+    let sl0 as List[String] = String.make("a\nb\r\nc" to cstr).splitlines()
+    let sl1 as List[String] = String.make("a\nb" to cstr).splitlines(True)
+    if sl0.length() == 3 to i64 and strcmp(sl0[0].data to cstr, "a" to cstr) == 0 and strcmp(sl0[1].data to cstr, "b" to cstr) == 0 and strcmp(sl0[2].data to cstr, "c" to cstr) == 0 and sl1.length() == 2 to i64 and strcmp(sl1[0].data to cstr, "a\n" to cstr) == 0 and strcmp(sl1[1].data to cstr, "b" to cstr) == 0:
+        let _p19 as i32 = printf("Test 19 (splitlines): PASSED!\n" to cstr)
+    else:
+        let _p19 as i32 = printf("Test 19 (splitlines): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 20: removeprefix / removesuffix ─────────────────────────────
+    let rm0 as String = String.make("foobar" to cstr).removeprefix("foo" to cstr)
+    let rm1 as String = String.make("foobar" to cstr).removeprefix("xyz" to cstr)
+    let rm2 as String = String.make("foobar" to cstr).removesuffix("bar" to cstr)
+    let rm3 as String = String.make("foobar" to cstr).removesuffix("xyz" to cstr)
+    if strcmp(rm0.data to cstr, "bar" to cstr) == 0 and strcmp(rm1.data to cstr, "foobar" to cstr) == 0 and strcmp(rm2.data to cstr, "foo" to cstr) == 0 and strcmp(rm3.data to cstr, "foobar" to cstr) == 0:
+        let _p20 as i32 = printf("Test 20 (removeprefix / removesuffix): PASSED!\n" to cstr)
+    else:
+        let _p20 as i32 = printf("Test 20 (removeprefix / removesuffix): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 21: encode ──────────────────────────────────────────────────
+    let en0 as List[u8] = String.make("AB" to cstr).encode()
+    if en0.length() == 2 to i64 and en0[0] == 65 to u8 and en0[1] == 66 to u8:
+        let _p21 as i32 = printf("Test 21 (encode): PASSED!\n" to cstr)
+    else:
+        let _p21 as i32 = printf("Test 21 (encode): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 22: maketrans / translate ───────────────────────────────────
+    let tbl as Dict[i64, i64] = String.maketrans("abc" to cstr, "xyz" to cstr)
+    let tr0 as String = String.make("aabbcc" to cstr).translate(tbl)
+    if strcmp(tr0.data to cstr, "xxyyzz" to cstr) == 0:
+        let _p22 as i32 = printf("Test 22 (maketrans / translate): PASSED!\n" to cstr)
+    else:
+        let _p22 as i32 = printf("Test 22 (maketrans / translate): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 23: format_map ──────────────────────────────────────────────
+    var fm as Dict[String, String] = Dict[String, String]()
+    fm[String.make("name" to cstr)] = String.make("Nizam" to cstr)
+    fm[String.make("lang" to cstr)] = String.make("nz" to cstr)
+    let fm0 as String = String.make("{lang} {name}" to cstr).format_map(fm)
+    if strcmp(fm0.data to cstr, "nz Nizam" to cstr) == 0:
+        let _p23 as i32 = printf("Test 23 (format_map): PASSED!\n" to cstr)
+    else:
+        let _p23 as i32 = printf("Test 23 (format_map): FAILED!\n" to cstr)
+        return 1 to i32
+
+    // ── Test 24: format ──────────────────────────────────────────────────
+    var fa as List[String] = List[String]()
+    fa.append(String.make("a" to cstr))
+    fa.append(String.make("b" to cstr))
+    let f0 as String = String.make("{} & {}" to cstr).format(fa)
+    let f1 as String = String.make("{1}{0}" to cstr).format(fa)
+    let f2 as String = String.make("{{x}}" to cstr).format(fa)
+    if strcmp(f0.data to cstr, "a & b" to cstr) == 0 and strcmp(f1.data to cstr, "ba" to cstr) == 0 and strcmp(f2.data to cstr, "{x}" to cstr) == 0:
+        let _p24 as i32 = printf("Test 24 (format): PASSED!\n" to cstr)
+    else:
+        let _p24 as i32 = printf("Test 24 (format): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_string_methods.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

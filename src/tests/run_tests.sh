@@ -20,6 +20,8 @@ TEST_FILES=(
     "src/tests/test_types.nz"
     "src/tests/test_abi.nz"
     "src/tests/test_std.nz"
+    "src/tests/test_list_methods.nz"
+    "src/tests/test_string_methods.nz"
     "src/tests/test_magic.nz"
     "src/tests/test_ast.nz"
     "src/tests/test_error.nz"
@@ -59,6 +61,7 @@ TEST_FILES=(
     "src/tests/test_closures_lambdas.mq"
     "src/tests/test_statement_temporaries.nz"
     "src/tests/test_recursive_drop_glue.nz"
+    "src/tests/test_multiline_delimiters.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

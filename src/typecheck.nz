@@ -5,7 +5,7 @@ from std.collections import List, Dict
 from std.option import Option, Empty, Some
 from std.mem import make
 import symbols
-from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_imported_symbols
+from symbols import Node, Span, Symbol, Scope, SymbolKind, TypeAnnotation, LanguageMode, NodeType, node_kind, node_span, node_name, node_name_ptr, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_inferred_type, node_module_name, node_file_path, node_is_float, set_node_inferred_type, set_node_is_float, set_node_name, set_node_module_name, set_node_val, set_node_op, set_node_is_mut, set_node_is_async, set_node_is_extern, set_node_is_variadic, set_node_return_type_annot, set_node_type_annots, set_node_left, set_node_right, set_node_body, set_node_cond, set_node_then_branch, set_node_str_val, set_node_declarations, set_node_params, make_node, node_return_names, node_return_type_annots, node_target, set_node_target, node_is_override, set_node_is_override, node_is_final, set_node_is_final, node_access_modifier, set_node_access_modifier, node_imported_symbols
 import types
 from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, make_class_type, make_interface_type, make_color_type, make_list_type, make_channel_type
 import sema
@@ -33,6 +33,111 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
 struct ListWrapper:
     public var list as List[Option[ptr[TypeAnnotation]]]
 
+// ── Default argument helpers ────────────────────────────────────────────
+
+fn clone_default_expr(node as ptr[Node]) as ptr[Node]:
+    if node == None to ptr[Node]:
+        return None to ptr[Node]
+    let nt as NodeType = node_kind(node)
+    let res as ptr[Node] = make_node(nt, node_span(node))
+    (deref res).module_name = (deref node).module_name
+    set_node_val(res, node_val(node))
+    set_node_op(res, node_op(node))
+    set_node_is_mut(res, node_is_mut(node))
+    set_node_is_float(res, node_is_float(node))
+    set_node_name(res, node_name(node))
+    set_node_str_val(res, node_str_val(node))
+    set_node_inferred_type(res, node_inferred_type(node))
+    set_node_type_annots(res, None to ptr[List[Option[ptr[TypeAnnotation]]]])
+    set_node_left(res, clone_default_expr(node_left(node)))
+    set_node_right(res, clone_default_expr(node_right(node)))
+    set_node_body(res, clone_default_expr(node_body(node)))
+    set_node_cond(res, clone_default_expr(node_cond(node)))
+    set_node_then_branch(res, clone_default_expr(node_then_branch(node)))
+    let node_decls as List[ptr[Node]] = node_declarations(node)
+    let decl_count as i64 = node_decls.length()
+    let decls as List[ptr[Node]] = List[ptr[Node]]()
+    var d_idx as i64 = 0 to i64
+    while d_idx < decl_count:
+        decls.append(clone_default_expr(node_decls[d_idx]))
+        d_idx = d_idx + 1 to i64
+    set_node_declarations(res, decls)
+    let node_prms as List[ptr[Node]] = node_params(node)
+    let prm_count as i64 = node_prms.length()
+    let prms as List[ptr[Node]] = List[ptr[Node]]()
+    var p_idx0 as i64 = 0 to i64
+    while p_idx0 < prm_count:
+        prms.append(clone_default_expr(node_prms[p_idx0]))
+        p_idx0 = p_idx0 + 1 to i64
+    set_node_params(res, prms)
+    return res
+
+fn strip_generic_base(name as String) as String:
+    if name.data == None to ptr[u8]:
+        return String.make("" to cstr)
+    extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+    var br_pos as usize = 0
+    var found_br as bool = False
+    while br_pos < name.len and not found_br:
+        if (deref ((name.data to usize + br_pos) to ptr[u8])) == 91 to u8:
+            found_br = True
+        else:
+            br_pos = br_pos + 1 to usize
+    if not found_br or br_pos == 0 to usize:
+        return name
+    let alloc as ptr[u8] = make[u8](br_pos + 1 to usize) to ptr[u8]
+    let _c as ptr = memcpy(alloc to ptr, name.data to ptr, br_pos)
+    alloc[br_pos] = 0 to u8
+    return String(data = alloc, len = br_pos, capacity = br_pos + 1 to usize)
+
+fn struct_method_params(sema as ptr[Sema], struct_name as String, method_name as String) as List[ptr[Node]]:
+    let empty as List[ptr[Node]] = List[ptr[Node]]()
+    if sema == None to ptr[Sema]:
+        return empty
+    if struct_name.data == None to ptr[u8] or struct_name.len == 0 to usize:
+        return empty
+    if method_name.data == None to ptr[u8] or method_name.len == 0 to usize:
+        return empty
+    let base_name as String = strip_generic_base(struct_name)
+    if base_name.data == None to ptr[u8] or base_name.len == 0 to usize:
+        return empty
+    let struct_sym as ptr[Symbol] = (deref sema).lookup_symbol(base_name)
+    if struct_sym == None to ptr[Symbol]:
+        return empty
+    if (deref struct_sym).decl_node == None to ptr[Node]:
+        return empty
+    let decl as ptr[Node] = (deref struct_sym).decl_node
+    let body as ptr[Node] = node_body(decl)
+    if body == None to ptr[Node] or node_kind(body) != NodeType.BlockStmt:
+        return empty
+    let body_decls as List[ptr[Node]] = node_declarations(body)
+    let d_count as i64 = body_decls.length()
+    var d_i as i64 = 0 to i64
+    while d_i < d_count:
+        let m_decl as ptr[Node] = body_decls[d_i]
+        if m_decl != None to ptr[Node]:
+            let mn as String = node_name(m_decl)
+            if node_kind(m_decl) == NodeType.FunDecl and mn.data != None to ptr[u8] and strcmp(mn.data to cstr, method_name.data to cstr) == 0:
+                return node_params(m_decl)
+        d_i = d_i + 1 to i64
+    return empty
+
+fn free_fn_params(sema as ptr[Sema], fn_name as String) as List[ptr[Node]]:
+    let empty as List[ptr[Node]] = List[ptr[Node]]()
+    if sema == None to ptr[Sema]:
+        return empty
+    if fn_name.data == None to ptr[u8] or fn_name.len == 0 to usize:
+        return empty
+    let sym as ptr[Symbol] = (deref sema).lookup_symbol(fn_name)
+    if sym == None to ptr[Symbol]:
+        return empty
+    if (deref sym).decl_node == None to ptr[Node]:
+        return empty
+    let decl as ptr[Node] = (deref sym).decl_node
+    if node_kind(decl) != NodeType.FunDecl:
+        return empty
+    return node_params(decl)
+
 // ── TypeChecker ─────────────────────────────────────────────────────────
 struct TypeChecker:
     public var sema as ptr[Sema]
@@ -45,6 +150,89 @@ struct TypeChecker:
         (deref self).current_function_return = Empty
         (deref self).inferred_return_type = None to ptr[Type]
         (deref self).current_struct_type = None to ptr[Type]
+
+    public fn fill_default_call_args(self as ptr[TypeChecker], node as ptr[Node], callee as ptr[Node]):
+        if node == None to ptr[Node] or callee == None to ptr[Node]:
+            return
+        var decl_params as List[ptr[Node]] = List[ptr[Node]]()
+        var param_ofs as i64 = 0 to i64
+        if node_kind(callee) == NodeType.MemberExpr:
+            let recv as ptr[Node] = node_left(callee)
+            if recv != None to ptr[Node]:
+                let recv_t as ptr[Type] = node_inferred_type(recv)
+                if recv_t != None to ptr[Type]:
+                    var struct_ty as ptr[Type] = recv_t
+                    if (deref recv_t).kind == TypeKind.RawPointer and (deref recv_t).payload != None to ptr[Type]:
+                        struct_ty = (deref recv_t).payload
+                    let sk as TypeKind = (deref struct_ty).kind
+                    if sk == TypeKind.Struct or sk == TypeKind.Class or sk == TypeKind.Interface or sk == TypeKind.String:
+                        var sname as String = (deref struct_ty).name
+                        if sname.len == 0 to usize:
+                            if sk == TypeKind.String:
+                                sname = String.make("String" to cstr)
+                            elif sk == TypeKind.List:
+                                sname = String.make("List" to cstr)
+                            elif sk == TypeKind.Dict:
+                                sname = String.make("Dict" to cstr)
+                        decl_params = struct_method_params((deref self).sema, sname, node_name(callee))
+                        if decl_params.length() > 0 to i64:
+                            let first_param_nm as String = node_name(decl_params[0])
+                            if first_param_nm.data != None to ptr[u8] and strcmp(first_param_nm.data to cstr, "self" to cstr) == 0:
+                                param_ofs = 1 to i64
+        elif node_kind(callee) == NodeType.Identifier:
+            let cn as String = node_name(callee)
+            if cn.data != None to ptr[u8] and cn.len > 0 to usize:
+                decl_params = free_fn_params((deref self).sema, cn)
+        let total as i64 = decl_params.length()
+        if total == 0 to i64:
+            return
+        if param_ofs >= total:
+            param_ofs = 0 to i64
+        let args as List[ptr[Node]] = node_params(node)
+        var have as i64 = args.length()
+        if param_ofs + have >= total:
+            return
+        var fi as i64 = param_ofs + have
+        while fi < total:
+            let fparam as ptr[Node] = decl_params[fi]
+            if fparam == None to ptr[Node] or node_left(fparam) == None to ptr[Node]:
+                return
+            fi = fi + 1 to i64
+        let new_args as List[ptr[Node]] = List[ptr[Node]]()
+        var nj as i64 = 0 to i64
+        while nj < have:
+            new_args.append(args[nj])
+            nj = nj + 1 to i64
+        var app_i as i64 = param_ofs + have
+        while app_i < total:
+            let dparam as ptr[Node] = decl_params[app_i]
+            if dparam != None to ptr[Node]:
+                let dc as ptr[Node] = clone_default_expr(node_left(dparam))
+                if dc != None to ptr[Node]:
+                    let dty as ptr[Type] = self.expected_param_type(dparam)
+                    if dty != None to ptr[Type]:
+                        set_node_inferred_type(dc, dty)
+                    new_args.append(dc)
+            app_i = app_i + 1 to i64
+        set_node_params(node, new_args)
+
+    public fn expected_param_type(self as ptr[TypeChecker], p as ptr[Node]) as ptr[Type]:
+        if p == None to ptr[Node]:
+            return None to ptr[Type]
+        let pa as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
+        if pa == None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            return None to ptr[Type]
+        let palist as List[Option[ptr[TypeAnnotation]]] = deref pa
+        if palist.length() < 1 to i64:
+            return None to ptr[Type]
+        let opt as Option[ptr[TypeAnnotation]] = palist[0 to i64]
+        let optref as ptr[u8] = (ref opt) to ptr[u8]
+        if not option_has_value(optref):
+            return None to ptr[Type]
+        let pa_node as ptr[TypeAnnotation] = option_value(optref) to ptr[TypeAnnotation]
+        if pa_node == None to ptr[TypeAnnotation]:
+            return None to ptr[Type]
+        return self.resolve_type_annotation(pa_node)
 
     public fn is_subclass_of(self as ptr[TypeChecker], sub_cls as String, base_cls as String) as bool:
         if sub_cls.len == 0 to usize or base_cls.len == 0 to usize:
@@ -1304,6 +1492,7 @@ struct TypeChecker:
                 set_node_inferred_type(node, ret_type)
                 return ret_type
             let callee_t as ptr[Type] = self.typecheck_node(callee)
+            self.fill_default_call_args(node, callee)
             var generic_ctor_t as ptr[Type] = None to ptr[Type]
             if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
                 let gc_name as String = node_name(callee)
@@ -1397,6 +1586,43 @@ struct TypeChecker:
                                         ret_type = (deref (deref coll_recv_t).payload).payload
                                     else:
                                         ret_type = make_type(TypeKind.Any)
+                                elif strcmp(coll_mname.data to cstr, "count") == 0:
+                                    ret_type = make_type(TypeKind.I64)
+                                elif strcmp(coll_mname.data to cstr, "index") == 0:
+                                    ret_type = make_type(TypeKind.I64)
+                                elif strcmp(coll_mname.data to cstr, "remove") == 0 or strcmp(coll_mname.data to cstr, "insert") == 0:
+                                    ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "reverse") == 0:
+                                    ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "copy") == 0:
+                                    let coll_copy_t as ptr[Type] = make_type(TypeKind.List)
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        (deref coll_copy_t).payload = (deref coll_recv_t).payload
+                                    elif coll_recv_t != None to ptr[Type] and (deref coll_recv_t).kind == TypeKind.RawPointer and (deref coll_recv_t).payload != None to ptr[Type] and (deref (deref coll_recv_t).payload).payload != None to ptr[Type]:
+                                        (deref coll_copy_t).payload = (deref (deref coll_recv_t).payload).payload
+                                    else:
+                                        (deref coll_copy_t).payload = make_type(TypeKind.Any)
+                                    ret_type = coll_copy_t
+                                elif strcmp(coll_mname.data to cstr, "pop") == 0:
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        ret_type = (deref coll_recv_t).payload
+                                    elif coll_recv_t != None to ptr[Type] and (deref coll_recv_t).kind == TypeKind.RawPointer and (deref coll_recv_t).payload != None to ptr[Type] and (deref (deref coll_recv_t).payload).payload != None to ptr[Type]:
+                                        ret_type = (deref (deref coll_recv_t).payload).payload
+                                    else:
+                                        ret_type = make_type(TypeKind.Any)
+                                elif strcmp(coll_mname.data to cstr, "sort") == 0:
+                                    ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "__add__") == 0 or strcmp(coll_mname.data to cstr, "__mul__") == 0:
+                                    let coll_dunder_t as ptr[Type] = make_type(TypeKind.List)
+                                    if coll_recv_t != None to ptr[Type] and (deref coll_recv_t).payload != None to ptr[Type]:
+                                        (deref coll_dunder_t).payload = (deref coll_recv_t).payload
+                                    elif coll_recv_t != None to ptr[Type] and (deref coll_recv_t).kind == TypeKind.RawPointer and (deref coll_recv_t).payload != None to ptr[Type] and (deref (deref coll_recv_t).payload).payload != None to ptr[Type]:
+                                        (deref coll_dunder_t).payload = (deref (deref coll_recv_t).payload).payload
+                                    else:
+                                        (deref coll_dunder_t).payload = make_type(TypeKind.Any)
+                                    ret_type = coll_dunder_t
+                                elif strcmp(coll_mname.data to cstr, "__contains__") == 0 or strcmp(coll_mname.data to cstr, "__eq__") == 0 or strcmp(coll_mname.data to cstr, "__ne__") == 0:
+                                    ret_type = make_type(TypeKind.Boolean)
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.Channel:
@@ -1421,8 +1647,27 @@ struct TypeChecker:
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.String:
-                                if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
+                                let sm_str as cstr = coll_mname.data to cstr
+                                if strcmp(sm_str, "lower" to cstr) == 0 or strcmp(sm_str, "upper" to cstr) == 0 or strcmp(sm_str, "capitalize" to cstr) == 0 or strcmp(sm_str, "casefold" to cstr) == 0 or strcmp(sm_str, "swapcase" to cstr) == 0 or strcmp(sm_str, "title" to cstr) == 0 or strcmp(sm_str, "strip" to cstr) == 0 or strcmp(sm_str, "lstrip" to cstr) == 0 or strcmp(sm_str, "rstrip" to cstr) == 0 or strcmp(sm_str, "center" to cstr) == 0 or strcmp(sm_str, "ljust" to cstr) == 0 or strcmp(sm_str, "rjust" to cstr) == 0 or strcmp(sm_str, "zfill" to cstr) == 0 or strcmp(sm_str, "expandtabs" to cstr) == 0 or strcmp(sm_str, "join" to cstr) == 0 or strcmp(sm_str, "replace" to cstr) == 0 or strcmp(sm_str, "removeprefix" to cstr) == 0 or strcmp(sm_str, "removesuffix" to cstr) == 0 or strcmp(sm_str, "translate" to cstr) == 0 or strcmp(sm_str, "format_map" to cstr) == 0 or strcmp(sm_str, "format" to cstr) == 0 or strcmp(sm_str, "__add__" to cstr) == 0 or strcmp(sm_str, "__mul__" to cstr) == 0:
+                                    ret_type = make_type(TypeKind.String)
+                                elif strcmp(sm_str, "isalnum" to cstr) == 0 or strcmp(sm_str, "isalpha" to cstr) == 0 or strcmp(sm_str, "isascii" to cstr) == 0 or strcmp(sm_str, "isdecimal" to cstr) == 0 or strcmp(sm_str, "isdigit" to cstr) == 0 or strcmp(sm_str, "isnumeric" to cstr) == 0 or strcmp(sm_str, "isidentifier" to cstr) == 0 or strcmp(sm_str, "islower" to cstr) == 0 or strcmp(sm_str, "isupper" to cstr) == 0 or strcmp(sm_str, "istitle" to cstr) == 0 or strcmp(sm_str, "isspace" to cstr) == 0 or strcmp(sm_str, "isprintable" to cstr) == 0 or strcmp(sm_str, "contains" to cstr) == 0 or strcmp(sm_str, "startswith" to cstr) == 0 or strcmp(sm_str, "endswith" to cstr) == 0 or strcmp(sm_str, "__contains__" to cstr) == 0 or strcmp(sm_str, "__eq__" to cstr) == 0 or strcmp(sm_str, "__ne__" to cstr) == 0:
+                                    ret_type = make_type(TypeKind.Boolean)
+                                elif strcmp(sm_str, "find" to cstr) == 0 or strcmp(sm_str, "rfind" to cstr) == 0 or strcmp(sm_str, "index" to cstr) == 0 or strcmp(sm_str, "rindex" to cstr) == 0 or strcmp(sm_str, "count" to cstr) == 0:
+                                    ret_type = make_type(TypeKind.I64)
+                                elif strcmp(sm_str, "length" to cstr) == 0 or strcmp(sm_str, "len" to cstr) == 0 or strcmp(sm_str, "__len__" to cstr) == 0:
                                     ret_type = make_type(TypeKind.USize)
+                                elif strcmp(sm_str, "split" to cstr) == 0 or strcmp(sm_str, "rsplit" to cstr) == 0 or strcmp(sm_str, "partition" to cstr) == 0 or strcmp(sm_str, "rpartition" to cstr) == 0 or strcmp(sm_str, "splitlines" to cstr) == 0:
+                                    let sv_t as ptr[Type] = make_type(TypeKind.List)
+                                    (deref sv_t).payload = make_type(TypeKind.String)
+                                    ret_type = sv_t
+                                elif strcmp(sm_str, "encode" to cstr) == 0:
+                                    let svb_t as ptr[Type] = make_type(TypeKind.List)
+                                    (deref svb_t).payload = make_type(TypeKind.U8)
+                                    ret_type = svb_t
+                                elif strcmp(sm_str, "__getitem__" to cstr) == 0:
+                                    ret_type = make_type(TypeKind.U8)
+                                elif strcmp(sm_str, "deinit" to cstr) == 0 or strcmp(sm_str, "__init__" to cstr) == 0:
+                                    ret_type = make_type(TypeKind.Void)
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.PyObject:

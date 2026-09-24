@@ -1,0 +1,193 @@
+// List Method Parity Tests (count / reverse / index / remove / insert / copy / pop / sort)
+import std.string
+from std.string import String
+from std.collections import List
+
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+fn main() -> i32:
+    let _h as i32 = printf("List Method Parity Tests\n\n" to cstr)
+
+    let mut nums as List[i64] = List[i64]()
+    nums.append(3)
+    nums.append(1)
+    nums.append(4)
+    nums.append(1)
+    nums.append(5)
+
+    let c3 as i64 = nums.count(3)
+    let c1 as i64 = nums.count(1)
+    let c9 as i64 = nums.count(9)
+    if c3 == 1 to i64 and c1 == 2 to i64 and c9 == 0 to i64:
+        let _p1 as i32 = printf("Test 1 (count): PASSED!\n" to cstr)
+    else:
+        let _p1 as i32 = printf("Test 1 (count): FAILED!\n" to cstr)
+        return 1 to i32
+
+    nums.reverse()
+    if nums[0] == 5 to i64 and nums[1] == 1 to i64 and nums[2] == 4 to i64 and nums[3] == 1 to i64 and nums[4] == 3 to i64:
+        let _p2 as i32 = printf("Test 2 (reverse): PASSED!\n" to cstr)
+    else:
+        let _p2 as i32 = printf("Test 2 (reverse): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let i5 as i64 = nums.index(5)
+    let i3 as i64 = nums.index(3)
+    let i9 as i64 = nums.index(9)
+    if i5 == 0 to i64 and i3 == 4 to i64 and i9 == -1 to i64:
+        let _p3 as i32 = printf("Test 3 (index): PASSED!\n" to cstr)
+    else:
+        let _p3 as i32 = printf("Test 3 (index): FAILED!\n" to cstr)
+        return 1 to i32
+
+    nums.remove(1)
+    if nums.length() == 4 to i64 and nums[1] == 4 to i64:
+        let _p4 as i32 = printf("Test 4 (remove): PASSED!\n" to cstr)
+    else:
+        let _p4 as i32 = printf("Test 4 (remove): FAILED!\n" to cstr)
+        return 1 to i32
+
+    nums.insert(0, 10)
+    nums.insert(-1, 99)
+    if nums.length() == 6 to i64 and nums[0] == 10 to i64 and nums[4] == 99 to i64 and nums[5] == 3 to i64:
+        let _p5 as i32 = printf("Test 5 (insert): PASSED!\n" to cstr)
+    else:
+        let _p5 as i32 = printf("Test 5 (insert): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let mut copy_nums as List[i64] = nums.copy()
+    if copy_nums.length() == 6 to i64 and nums.length() == 6 to i64 and copy_nums[2] == 4 to i64 and copy_nums[5] == 3 to i64:
+        let _p6 as i32 = printf("Test 6 (copy): PASSED!\n" to cstr)
+    else:
+        let _p6 as i32 = printf("Test 6 (copy): FAILED!\n" to cstr)
+        return 1 to i32
+    copy_nums[0] = 777
+    if nums[0] == 10 to i64 and copy_nums[0] == 777 to i64:
+        let _p6b as i32 = printf("Test 6b (copy independent): PASSED!\n" to cstr)
+    else:
+        let _p6b as i32 = printf("Test 6b (copy independent): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let pop_last as i64 = nums.pop()
+    if nums.length() == 5 to i64 and nums[4] == 99 to i64 and pop_last == 3 to i64:
+        let _p7 as i32 = printf("Test 7 (pop): PASSED!\n" to cstr)
+    else:
+        let _p7 as i32 = printf("Test 7 (pop): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let pop_idx as i64 = nums.pop(0)
+    if nums.length() == 4 to i64 and nums[0] == 5 to i64 and pop_idx == 10 to i64:
+        let _p8 as i32 = printf("Test 8 (pop index): PASSED!\n" to cstr)
+    else:
+        let _p8 as i32 = printf("Test 8 (pop index): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let pop_neg as i64 = nums.pop(-1)
+    if nums.length() == 3 to i64 and nums[2] == 1 to i64 and pop_neg == 99 to i64:
+        let _p8b as i32 = printf("Test 8b (pop negative): PASSED!\n" to cstr)
+    else:
+        let _p8b as i32 = printf("Test 8b (pop negative): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let mut sorter as List[i64] = List[i64]()
+    sorter.append(5)
+    sorter.append(-3 to i64)
+    sorter.append(7)
+    sorter.append(-10 to i64)
+    sorter.append(0)
+    sorter.sort()
+    if sorter[0] == -10 to i64 and sorter[1] == -3 to i64 and sorter[2] == 0 to i64 and sorter[3] == 5 to i64 and sorter[4] == 7 to i64:
+        let _p9 as i32 = printf("Test 9 (sort signed ints): PASSED!\n" to cstr)
+    else:
+        let _p9 as i32 = printf("Test 9 (sort signed ints): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let mut words as List[String] = List[String]()
+    words.append(String.make("pear" to cstr))
+    words.append(String.make("apple" to cstr))
+    words.append(String.make("mango" to cstr))
+    words.append(String.make("apricot" to cstr))
+    words.sort()
+    if strcmp(words[0].data to cstr, "apple" to cstr) == 0 and strcmp(words[1].data to cstr, "apricot" to cstr) == 0 and strcmp(words[2].data to cstr, "mango" to cstr) == 0 and strcmp(words[3].data to cstr, "pear" to cstr) == 0:
+        let _p10 as i32 = printf("Test 10 (sort strings): PASSED!\n" to cstr)
+    else:
+        let _p10 as i32 = printf("Test 10 (sort strings): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let mut dnr_a as List[i64] = List[i64]()
+    dnr_a.append(1)
+    dnr_a.append(2)
+    let mut dnr_b as List[i64] = List[i64]()
+    dnr_b.append(3)
+    dnr_b.append(4)
+    let dnr_c as List[i64] = dnr_a.__add__(dnr_b)
+    if dnr_a.length() == 2 to i64 and dnr_c.length() == 4 to i64 and dnr_c[0] == 1 to i64 and dnr_c[1] == 2 to i64 and dnr_c[2] == 3 to i64 and dnr_c[3] == 4 to i64:
+        let _p11 as i32 = printf("Test 11 (concat __add__): PASSED!\n" to cstr)
+    else:
+        let _p11 as i32 = printf("Test 11 (concat __add__): FAILED!\n" to cstr)
+        return 1 to i32
+
+    dnr_a.append(10)
+    if dnr_c.length() == 4 to i64 and dnr_c[2] == 3 to i64:
+        let _p11b as i32 = printf("Test 11b (concat independent): PASSED!\n" to cstr)
+    else:
+        let _p11b as i32 = printf("Test 11b (concat independent): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let dnr_d as List[i64] = dnr_a.__mul__(3)
+    let dnr_e as List[i64] = dnr_a.__mul__(0)
+    if dnr_d.length() == 9 to i64 and dnr_d[0] == 1 to i64 and dnr_d[3] == 1 to i64 and dnr_d[8] == 10 to i64 and dnr_e.length() == 0 to i64:
+        let _p12 as i32 = printf("Test 12 (repeat __mul__): PASSED!\n" to cstr)
+    else:
+        let _p12 as i32 = printf("Test 12 (repeat __mul__): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let dnr_h1 as bool = dnr_a.__contains__(10)
+    let dnr_h2 as bool = dnr_a.__contains__(99)
+    if dnr_h1 and not dnr_h2:
+        let _p13 as i32 = printf("Test 13 (contains int): PASSED!\n" to cstr)
+    else:
+        let _p13 as i32 = printf("Test 13 (contains int): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let mut dnr_w as List[String] = List[String]()
+    dnr_w.append(String.make("mango" to cstr))
+    dnr_w.append(String.make("apple" to cstr))
+    let dnr_wh as bool = dnr_w.__contains__(String.make("mango" to cstr))
+    let dnr_wn as bool = dnr_w.__contains__(String.make("kiwi" to cstr))
+    if dnr_wh and not dnr_wn:
+        let _p14 as i32 = printf("Test 14 (contains string): PASSED!\n" to cstr)
+    else:
+        let _p14 as i32 = printf("Test 14 (contains string): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let dnr_eq1 as bool = dnr_a.__eq__(dnr_a)
+    let dnr_eq2 as bool = dnr_a.__eq__(dnr_b)
+    let dnr_neq as bool = dnr_a.__ne__(dnr_b)
+    let dnr_eq3 as bool = dnr_w.__ne__(dnr_w)
+    if dnr_eq1 and not dnr_eq2 and dnr_neq and not dnr_eq3:
+        let _p15 as i32 = printf("Test 15 (equals/ne): PASSED!\n" to cstr)
+    else:
+        let _p15 as i32 = printf("Test 15 (equals/ne): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let dnr_ws as String = dnr_w.__add__(dnr_w).to_string()
+    let dnr_ws2 as String = dnr_w.to_string()
+    if strcmp(dnr_ws.data to cstr, "[mango, apple, mango, apple]" to cstr) == 0 and strcmp(dnr_ws2.data to cstr, "[mango, apple]" to cstr) == 0:
+        let _p16 as i32 = printf("Test 16 (string concat/to_string): PASSED!\n" to cstr)
+    else:
+        let _p16 as i32 = printf("Test 16 (string concat/to_string): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let dnr_fmt as String = dnr_b.to_string()
+    let mut dnr_empty as List[i64] = List[i64]()
+    let dnr_efmt as String = dnr_empty.to_string()
+    if strcmp(dnr_fmt.data to cstr, "[3, 4]" to cstr) == 0 and strcmp(dnr_efmt.data to cstr, "[]" to cstr) == 0:
+        let _p17 as i32 = printf("Test 17 (to_string fmt): PASSED!\n" to cstr)
+    else:
+        let _p17 as i32 = printf("Test 17 (to_string fmt): FAILED!\n" to cstr)
+        return 1 to i32
+
+    let _done as i32 = printf("\n[PASS] All test_list_methods.nz tests passed successfully!\n" to cstr)
+    return 0 to i32

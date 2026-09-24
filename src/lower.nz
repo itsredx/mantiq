@@ -34,7 +34,7 @@ fn slice_string(s_data as ptr[u8], s_len as usize, start as usize, end as usize)
     return res to ptr
 
 fn normalize_type_str(raw as ptr[String]) as String:
-    if raw == None to ptr[String] or (deref raw).data == None to ptr[u8]:
+    if (raw to ptr[u8]) == (None to ptr[u8]) or (deref raw).data == None to ptr[u8]:
         return String.make("" to cstr)
     let d as ptr[u8] = (deref raw).data
     let len as usize = (deref raw).len
@@ -1059,6 +1059,16 @@ struct Lowerer:
                                         (deref param_annots_ptr).append(Some(annot))
                                     else:
                                         (deref param_annots_ptr).append(Empty)
+                                    var v_cnt as u32 = ts_node_child_count_ptr(ref p_child)
+                                    var v_i as u32 = 0 to u32
+                                    while v_i < v_cnt:
+                                        var vc as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                        ts_node_child_ptr(ref p_child, v_i, ref vc)
+                                        if ts_node_is_named_ptr(ref vc):
+                                            let vc_type as cstr = ts_node_type_ptr(ref vc)
+                                            if strcmp(vc_type, "expression" to cstr) == 0:
+                                                (deref param_data).left = self.lower_node(ref vc)
+                                        v_i = v_i + 1 to u32
                                     (deref param_data).type_annots = param_annots_ptr
                                     (deref param_node).data = param_data to ptr[u8]
                                     params.append(param_node)
@@ -2142,17 +2152,29 @@ struct Lowerer:
                                     if has_param_lifetime:
                                         (deref annot).lifetime = param_lifetime
                                 
+                                var default_node as ptr[Node] = None to ptr[Node]
+                                var pre_idx as u32 = 0 to u32
+                                while pre_idx < pd_count:
+                                    var pre_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                    ts_node_child_ptr(ref tp_child, pre_idx, ref pre_child)
+                                    if ts_node_is_named_ptr(ref pre_child):
+                                        let pre_kind as cstr = ts_node_type_ptr(ref pre_child)
+                                        if strcmp(pre_kind, "expression" to cstr) == 0:
+                                            default_node = self.lower_node(ref pre_child)
+                                    pre_idx = pre_idx + 1 to u32
                                 while k < pd_count:
                                     var pd_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
                                     ts_node_child_ptr(ref tp_child, k, ref pd_child)
                                     if ts_node_is_named_ptr(ref pd_child):
                                         let pd_kind as cstr = ts_node_type_ptr(ref pd_child)
-                                        if strcmp(pd_kind, "identifier" to cstr) == 0 or strcmp(pd_kind, "self_reference" to cstr) == 0:
+                                        if strcmp(pd_kind, "expression" to cstr) == 0:
+                                            default_node = self.lower_node(ref pd_child)
+                                        elif strcmp(pd_kind, "identifier" to cstr) == 0 or strcmp(pd_kind, "self_reference" to cstr) == 0:
                                             let p_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref pd_child) to usize, ts_node_end_byte_ptr(ref pd_child) to usize) to ptr[String]
                                             let p_node as ptr[Node] = make_node(NodeType.VarDecl, self.get_span(ref pd_child))
                                             let p_data as ptr[VarDeclData] = make_ast[VarDeclData](1 to usize) to ptr[VarDeclData]
                                             (deref p_data).name = deref p_slice
-                                            (deref p_data).left = None to ptr[Node]
+                                            (deref p_data).left = default_node
                                             (deref p_data).is_mut = is_param_mut
 
                                             let p_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]

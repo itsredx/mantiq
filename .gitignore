@@ -35,3 +35,4 @@ research/
 dist/
 build/
 .mantiq_cache/
+graphify-out/

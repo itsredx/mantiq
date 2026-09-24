@@ -456,7 +456,7 @@ struct String:
         return cnt
 
     public fn contains(self as String, sub as cstr) as bool:
-        return self.find(sub) >= 0 to i64
+        return self.find(sub, 0 to i64, -1 to i64) >= 0 to i64
 
     public fn startswith(self as String, prefix as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as bool:
         if prefix to ptr == None:
@@ -513,19 +513,19 @@ struct String:
         let is_custom as bool = (chars to ptr != None)
         while start < self.len:
             let c as u8 = self.data[start]
-            var match as bool = False
+            var found as bool = False
             if is_custom:
                 let clen as usize = strlen(chars)
                 var ci as usize = 0
                 while ci < clen:
                     if (deref ((chars to usize + ci) to ptr[u8])) == c:
-                        match = True
+                        found = True
                         break
                     ci = ci + 1 to usize
             else:
                 if c == 32 to u8 or c == 9 to u8 or c == 10 to u8 or c == 13 to u8:
-                    match = True
-            if match:
+                    found = True
+            if found:
                 start = start + 1 to usize
             else:
                 break
@@ -545,19 +545,19 @@ struct String:
         let is_custom as bool = (chars to ptr != None)
         while end_idx >= 0 to i64:
             let c as u8 = self.data[end_idx to usize]
-            var match as bool = False
+            var found as bool = False
             if is_custom:
                 let clen as usize = strlen(chars)
                 var ci as usize = 0
                 while ci < clen:
                     if (deref ((chars to usize + ci) to ptr[u8])) == c:
-                        match = True
+                        found = True
                         break
                     ci = ci + 1 to usize
             else:
                 if c == 32 to u8 or c == 9 to u8 or c == 10 to u8 or c == 13 to u8:
-                    match = True
-            if match:
+                    found = True
+            if found:
                 end_idx = end_idx - 1 to i64
             else:
                 break
@@ -662,7 +662,9 @@ struct String:
         let ts as usize = if tabsize > 0 to i64: tabsize to usize else: 0 to usize
         if self.len == 0 to usize:
             return String.make("" to cstr)
-        var sb as StringBuilder = StringBuilder.make()
+        var cap as usize = self.len * 2 to usize + 16 to usize
+        var buf as ptr[u8] = make[u8](cap) to ptr[u8]
+        var b_len as usize = 0
         var col as usize = 0
         var i as usize = 0
         while i < self.len:
@@ -672,19 +674,30 @@ struct String:
                     let spaces as usize = ts - (col % ts)
                     var s_i as usize = 0
                     while s_i < spaces:
-                        sb.append_char(32 to u8)
+                        if b_len + 1 to usize >= cap:
+                            cap = cap * 2 to usize
+                            buf = resize(buf to ptr, cap) to ptr[u8]
+                        buf[b_len] = 32 to u8
+                        b_len = b_len + 1 to usize
                         col = col + 1 to usize
                         s_i = s_i + 1 to usize
             elif c == 10 to u8 or c == 13 to u8:
-                sb.append_char(c)
+                if b_len + 1 to usize >= cap:
+                    cap = cap * 2 to usize
+                    buf = resize(buf to ptr, cap) to ptr[u8]
+                buf[b_len] = c
+                b_len = b_len + 1 to usize
                 col = 0 to usize
             else:
-                sb.append_char(c)
+                if b_len + 1 to usize >= cap:
+                    cap = cap * 2 to usize
+                    buf = resize(buf to ptr, cap) to ptr[u8]
+                buf[b_len] = c
+                b_len = b_len + 1 to usize
                 col = col + 1 to usize
             i = i + 1 to usize
-        let res as String = sb.to_string()
-        sb.deinit()
-        return res
+        buf[b_len] = 0 to u8
+        return String(data = buf, len = b_len, capacity = cap)
 
     // ── Splitting and Partitioning ─────────────────────────────────────────────
     public fn split(self as String, sep as cstr = None to cstr, maxsplit as i64 = -1 to i64) as List[String]:
@@ -740,21 +753,21 @@ struct String:
                 tmp[rem_len] = 0 to u8
                 res.append(String(data = tmp, len = rem_len, capacity = rem_len + 1 to usize))
                 break
-            let match as cstr = strstr(cur_ptr to cstr, sep)
-            if match to ptr == None:
+            let found_match as cstr = strstr(cur_ptr to cstr, sep)
+            if found_match to ptr == None:
                 let rem_len as usize = (end_ptr to usize) - (cur_ptr to usize)
                 let tmp as ptr[u8] = make[u8](rem_len + 1 to usize) to ptr[u8]
                 memcpy(tmp to ptr, cur_ptr to ptr, rem_len)
                 tmp[rem_len] = 0 to u8
                 res.append(String(data = tmp, len = rem_len, capacity = rem_len + 1 to usize))
                 break
-            let seg_len as usize = (match to usize) - (cur_ptr to usize)
+            let seg_len as usize = (found_match to usize) - (cur_ptr to usize)
             let tmp as ptr[u8] = make[u8](seg_len + 1 to usize) to ptr[u8]
             memcpy(tmp to ptr, cur_ptr to ptr, seg_len)
             tmp[seg_len] = 0 to u8
             res.append(String(data = tmp, len = seg_len, capacity = seg_len + 1 to usize))
             s_cnt = s_cnt + 1 to i64
-            cur_ptr = (match to usize + sep_len) to ptr[u8]
+            cur_ptr = (found_match to usize + sep_len) to ptr[u8]
             if cur_ptr to usize == end_ptr to usize:
                 let empty_tmp as ptr[u8] = make[u8](1 to usize) to ptr[u8]
                 empty_tmp[0] = 0 to u8
@@ -845,7 +858,7 @@ struct String:
             res.append(String.make("" to cstr))
             res.append(String.make("" to cstr))
             return res
-        let idx as i64 = self.find(sep)
+        let idx as i64 = self.find(sep, 0 to i64, -1 to i64)
         if idx < 0 to i64:
             res.append(String.make(self.data to cstr))
             res.append(String.make("" to cstr))
@@ -876,7 +889,7 @@ struct String:
             res.append(String.make("" to cstr))
             res.append(String.make(self.data to cstr))
             return res
-        let idx as i64 = self.rfind(sep)
+        let idx as i64 = self.rfind(sep, 0 to i64, -1 to i64)
         if idx < 0 to i64:
             res.append(String.make("" to cstr))
             res.append(String.make("" to cstr))
@@ -1069,22 +1082,31 @@ struct String:
     public fn translate(self as String, table as Dict[i64, i64]) as String:
         if self.len == 0 to usize:
             return String.make("" to cstr)
-        var sb as StringBuilder = StringBuilder.make()
+        var tcap as usize = self.len + 32 to usize
+        var tbuf as ptr[u8] = make[u8](tcap) to ptr[u8]
+        var t_idx as usize = 0
         var i as usize = 0
         while i < self.len:
             let c as i64 = self.data[i] to i64
             if table.has(c):
                 let repl as i64 = table[c]
                 if repl >= 0 to i64:
-                    sb.append_char(repl to u8)
+                    if t_idx + 1 to usize >= tcap:
+                        tcap = tcap * 2 to usize
+                        tbuf = resize(tbuf to ptr, tcap) to ptr[u8]
+                    tbuf[t_idx] = repl to u8
+                    t_idx = t_idx + 1 to usize
             else:
-                sb.append_char(c to u8)
+                if t_idx + 1 to usize >= tcap:
+                    tcap = tcap * 2 to usize
+                    tbuf = resize(tbuf to ptr, tcap) to ptr[u8]
+                tbuf[t_idx] = c to u8
+                t_idx = t_idx + 1 to usize
             i = i + 1 to usize
-        let res as String = sb.to_string()
-        sb.deinit()
-        return res
+        tbuf[t_idx] = 0 to u8
+        return String(data = tbuf, len = t_idx, capacity = tcap)
 
-    fn maketrans(from_s as cstr, to_s as cstr) as Dict[i64, i64]:
+    public fn maketrans(from_s as cstr, to_s as cstr) as Dict[i64, i64]:
         var table as Dict[i64, i64] = Dict[i64, i64]()
         if from_s to ptr == None or to_s to ptr == None:
             return table
@@ -1103,7 +1125,9 @@ struct String:
     public fn format_map(self as String, mapping as Dict[String, String]) as String:
         if self.len == 0 to usize:
             return String.make("" to cstr)
-        var sb as StringBuilder = StringBuilder.make()
+        var fcap as usize = self.len + 32 to usize
+        var fbuf as ptr[u8] = make[u8](fcap) to ptr[u8]
+        var b_idx as usize = 0
         var i as usize = 0
         while i < self.len:
             let c as u8 = self.data[i]
@@ -1124,23 +1148,152 @@ struct String:
                     let k_str as String = String(data = k_buf, len = k_len, capacity = k_len + 1 to usize)
                     if mapping.has(k_str):
                         let val as String = mapping[k_str]
-                        sb.append_str(val)
+                        let v_len as usize = val.len
+                        if b_idx + v_len + 1 to usize >= fcap:
+                            fcap = fcap * 2 to usize
+                            fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                        if v_len > 0 to usize:
+                            let dst_v as ptr[u8] = ref fbuf[b_idx]
+                            memcpy(dst_v to ptr, val.data to ptr, v_len)
+                            b_idx = b_idx + v_len
                     else:
                         var raw_k as usize = i
                         while raw_k <= j:
-                            sb.append_char(self.data[raw_k])
+                            if b_idx + 1 to usize >= fcap:
+                                fcap = fcap * 2 to usize
+                                fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                            fbuf[b_idx] = self.data[raw_k]
+                            b_idx = b_idx + 1 to usize
                             raw_k = raw_k + 1 to usize
                     k_str.deinit()
                     i = j + 1 to usize
                 else:
-                    sb.append_char(c)
+                    if b_idx + 1 to usize >= fcap:
+                        fcap = fcap * 2 to usize
+                        fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                    fbuf[b_idx] = c
+                    b_idx = b_idx + 1 to usize
                     i = i + 1 to usize
             else:
-                sb.append_char(c)
+                if b_idx + 1 to usize >= fcap:
+                    fcap = fcap * 2 to usize
+                    fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                fbuf[b_idx] = c
+                b_idx = b_idx + 1 to usize
                 i = i + 1 to usize
-        let res as String = sb.to_string()
-        sb.deinit()
-        return res
+        fbuf[b_idx] = 0 to u8
+        return String(data = fbuf, len = b_idx, capacity = fcap)
+
+    // ── str.format(*args) ─────────────────────────────────────────────────────
+    //
+    // Positional replacement-field formatting.  Supported syntax:
+    //   {}          – automatic field numbering
+    //   {0}, {12}   – explicit positional index
+    //   {{ }}       – escaped literal braces
+    //   {0:>10}     – format spec after ':' is accepted and ignored
+    // Named fields ({name}) and conversion flags are left verbatim, since
+    // keyword arguments are not representable in this signature.
+    public fn format(self as String, args as List[String]) as String:
+        if self.len == 0 to usize:
+            return String.make("" to cstr)
+        var fcap as usize = self.len + 32 to usize
+        var fbuf as ptr[u8] = make[u8](fcap) to ptr[u8]
+        var b_idx as usize = 0
+        var auto_idx as i64 = 0
+        let arg_count as i64 = args.length()
+        var i as usize = 0
+        while i < self.len:
+            let c as u8 = self.data[i]
+            if c == 123 to u8:
+                if i + 1 to usize < self.len and self.data[i + 1 to usize] == 123 to u8:
+                    while b_idx >= fcap:
+                        fcap = fcap * 2 to usize
+                        fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                    fbuf[b_idx] = 123 to u8
+                    b_idx = b_idx + 1 to usize
+                    i = i + 2 to usize
+                else:
+                    var j as usize = i + 1 to usize
+                    var found_brace as bool = False
+                    while j < self.len:
+                        if self.data[j] == 125 to u8:
+                            found_brace = True
+                            break
+                        j = j + 1 to usize
+                    if found_brace:
+                        let f_start as usize = i + 1 to usize
+                        let f_len as usize = j - f_start
+                        var arg_index as i64 = -1
+                        if f_len == 0 to usize or self.data[f_start] == 58 to u8:
+                            arg_index = auto_idx
+                            auto_idx = auto_idx + 1 to i64
+                        else:
+                            var p as usize = f_start
+                            var num as i64 = 0
+                            var is_num as bool = True
+                            while p < j:
+                                let fd as i64 = self.data[p] to i64
+                                if fd == 58 to i64:
+                                    break
+                                if fd >= 48 to i64 and fd <= 57 to i64:
+                                    num = num * 10 to i64 + (fd - 48 to i64)
+                                else:
+                                    is_num = False
+                                    break
+                                p = p + 1 to usize
+                            if is_num:
+                                arg_index = num
+                        if arg_index >= 0 to i64 and arg_index < arg_count:
+                            let val as String = args[arg_index]
+                            let v_len as usize = val.len
+                            while b_idx + v_len >= fcap:
+                                fcap = fcap * 2 to usize
+                                fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                            if v_len > 0 to usize:
+                                let dst_v as ptr[u8] = ref fbuf[b_idx]
+                                memcpy(dst_v to ptr, val.data to ptr, v_len)
+                                b_idx = b_idx + v_len
+                        else:
+                            var raw_k as usize = i
+                            while raw_k <= j:
+                                while b_idx >= fcap:
+                                    fcap = fcap * 2 to usize
+                                    fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                                fbuf[b_idx] = self.data[raw_k]
+                                b_idx = b_idx + 1 to usize
+                                raw_k = raw_k + 1 to usize
+                        i = j + 1 to usize
+                    else:
+                        while b_idx >= fcap:
+                            fcap = fcap * 2 to usize
+                            fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                        fbuf[b_idx] = c
+                        b_idx = b_idx + 1 to usize
+                        i = i + 1 to usize
+            elif c == 125 to u8:
+                if i + 1 to usize < self.len and self.data[i + 1 to usize] == 125 to u8:
+                    while b_idx >= fcap:
+                        fcap = fcap * 2 to usize
+                        fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                    fbuf[b_idx] = 125 to u8
+                    b_idx = b_idx + 1 to usize
+                    i = i + 2 to usize
+                else:
+                    while b_idx >= fcap:
+                        fcap = fcap * 2 to usize
+                        fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                    fbuf[b_idx] = c
+                    b_idx = b_idx + 1 to usize
+                    i = i + 1 to usize
+            else:
+                while b_idx >= fcap:
+                    fcap = fcap * 2 to usize
+                    fbuf = resize(fbuf to ptr, fcap) to ptr[u8]
+                fbuf[b_idx] = c
+                b_idx = b_idx + 1 to usize
+                i = i + 1 to usize
+        fbuf[b_idx] = 0 to u8
+        return String(data = fbuf, len = b_idx, capacity = fcap)
 
     // ── Dunders and Operators ─────────────────────────────────────────────────
     public fn __len__(self as String) as usize:
