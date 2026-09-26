@@ -1,0 +1,119 @@
+// ── Test Dict Methods Parity ──────────────────────────────────────────
+
+import std.collections
+from std.collections import Dict, List
+import std.string
+from std.string import String
+
+fn main() as i32:
+    print("[TEST SUITE] Native Dict Methods Parity (keys, values, copy, update, setdefault, pop, clear)")
+
+    // ── Test 1: Keys & Values ──────────────────────────────────────────
+    var d as Dict[String, i32] = {}
+    d["apple"] = 10
+    d["banana"] = 20
+    d["cherry"] = 30
+
+    if d.len() != 3 to usize:
+        print("  FAIL: Initial dict length expected 3")
+        return 1
+
+    let ks as List[String] = d.keys()
+    if ks.len() != 3 to usize:
+        print("  FAIL: d.keys().len() expected 3")
+        return 1
+
+    let vs as List[i32] = d.values()
+    if vs.len() != 3 to usize:
+        print("  FAIL: d.values().len() expected 3")
+        return 1
+
+    var sum_v as i32 = 0
+    var vi as i64 = 0 to i64
+    let v_cnt as i64 = vs.len() to i64
+    while vi < v_cnt:
+        sum_v = sum_v + vs[vi]
+        vi = vi + 1 to i64
+    if sum_v != 60:
+        print("  FAIL: d.values() sum expected 60")
+        return 1
+    print("  PASS: keys() and values()")
+
+    // ── Test 2: Copy Semantics ─────────────────────────────────────────
+    var d_copy as Dict[String, i32] = d.copy()
+    if d_copy.len() != 3 to usize:
+        print("  FAIL: d.copy().len() expected 3")
+        return 1
+
+    d_copy["date"] = 40
+    if d_copy.len() != 4 to usize:
+        print("  FAIL: d_copy length after addition expected 4")
+        return 1
+    if d.len() != 3 to usize:
+        print("  FAIL: original dict mutated after copy mutation")
+        return 1
+    print("  PASS: copy()")
+
+    // ── Test 3: Setdefault ─────────────────────────────────────────────
+    let ex as i32 = d.setdefault("apple", 999)
+    if ex != 10:
+        print("  FAIL: setdefault on existing key expected 10")
+        return 1
+
+    let nw as i32 = d.setdefault("elderberry", 50)
+    if nw != 50:
+        print("  FAIL: setdefault on missing key expected 50")
+        return 1
+    if d.len() != 4 to usize:
+        print("  FAIL: d.len() after setdefault expected 4")
+        return 1
+    if d["elderberry"] != 50:
+        print("  FAIL: d['elderberry'] expected 50")
+        return 1
+    print("  PASS: setdefault()")
+
+    // ── Test 4: Pop with & without Default ──────────────────────────────
+    let p1 as i32 = d.pop("banana", 0)
+    if p1 != 20:
+        print("  FAIL: pop existing key expected 20")
+        return 1
+    if d.has("banana"):
+        print("  FAIL: pop did not remove banana")
+        return 1
+    if d.len() != 3 to usize:
+        print("  FAIL: d.len() after pop expected 3")
+        return 1
+
+    let p_missing as i32 = d.pop("nonexistent", 99)
+    if p_missing != 99:
+        print("  FAIL: pop missing key expected default 99")
+        return 1
+    print("  PASS: pop()")
+
+    // ── Test 5: Update / Merge ─────────────────────────────────────────
+    var other as Dict[String, i32] = {}
+    other["fig"] = 60
+    other["grape"] = 70
+    other["apple"] = 100
+
+    d.update(other)
+    if d["apple"] != 100:
+        print("  FAIL: update overwritten key expected 100")
+        return 1
+    if d["fig"] != 60 or d["grape"] != 70:
+        print("  FAIL: update new keys missing")
+        return 1
+    if d.len() != 5 to usize:
+        print("  FAIL: d.len() after update expected 5")
+        return 1
+    print("  PASS: update()")
+
+    // ── Test 6: Clear ──────────────────────────────────────────────────
+    d.clear()
+    if d.len() != 0 to usize:
+        print("  FAIL: d.len() after clear expected 0")
+        return 1
+    print("  PASS: clear()")
+
+    print("ALL DICT METHOD TESTS PASSED")
+    return 0

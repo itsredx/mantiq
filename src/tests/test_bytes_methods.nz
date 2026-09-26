@@ -1,0 +1,255 @@
+// ── Test Bytes and ByteArray Methods Parity ──────────────────────────
+
+import std.collections
+from std.collections import Bytes, ByteArray, List
+from std.string import String
+
+fn main() as i32:
+    print("[TEST SUITE] Bytes & ByteArray Methods Parity")
+
+    // ── Test 1: Bytes Construction & Inspection ────────────────────────
+    let s_orig as String = "Hello World"
+    var b as Bytes = Bytes.from_str(s_orig)
+    if b.length() != 11 to i64:
+        print("  FAIL: b.length() != 11")
+        return 1
+
+    if b.get(0 to i64) != 72 to u8 or b.get(1 to i64) != 101 to u8 or b.get(10 to i64) != 100 to u8:
+        print("  FAIL: b.get() element access failed")
+        return 1
+
+    if b[0 to i64] != 72 to u8 or b[4 to i64] != 111 to u8:
+        print("  FAIL: b[] indexing failed")
+        return 1
+    print("  PASS: Bytes construction and element access (length, get, [])")
+
+    // ── Test 2: Search, Count & Predicates ─────────────────────────────
+    if b.count(108 to u8) != 3 to i64:
+        print("  FAIL: b.count('l') expected 3")
+        return 1
+
+    if b.find(87 to u8) != 6 to i64 or b.index(87 to u8) != 6 to i64:
+        print("  FAIL: b.find/index('W') expected 6")
+        return 1
+
+    if b.find(122 to u8) != -1 to i64:
+        print("  FAIL: b.find('z') expected -1")
+        return 1
+
+    if b.rfind(108 to u8) != 9 to i64 or b.rindex(108 to u8) != 9 to i64:
+        print("  FAIL: b.rfind/rindex('l') expected 9")
+        return 1
+
+    if not b.contains(101 to u8) or b.contains(120 to u8):
+        print("  FAIL: b.contains() failed")
+        return 1
+    print("  PASS: count(), find(), index(), rfind(), rindex(), and contains()")
+
+    // ── Test 3: Prefix, Suffix & Slicing ───────────────────────────────
+    var pre as Bytes = Bytes.from_cstr("Hello" to cstr)
+    var suf as Bytes = Bytes.from_cstr("World" to cstr)
+    var wrong as Bytes = Bytes.from_cstr("world" to cstr)
+
+    if not b.startswith(ref pre) or b.startswith(ref wrong):
+        print("  FAIL: b.startswith() failed")
+        return 1
+
+    if not b.endswith(ref suf) or b.endswith(ref wrong):
+        print("  FAIL: b.endswith() failed")
+        return 1
+
+    var without_pre as Bytes = b.removeprefix(ref pre)
+    if without_pre.length() != 6 to i64 or without_pre.get(0 to i64) != 32 to u8:
+        print("  FAIL: b.removeprefix() failed")
+        return 1
+
+    var without_suf as Bytes = b.removesuffix(ref suf)
+    if without_suf.length() != 6 to i64 or without_suf.get(5 to i64) != 32 to u8:
+        print("  FAIL: b.removesuffix() failed")
+        return 1
+    print("  PASS: startswith(), endswith(), removeprefix(), and removesuffix()")
+
+    // ── Test 4: Case Transformations ───────────────────────────────────
+    var b_lower as Bytes = b.lower()
+    var b_upper as Bytes = b.upper()
+    var b_swap as Bytes = b.swapcase()
+
+    if b_lower.get(0 to i64) != 104 to u8 or b_lower.get(6 to i64) != 119 to u8:
+        print("  FAIL: b.lower() failed")
+        return 1
+
+    if b_upper.get(1 to i64) != 69 to u8 or b_upper.get(7 to i64) != 79 to u8:
+        print("  FAIL: b.upper() failed")
+        return 1
+
+    if b_swap.get(0 to i64) != 104 to u8 or b_swap.get(1 to i64) != 69 to u8:
+        print("  FAIL: b.swapcase() failed")
+        return 1
+    print("  PASS: lower(), upper(), and swapcase()")
+
+    // ── Test 5: Trimming & Replacement ─────────────────────────────────
+    var padded as Bytes = Bytes.from_cstr("   xyz   " to cstr)
+    var stripped as Bytes = padded.strip()
+    if stripped.length() != 3 to i64 or stripped.get(0 to i64) != 120 to u8 or stripped.get(2 to i64) != 122 to u8:
+        print("  FAIL: padded.strip() failed")
+        return 1
+
+    var replaced as Bytes = b.replace(108 to u8, 120 to u8)
+    if replaced.count(120 to u8) != 3 to i64 or replaced.count(108 to u8) != 0 to i64:
+        print("  FAIL: b.replace('l', 'x') failed")
+        return 1
+    print("  PASS: strip(), lstrip(), rstrip(), and replace()")
+
+    // ── Test 6: Encodings, Hex & Round-Trip ────────────────────────────
+    var dec as String = b.decode()
+    if dec.len != 11 to usize:
+        print("  FAIL: b.decode() length failed")
+        return 1
+
+    var hx as String = b.hex()
+    if hx.len != 22 to usize:
+        print("  FAIL: b.hex() length failed")
+        return 1
+
+    var from_hx as Bytes = Bytes.fromhex("48656c6c6f" to cstr)
+    if from_hx.length() != 5 to i64 or from_hx.get(0 to i64) != 72 to u8 or from_hx.get(4 to i64) != 111 to u8:
+        print("  FAIL: Bytes.fromhex() failed")
+        return 1
+    print("  PASS: decode(), hex(), and fromhex()")
+
+    // ── Test 7: Classification Predicates ──────────────────────────────
+    var alpha as Bytes = Bytes.from_cstr("Python" to cstr)
+    var alnum as Bytes = Bytes.from_cstr("Nizam38" to cstr)
+    var spaces as Bytes = Bytes.from_cstr(" \t\n" to cstr)
+
+    if not alpha.isalpha() or not alpha.isascii() or alnum.isalpha():
+        print("  FAIL: isalpha/isascii failed")
+        return 1
+
+    if not alnum.isalnum() or spaces.isalnum():
+        print("  FAIL: isalnum failed")
+        return 1
+
+    if not spaces.isspace() or alpha.isspace():
+        print("  FAIL: isspace failed")
+        return 1
+
+    if not b_lower.islower() or b_upper.islower():
+        print("  FAIL: islower failed")
+        return 1
+
+    if not b_upper.isupper() or b_lower.isupper():
+        print("  FAIL: isupper failed")
+        return 1
+    print("  PASS: Classification predicates (isalpha, isalnum, isascii, isspace, islower, isupper)")
+
+    // ── Test 8: Padding & Justification ────────────────────────────────
+    var just as Bytes = Bytes.from_cstr("abc" to cstr)
+    var ljust_b as Bytes = just.ljust(5 to i64)
+    var rjust_b as Bytes = just.rjust(5 to i64)
+    var zfill_b as Bytes = just.zfill(5 to i64)
+
+    if ljust_b.length() != 5 to i64 or ljust_b.get(0 to i64) != 97 to u8 or ljust_b.get(4 to i64) != 32 to u8:
+        print("  FAIL: ljust() failed")
+        return 1
+
+    if rjust_b.length() != 5 to i64 or rjust_b.get(0 to i64) != 32 to u8 or rjust_b.get(4 to i64) != 99 to u8:
+        print("  FAIL: rjust() failed")
+        return 1
+
+    if zfill_b.length() != 5 to i64 or zfill_b.get(0 to i64) != 48 to u8 or zfill_b.get(4 to i64) != 99 to u8:
+        print("  FAIL: zfill() failed")
+        return 1
+    print("  PASS: ljust(), rjust(), and zfill()")
+
+    // ── Test 9: ByteArray Mutable Operations ───────────────────────────
+    var ba as ByteArray = ByteArray.from_cstr("ABC" to cstr)
+    if ba.length() != 3 to i64:
+        print("  FAIL: ByteArray.from_cstr length failed")
+        return 1
+
+    ba.set(1 to i64, 90 to u8)
+    if ba.get(1 to i64) != 90 to u8 or ba[1 to i64] != 90 to u8:
+        print("  FAIL: ByteArray.set() failed")
+        return 1
+
+    ba.append(68 to u8)
+    if ba.length() != 4 to i64 or ba.get(3 to i64) != 68 to u8:
+        print("  FAIL: ByteArray.append() failed")
+        return 1
+
+    var ba_ext as ByteArray = ByteArray.from_cstr("EF" to cstr)
+    ba.extend(ref ba_ext)
+    if ba.length() != 6 to i64 or ba.get(5 to i64) != 70 to u8:
+        print("  FAIL: ByteArray.extend() failed")
+        return 1
+
+    ba.insert(0 to i64, 48 to u8)
+    if ba.length() != 7 to i64 or ba.get(0 to i64) != 48 to u8 or ba.get(1 to i64) != 65 to u8:
+        print("  FAIL: ByteArray.insert() failed")
+        return 1
+
+    var rem_ok as bool = ba.remove(48 to u8)
+    if not rem_ok or ba.get(0 to i64) != 65 to u8:
+        print("  FAIL: ByteArray.remove() failed")
+        return 1
+
+    let popped as u8 = ba.pop()
+    if popped != 70 to u8 or ba.length() != 5 to i64:
+        print("  FAIL: ByteArray.pop() failed")
+        return 1
+
+    let popped_idx as u8 = ba.pop_index(1 to i64)
+    if popped_idx != 90 to u8 or ba.length() != 4 to i64:
+        print("  FAIL: ByteArray.pop_index() failed")
+        return 1
+
+    ba.reverse()
+    if ba.get(0 to i64) != 69 to u8 or ba.get(3 to i64) != 65 to u8:
+        print("  FAIL: ByteArray.reverse() failed")
+        return 1
+
+    var ba_copy as ByteArray = ba.copy()
+    ba.clear()
+    if ba.length() != 0 to i64 or ba_copy.length() != 4 to i64:
+        print("  FAIL: ByteArray.clear/copy failed")
+        return 1
+    print("  PASS: ByteArray mutable operations (set, append, extend, insert, remove, pop, pop_index, reverse, clear, copy)")
+
+    // ── Test 10: ByteArray Shared Sequence Methods ────────────────────
+    var ba_seq as ByteArray = ByteArray.from_cstr("hello world" to cstr)
+    var ba_pre as ByteArray = ByteArray.from_cstr("hello" to cstr)
+    var ba_suf as ByteArray = ByteArray.from_cstr("world" to cstr)
+
+    if not ba_seq.startswith(ref ba_pre) or not ba_seq.endswith(ref ba_suf):
+        print("  FAIL: ByteArray startswith/endswith failed")
+        return 1
+
+    var ba_nopre as ByteArray = ba_seq.removeprefix(ref ba_pre)
+    if ba_nopre.length() != 6 to i64 or ba_nopre.get(0 to i64) != 32 to u8:
+        print("  FAIL: ByteArray removeprefix failed")
+        return 1
+
+    var ba_up as ByteArray = ba_seq.upper()
+    if ba_up.get(0 to i64) != 72 to u8 or ba_up.get(6 to i64) != 87 to u8:
+        print("  FAIL: ByteArray upper failed")
+        return 1
+
+    var ba_rep as ByteArray = ba_seq.replace(108 to u8, 120 to u8)
+    if ba_rep.count(120 to u8) != 3 to i64 or ba_rep.count(108 to u8) != 0 to i64:
+        print("  FAIL: ByteArray replace failed")
+        return 1
+
+    var ba_dec as String = ba_seq.decode()
+    if ba_dec.len != 11 to usize:
+        print("  FAIL: ByteArray decode failed")
+        return 1
+
+    var ba_hx as String = ba_seq.hex()
+    if ba_hx.len != 22 to usize:
+        print("  FAIL: ByteArray hex failed")
+        return 1
+    print("  PASS: ByteArray sequence methods (startswith, endswith, removeprefix, upper, replace, decode, hex)")
+
+    print("ALL BYTES AND BYTEARRAY TESTS PASSED")
+    return 0

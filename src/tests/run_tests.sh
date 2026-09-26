@@ -62,6 +62,10 @@ TEST_FILES=(
     "src/tests/test_statement_temporaries.nz"
     "src/tests/test_recursive_drop_glue.nz"
     "src/tests/test_multiline_delimiters.nz"
+    "src/tests/test_dict_methods.nz"
+    "src/tests/test_set_methods.nz"
+    "src/tests/test_tuple_methods.nz"
+    "src/tests/test_bytes_methods.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

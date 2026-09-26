@@ -222,7 +222,7 @@ fn is_copy_type(t as ptr[Type]) as bool:
             extern fn mantiq_type_needs_drop(type_name as cstr) as i32
             if mantiq_type_needs_drop(s_cstr) != 0 to i32:
                 return False
-            if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0:
+            if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0 or strcmp(s_cstr, "Set" to cstr) == 0 or strcmp(s_cstr, "FrozenSet" to cstr) == 0 or strcmp(s_cstr, "Tuple" to cstr) == 0 or strcmp(s_cstr, "Bytes" to cstr) == 0 or strcmp(s_cstr, "ByteArray" to cstr) == 0:
                 return False
         return True
     return False

@@ -1,0 +1,197 @@
+// ── Test Set and FrozenSet Methods Parity ─────────────────────────────
+
+import std.collections
+from std.collections import Set, FrozenSet, List
+
+fn main() as i32:
+    print("[TEST SUITE] Set & FrozenSet Methods Parity")
+
+    // ── Test 1: Basic Operations (add, has, remove, discard, length) ────
+    var s1 as Set[i64] = Set[i64]()
+    s1.init()
+    s1.add(10 to i64)
+    s1.add(20 to i64)
+    s1.add(30 to i64)
+    s1.add(10 to i64)
+
+    if s1.length() != 3 to i64:
+        print("  FAIL: s1.length() expected 3")
+        return 1
+
+    if not s1.has(20 to i64) or s1.has(99 to i64):
+        print("  FAIL: s1.has() check failed")
+        return 1
+
+    let rm as bool = s1.remove(20 to i64)
+    if not rm or s1.has(20 to i64) or s1.length() != 2 to i64:
+        print("  FAIL: s1.remove() failed")
+        return 1
+
+    s1.discard(99 to i64)
+    s1.discard(30 to i64)
+    if s1.length() != 1 to i64:
+        print("  FAIL: s1.discard() failed")
+        return 1
+    print("  PASS: Basic operations (add, has, remove, discard, length)")
+
+    // ── Test 2: Copy & Pop ─────────────────────────────────────────────
+    var s2 as Set[i64] = Set[i64]()
+    s2.init()
+    s2.add(100 to i64)
+    s2.add(200 to i64)
+
+    var s2_c as Set[i64] = s2.copy()
+    if s2_c.length() != 2 to i64:
+        print("  FAIL: s2.copy().length() expected 2")
+        return 1
+
+    let popped as i64 = s2.pop()
+    if s2.length() != 1 to i64 or s2_c.length() != 2 to i64:
+        print("  FAIL: s2.pop() failed or mutated copy")
+        return 1
+    print("  PASS: copy() and pop()")
+
+    // ── Test 3: Union & Update ─────────────────────────────────────────
+    var a as Set[i64] = Set[i64]()
+    a.init()
+    a.add(1 to i64)
+    a.add(2 to i64)
+
+    var b as Set[i64] = Set[i64]()
+    b.init()
+    b.add(2 to i64)
+    b.add(3 to i64)
+
+    var u as Set[i64] = a.union(ref b)
+    if u.length() != 3 to i64 or not u.has(1 to i64) or not u.has(2 to i64) or not u.has(3 to i64):
+        print("  FAIL: a.union(b) expected {1, 2, 3}")
+        return 1
+
+    a.update(ref b)
+    if a.length() != 3 to i64:
+        print("  FAIL: a.update(b) expected length 3")
+        return 1
+    print("  PASS: union() and update()")
+
+    // ── Test 4: Intersection & Intersection_Update ─────────────────────
+    var c as Set[i64] = Set[i64]()
+    c.init()
+    c.add(1 to i64)
+    c.add(2 to i64)
+    c.add(3 to i64)
+
+    var d as Set[i64] = Set[i64]()
+    d.init()
+    d.add(2 to i64)
+    d.add(3 to i64)
+    d.add(4 to i64)
+
+    var inter as Set[i64] = c.intersection(ref d)
+    if inter.length() != 2 to i64 or not inter.has(2 to i64) or not inter.has(3 to i64):
+        print("  FAIL: c.intersection(d) expected {2, 3}")
+        return 1
+
+    c.intersection_update(ref d)
+    if c.length() != 2 to i64:
+        print("  FAIL: c.intersection_update(d) expected length 2")
+        return 1
+    print("  PASS: intersection() and intersection_update()")
+
+    // ── Test 5: Difference & Difference_Update ─────────────────────────
+    var x as Set[i64] = Set[i64]()
+    x.init()
+    x.add(10 to i64)
+    x.add(20 to i64)
+    x.add(30 to i64)
+
+    var y as Set[i64] = Set[i64]()
+    y.init()
+    y.add(20 to i64)
+    y.add(40 to i64)
+
+    var diff as Set[i64] = x.difference(ref y)
+    if diff.length() != 2 to i64 or not diff.has(10 to i64) or not diff.has(30 to i64):
+        print("  FAIL: x.difference(y) expected {10, 30}")
+        return 1
+
+    x.difference_update(ref y)
+    if x.length() != 2 to i64 or x.has(20 to i64):
+        print("  FAIL: x.difference_update(y) expected length 2 without 20")
+        return 1
+    print("  PASS: difference() and difference_update()")
+
+    // ── Test 6: Symmetric Difference & Update ──────────────────────────
+    var p as Set[i64] = Set[i64]()
+    p.init()
+    p.add(1 to i64)
+    p.add(2 to i64)
+
+    var q as Set[i64] = Set[i64]()
+    q.init()
+    q.add(2 to i64)
+    q.add(3 to i64)
+
+    var sym as Set[i64] = p.symmetric_difference(ref q)
+    if sym.length() != 2 to i64 or not sym.has(1 to i64) or not sym.has(3 to i64) or sym.has(2 to i64):
+        print("  FAIL: p.symmetric_difference(q) expected {1, 3}")
+        return 1
+
+    p.symmetric_difference_update(ref q)
+    if p.length() != 2 to i64 or not p.has(1 to i64) or not p.has(3 to i64):
+        print("  FAIL: p.symmetric_difference_update(q) expected {1, 3}")
+        return 1
+    print("  PASS: symmetric_difference() and symmetric_difference_update()")
+
+    // ── Test 7: Subset, Superset, Disjoint ─────────────────────────────
+    var sub as Set[i64] = Set[i64]()
+    sub.init()
+    sub.add(1 to i64)
+
+    var sup as Set[i64] = Set[i64]()
+    sup.init()
+    sup.add(1 to i64)
+    sup.add(2 to i64)
+
+    var dis as Set[i64] = Set[i64]()
+    dis.init()
+    dis.add(99 to i64)
+
+    if not sub.issubset(ref sup):
+        print("  FAIL: sub.issubset(sup) expected True")
+        return 1
+    if not sup.issuperset(ref sub):
+        print("  FAIL: sup.issuperset(sub) expected True")
+        return 1
+    if not sub.isdisjoint(ref dis):
+        print("  FAIL: sub.isdisjoint(dis) expected True")
+        return 1
+    if sub.isdisjoint(ref sup):
+        print("  FAIL: sub.isdisjoint(sup) expected False")
+        return 1
+    print("  PASS: issubset(), issuperset(), isdisjoint()")
+
+    // ── Test 8: FrozenSet Operations ───────────────────────────────────
+    var fs1 as FrozenSet[i64] = FrozenSet.from_set(ref sup)
+    if fs1.length() != 2 to i64 or not fs1.has(1 to i64) or not fs1.has(2 to i64):
+        print("  FAIL: FrozenSet.from_set expected length 2")
+        return 1
+
+    var fs2 as FrozenSet[i64] = FrozenSet.from_set(ref dis)
+    var fs_u as FrozenSet[i64] = fs1.union(ref fs2)
+    if fs_u.length() != 3 to i64:
+        print("  FAIL: fs1.union(fs2) expected length 3")
+        return 1
+
+    var fs_inter as FrozenSet[i64] = fs1.intersection(ref fs2)
+    if fs_inter.length() != 0 to i64:
+        print("  FAIL: fs1.intersection(fs2) expected length 0")
+        return 1
+
+    if not fs1.isdisjoint(ref fs2):
+        print("  FAIL: fs1.isdisjoint(fs2) expected True")
+        return 1
+
+    print("  PASS: FrozenSet operations (from_set, union, intersection, isdisjoint)")
+
+    print("ALL SET & FROZENSET TESTS PASSED")
+    return 0

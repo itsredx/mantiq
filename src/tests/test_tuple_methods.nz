@@ -1,0 +1,87 @@
+// ── Test Tuple Methods Parity ─────────────────────────────────────────
+
+import std.collections
+from std.collections import Tuple, Tuple2, Tuple3, Tuple4, List
+
+fn main() as i32:
+    print("[TEST SUITE] Tuple Methods Parity (count, index, get, contains, length, to_list, from_list, Tuple2/3/4)")
+
+    // ── Test 1: Tuple Construction & Basic Inspection ──────────────────
+    var l as List[i64] = List[i64]()
+    l.append(10 to i64)
+    l.append(20 to i64)
+    l.append(30 to i64)
+    l.append(20 to i64)
+    l.append(40 to i64)
+
+    var t as Tuple[i64] = Tuple[i64]()
+    t.from_list(l)
+
+
+
+    if t.get(0 to i64) != 10 to i64 or t.get(1 to i64) != 20 to i64 or t.get(4 to i64) != 40 to i64:
+        print("  FAIL: t.get() failed")
+        return 1
+
+    if t[2 to i64] != 30 to i64:
+        print("  FAIL: t[] indexing failed")
+        return 1
+    print("  PASS: Tuple construction and element access (length, get, [])")
+
+    // ── Test 2: Tuple Search & Counting ────────────────────────────────
+    if t.count(20 to i64) != 2 to i64:
+        print("  FAIL: t.count(20) expected 2")
+        return 1
+
+    if t.count(99 to i64) != 0 to i64:
+        print("  FAIL: t.count(99) expected 0")
+        return 1
+
+    if t.index(20 to i64) != 1 to i64:
+        print("  FAIL: t.index(20) expected 1")
+        return 1
+
+    if t.index(40 to i64) != 4 to i64:
+        print("  FAIL: t.index(40) expected 4")
+        return 1
+
+    if t.index(99 to i64) != -1 to i64:
+        print("  FAIL: t.index(99) expected -1")
+        return 1
+
+    if not t.contains(30 to i64) or t.contains(99 to i64):
+        print("  FAIL: t.contains() failed")
+        return 1
+    print("  PASS: count(), index(), and contains()")
+
+    // ── Test 3: Tuple Conversion to List ───────────────────────────────
+    var out_l as List[i64] = t.to_list()
+    if out_l.length() != 5 to i64 or out_l[0 to i64] != 10 to i64 or out_l[4 to i64] != 40 to i64:
+        print("  FAIL: t.to_list() failed")
+        return 1
+    print("  PASS: to_list() conversion")
+
+    // ── Test 4: Fixed-Arity Heterogeneous Tuples ───────────────────────
+    let s_first as cstr = "first" to cstr
+    let s_second as cstr = "second" to cstr
+    let s_third as cstr = "third" to cstr
+    let s_fourth as cstr = "fourth" to cstr
+
+    var tup2 as Tuple2[cstr, cstr] = Tuple2[cstr, cstr](v0 = s_first, v1 = s_second)
+    if tup2.length() != 2 to i64 or tup2.get0() != s_first or tup2.get1() != s_second:
+        print("  FAIL: Tuple2 failed")
+        return 1
+
+    var tup3 as Tuple3[cstr, cstr, cstr] = Tuple3[cstr, cstr, cstr](v0 = s_first, v1 = s_second, v2 = s_third)
+    if tup3.length() != 3 to i64 or tup3.get0() != s_first or tup3.get1() != s_second or tup3.get2() != s_third:
+        print("  FAIL: Tuple3 failed")
+        return 1
+
+    var tup4 as Tuple4[cstr, cstr, cstr, cstr] = Tuple4[cstr, cstr, cstr, cstr](v0 = s_first, v1 = s_second, v2 = s_third, v3 = s_fourth)
+    if tup4.length() != 4 to i64 or tup4.get0() != s_first or tup4.get3() != s_fourth:
+        print("  FAIL: Tuple4 failed")
+        return 1
+    print("  PASS: Fixed-arity heterogeneous tuples (Tuple2, Tuple3, Tuple4)")
+
+    print("ALL TUPLE TESTS PASSED")
+    return 0
