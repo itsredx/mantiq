@@ -15,7 +15,7 @@ from std.mem import make, drop
 from symbols import Node, NodeType, Span, Symbol, Scope, SymbolKind, TypeAnnotation
 from symbols import node_kind, node_name, node_name_ptr, node_body, node_declarations
 from symbols import node_cond, node_then_branch, node_else_branch, node_left, node_right
-from symbols import node_span, node_inferred_type, node_is_extern, node_return_type_annot
+from symbols import node_span, node_inferred_type, node_is_extern, node_return_type_annot, node_params, node_op
 from symbols import set_node_auto_drops
 from types import Type, TypeKind, is_copy_type
 from sema import Sema
@@ -47,38 +47,106 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
     let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref lay).val_ptr
 
-// ── Terminator Representation ────────────────────────────────────────────
-enum TerminatorKind:
-    Return
-    Branch
-    BranchIf
-    Throw
-    Unreachable
+// ── Liveness List Utilities ───────────────────────────────────────────────
+fn list_has_string(list as ptr[List[String]], s as String) as bool:
+    if s.data == None to ptr[u8] or s.len == 0 to usize:
+        return False
+    let cnt as i64 = (deref list).length()
+    var i as i64 = 0 to i64
+    while i < cnt:
+        let item as String = (deref list)[i]
+        if item.data != None to ptr[u8]:
+            if strcmp(item.data to cstr, s.data to cstr) == 0:
+                return True
+        i = i + 1 to i64
+    return False
 
-struct Terminator:
-    public var kind as TerminatorKind
-    public var target_bb as i64
-    public var then_bb as i64
-    public var else_bb as i64
-    public var expr as ptr[Node]
-    public var span as Span
+fn list_add_string_unique(list as ptr[List[String]], s as String):
+    if not list_has_string(list, s):
+        (deref list).append(s)
 
-fn make_terminator(kind as TerminatorKind) as Terminator:
-    return Terminator(
-        kind = kind,
-        target_bb = -1 to i64,
-        then_bb = -1 to i64,
-        else_bb = -1 to i64,
-        expr = None to ptr[Node],
-        span = Span(start_byte = 0 to u32, end_byte = 0 to u32, start_row = 0 to u32, start_col = 0 to u32, end_row = 0 to u32, end_col = 0 to u32)
-    )
+fn list_remove_string(list as ptr[List[String]], s as String):
+    if s.data == None to ptr[u8] or s.len == 0 to usize:
+        return
+    let cnt as i64 = (deref list).length()
+    var new_list as List[String] = List[String]()
+    var i as i64 = 0 to i64
+    var found as bool = False
+    while i < cnt:
+        let item as String = (deref list)[i]
+        if not found and item.data != None to ptr[u8] and strcmp(item.data to cstr, s.data to cstr) == 0:
+            found = True
+        else:
+            new_list.append(item)
+        i = i + 1 to i64
+    (deref list) = new_list
+
+fn collect_expr_uses(expr as ptr[Node], out_uses as ptr[List[String]]):
+    if expr == None to ptr[Node]:
+        return
+    let nt as NodeType = node_kind(expr)
+    if nt == NodeType.Identifier:
+        let nm as String = node_name(expr)
+        if nm.len > 0 to usize and nm.data != None:
+            let nm_c as cstr = nm.data to cstr
+            if strcmp(nm_c, "True" to cstr) != 0 and strcmp(nm_c, "False" to cstr) != 0 and strcmp(nm_c, "None" to cstr) != 0 and strcmp(nm_c, "break" to cstr) != 0 and strcmp(nm_c, "continue" to cstr) != 0:
+                list_add_string_unique(out_uses, nm)
+    elif nt == NodeType.BinaryExpr:
+        collect_expr_uses(node_left(expr), out_uses)
+        collect_expr_uses(node_right(expr), out_uses)
+    elif nt == NodeType.UnaryExpr:
+        collect_expr_uses(node_left(expr), out_uses)
+    elif nt == NodeType.CallExpr:
+        collect_expr_uses(node_left(expr), out_uses)
+        let params_raw as List[ptr[Node]] = node_params(expr)
+        let params as ptr[List[ptr[Node]]] = ref params_raw
+        var i as i64 = 0 to i64
+        while i < (deref params).length():
+            collect_expr_uses((deref params)[i], out_uses)
+            i = i + 1 to i64
+    elif nt == NodeType.MemberExpr or nt == NodeType.CastExpr:
+        collect_expr_uses(node_left(expr), out_uses)
+    elif nt == NodeType.IndexExpr:
+        collect_expr_uses(node_left(expr), out_uses)
+        collect_expr_uses(node_right(expr), out_uses)
+    elif nt == NodeType.ListLiteral:
+        let decls_raw as List[ptr[Node]] = node_declarations(expr)
+        let decls as ptr[List[ptr[Node]]] = ref decls_raw
+        var i as i64 = 0 to i64
+        while i < (deref decls).length():
+            collect_expr_uses((deref decls)[i], out_uses)
+            i = i + 1 to i64
+
+// ── Terminator Constants ──────────────────────────────────────────────────
+fn tk_none() as i64:
+    return 0 to i64
+
+fn tk_return() as i64:
+    return 1 to i64
+
+fn tk_branch() as i64:
+    return 2 to i64
+
+fn tk_branch_if() as i64:
+    return 3 to i64
+
+fn tk_throw() as i64:
+    return 4 to i64
+
+fn tk_unreachable() as i64:
+    return 5 to i64
 
 // ── Basic Block Representation ───────────────────────────────────────────
 struct BasicBlock:
     public var id as i64
     public var name as String
     public var statements as List[ptr[Node]]
-    public var terminator as Terminator
+    public var terminator_kind as i64
+    public var terminator_target_bb as i64
+    public var terminator_then_bb as i64
+    public var terminator_else_bb as i64
+    public var terminator_expr as ptr[Node]
+    public var terminator_span as Span
     public var predecessors as List[i64]
     public var successors as List[i64]
     public var auto_drops as List[String]
@@ -89,7 +157,12 @@ fn make_basic_block(id as i64, name as String) as ptr[BasicBlock]:
     (deref bb).id = id
     (deref bb).name = name
     (deref bb).statements = List[ptr[Node]]()
-    (deref bb).terminator = make_terminator(TerminatorKind.Unreachable)
+    (deref bb).terminator_kind = tk_unreachable()
+    (deref bb).terminator_target_bb = -1 to i64
+    (deref bb).terminator_then_bb = -1 to i64
+    (deref bb).terminator_else_bb = -1 to i64
+    (deref bb).terminator_expr = None to ptr[Node]
+    (deref bb).terminator_span = Span(start_byte = 0 to u32, end_byte = 0 to u32, start_row = 0 to u32, start_col = 0 to u32, end_row = 0 to u32, end_col = 0 to u32)
     (deref bb).predecessors = List[i64]()
     (deref bb).successors = List[i64]()
     (deref bb).auto_drops = List[String]()
@@ -105,6 +178,10 @@ struct ControlFlowGraph:
     public var ret_type_name as String
     public var is_extern as bool
     public var span as Span
+    public var live_in as List[List[String]]
+    public var live_out as List[List[String]]
+    public var def_vars as List[List[String]]
+    public var use_vars as List[List[String]]
 
 fn make_cfg(func_name as String, ret_type as String, is_extern as bool, span as Span) as ptr[ControlFlowGraph]:
     let g as ptr[ControlFlowGraph] = make[ControlFlowGraph](1 to usize) to ptr[ControlFlowGraph]
@@ -115,6 +192,10 @@ fn make_cfg(func_name as String, ret_type as String, is_extern as bool, span as 
     (deref g).ret_type_name = ret_type
     (deref g).is_extern = is_extern
     (deref g).span = span
+    (deref g).live_in = List[List[String]]()
+    (deref g).live_out = List[List[String]]()
+    (deref g).def_vars = List[List[String]]()
+    (deref g).use_vars = List[List[String]]()
     return g
 
 // ── Polonius Origin & Loan Data Structures ───────────────────────────────
@@ -140,6 +221,10 @@ struct CFGAnalyzer:
     public var loans as List[LoanRecord]
     public var var_moves as Dict[String, List[Point]]
     public var var_borrows as Dict[String, List[i64]]
+    public var node_cfgs as Dict[usize, ptr[ControlFlowGraph]]
+    public var node_points as Dict[usize, Point]
+    public var current_loop_break_bb as i64
+    public var current_loop_continue_bb as i64
 
     public fn init_cfg(self as ptr[CFGAnalyzer], engine as ptr[DiagnosticEngine], current_file as String):
         (deref self).cfgs = Dict[String, ptr[ControlFlowGraph]]()
@@ -150,6 +235,10 @@ struct CFGAnalyzer:
         (deref self).loans = List[LoanRecord]()
         (deref self).var_moves = Dict[String, List[Point]]()
         (deref self).var_borrows = Dict[String, List[i64]]()
+        (deref self).node_cfgs = Dict[usize, ptr[ControlFlowGraph]]()
+        (deref self).node_points = Dict[usize, Point]()
+        (deref self).current_loop_break_bb = -1 to i64
+        (deref self).current_loop_continue_bb = -1 to i64
 
     public fn new_block(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], prefix as cstr) as ptr[BasicBlock]:
         let bid as i64 = (deref cfg).blocks.length()
@@ -160,11 +249,60 @@ struct CFGAnalyzer:
         (deref cfg).blocks.append(bb)
         return bb
 
+    public fn set_terminator_return(self as ptr[CFGAnalyzer], bb as ptr[BasicBlock], expr as ptr[Node], span as Span):
+        (deref bb).terminator_kind = tk_return()
+        (deref bb).terminator_expr = expr
+        (deref bb).terminator_span = span
+        (deref bb).is_sealed = True
+
+    public fn set_terminator_branch(self as ptr[CFGAnalyzer], bb as ptr[BasicBlock], target_id as i64, span as Span):
+        (deref bb).terminator_kind = tk_branch()
+        (deref bb).terminator_target_bb = target_id
+        (deref bb).terminator_span = span
+        (deref bb).is_sealed = True
+
+    public fn set_terminator_branch_if(self as ptr[CFGAnalyzer], bb as ptr[BasicBlock], then_id as i64, else_id as i64, expr as ptr[Node], span as Span):
+        (deref bb).terminator_kind = tk_branch_if()
+        (deref bb).terminator_then_bb = then_id
+        (deref bb).terminator_else_bb = else_id
+        (deref bb).terminator_expr = expr
+        (deref bb).terminator_span = span
+        (deref bb).is_sealed = True
+
+    public fn set_terminator_throw(self as ptr[CFGAnalyzer], bb as ptr[BasicBlock], span as Span):
+        (deref bb).terminator_kind = tk_throw()
+        (deref bb).terminator_span = span
+        (deref bb).is_sealed = True
+
     public fn add_edge(self as ptr[CFGAnalyzer], from_bb as ptr[BasicBlock], to_bb as ptr[BasicBlock]):
         if from_bb == None to ptr[BasicBlock] or to_bb == None to ptr[BasicBlock]:
             return
         (deref from_bb).successors.append((deref to_bb).id)
         (deref to_bb).predecessors.append((deref from_bb).id)
+
+    public fn record_node_point(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], node as ptr[Node], pt as Point):
+        if node == None to ptr[Node]:
+            return
+        (deref self).node_cfgs[node to usize] = cfg
+        (deref self).node_points[node to usize] = pt
+        let nt as NodeType = node_kind(node)
+        if nt == NodeType.VarDecl:
+            let left as ptr[Node] = node_left(node)
+            if left != None to ptr[Node]:
+                self.record_node_point(cfg, left, pt)
+        elif nt == NodeType.BinaryExpr:
+            self.record_node_point(cfg, node_left(node), pt)
+            self.record_node_point(cfg, node_right(node), pt)
+        elif nt == NodeType.UnaryExpr or nt == NodeType.CastExpr:
+            self.record_node_point(cfg, node_left(node), pt)
+        elif nt == NodeType.CallExpr:
+            self.record_node_point(cfg, node_left(node), pt)
+            let params_raw as List[ptr[Node]] = node_params(node)
+            let params as ptr[List[ptr[Node]]] = ref params_raw
+            var p_i as i64 = 0 to i64
+            while p_i < (deref params).length():
+                self.record_node_point(cfg, (deref params)[p_i], pt)
+                p_i = p_i + 1 to i64
 
     public fn build_function_cfg(self as ptr[CFGAnalyzer], fn_node as ptr[Node]) as ptr[ControlFlowGraph]:
         let fn_name as String = node_name(fn_node)
@@ -192,10 +330,10 @@ struct CFGAnalyzer:
 
         // Seal remaining open block
         if current_bb != None to ptr[BasicBlock] and (deref current_bb).is_sealed == False:
-            (deref current_bb).terminator = make_terminator(TerminatorKind.Return)
-            (deref current_bb).is_sealed = True
+            self.set_terminator_return(current_bb, None to ptr[Node], (deref cfg).span)
             (deref cfg).exit_ids.append((deref current_bb).id)
 
+        self.compute_cfg_liveness(cfg)
         return cfg
 
     public fn build_statements(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], block_node as ptr[Node]) as ptr[BasicBlock]:
@@ -227,20 +365,16 @@ struct CFGAnalyzer:
                         )
                 elif k == NodeType.ReturnStmt:
                     (deref bb).statements.append(stmt)
-                    var term as Terminator = make_terminator(TerminatorKind.Return)
-                    term.expr = node_left(stmt)
-                    term.span = node_span(stmt)
-                    (deref bb).terminator = term
-                    (deref bb).is_sealed = True
+                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = (deref bb).statements.length() - 1)
+                    self.record_node_point(cfg, stmt, pt)
+                    self.set_terminator_return(bb, node_left(stmt), node_span(stmt))
                     (deref cfg).exit_ids.append((deref bb).id)
                     already_returned = True
                 elif k == NodeType.ThrowStmt:
                     (deref bb).statements.append(stmt)
-                    var term as Terminator = make_terminator(TerminatorKind.Throw)
-                    term.expr = node_left(stmt)
-                    term.span = node_span(stmt)
-                    (deref bb).terminator = term
-                    (deref bb).is_sealed = True
+                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = (deref bb).statements.length() - 1)
+                    self.record_node_point(cfg, stmt, pt)
+                    self.set_terminator_throw(bb, node_span(stmt))
                     (deref cfg).exit_ids.append((deref bb).id)
                     already_returned = True
                 elif k == NodeType.IfStmt:
@@ -249,10 +383,34 @@ struct CFGAnalyzer:
                     bb = self.build_while(cfg, bb, stmt)
                 elif k == NodeType.ForStmt:
                     bb = self.build_for(cfg, bb, stmt)
+                elif k == NodeType.MatchStmt:
+                    bb = self.build_match(cfg, bb, stmt)
                 elif k == NodeType.BlockStmt or k == NodeType.ParamBlockStmt:
                     bb = self.build_statements(cfg, bb, stmt)
+                elif k == NodeType.Identifier:
+                    let id_nm as String = node_name(stmt)
+                    if id_nm.data != None and strcmp(id_nm.data to cstr, "break" to cstr) == 0:
+                        if (deref self).current_loop_break_bb >= 0 to i64:
+                            let target_id as i64 = (deref self).current_loop_break_bb
+                            self.set_terminator_branch(bb, target_id, node_span(stmt))
+                            if target_id >= 0 to i64 and target_id < (deref cfg).blocks.length():
+                                self.add_edge(bb, (deref cfg).blocks[target_id])
+                            bb = self.new_block(cfg, "dead" to cstr)
+                    elif id_nm.data != None and strcmp(id_nm.data to cstr, "continue" to cstr) == 0:
+                        if (deref self).current_loop_continue_bb >= 0 to i64:
+                            let target_id as i64 = (deref self).current_loop_continue_bb
+                            self.set_terminator_branch(bb, target_id, node_span(stmt))
+                            if target_id >= 0 to i64 and target_id < (deref cfg).blocks.length():
+                                self.add_edge(bb, (deref cfg).blocks[target_id])
+                            bb = self.new_block(cfg, "dead" to cstr)
+                    else:
+                        (deref bb).statements.append(stmt)
+                        let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = (deref bb).statements.length() - 1)
+                        self.record_node_point(cfg, stmt, pt)
                 else:
                     (deref bb).statements.append(stmt)
+                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = (deref bb).statements.length() - 1)
+                    self.record_node_point(cfg, stmt, pt)
             i = i + 1 to i64
 
         return bb
@@ -271,13 +429,7 @@ struct CFGAnalyzer:
         let join_bb as ptr[BasicBlock] = self.new_block(cfg, "join" to cstr)
 
         // Seal current block with BranchIf
-        var term as Terminator = make_terminator(TerminatorKind.BranchIf)
-        term.then_bb = (deref then_bb).id
-        term.else_bb = (deref else_bb).id
-        term.expr = cond_node
-        term.span = node_span(if_node)
-        (deref current_bb).terminator = term
-        (deref current_bb).is_sealed = True
+        self.set_terminator_branch_if(current_bb, (deref then_bb).id, (deref else_bb).id, cond_node, node_span(if_node))
         self.add_edge(current_bb, then_bb)
         self.add_edge(current_bb, else_bb)
 
@@ -290,10 +442,7 @@ struct CFGAnalyzer:
                 (deref then_bb).statements.append(then_node)
 
         if then_exit != None to ptr[BasicBlock] and (deref then_exit).is_sealed == False:
-            var b_term as Terminator = make_terminator(TerminatorKind.Branch)
-            b_term.target_bb = (deref join_bb).id
-            (deref then_exit).terminator = b_term
-            (deref then_exit).is_sealed = True
+            self.set_terminator_branch(then_exit, (deref join_bb).id, node_span(if_node))
             self.add_edge(then_exit, join_bb)
 
         // Build Else branch
@@ -305,10 +454,7 @@ struct CFGAnalyzer:
                 (deref else_bb).statements.append(else_node)
 
         if else_exit != None to ptr[BasicBlock] and (deref else_exit).is_sealed == False:
-            var b_term as Terminator = make_terminator(TerminatorKind.Branch)
-            b_term.target_bb = (deref join_bb).id
-            (deref else_exit).terminator = b_term
-            (deref else_exit).is_sealed = True
+            self.set_terminator_branch(else_exit, (deref join_bb).id, node_span(if_node))
             self.add_edge(else_exit, join_bb)
 
         // If both branches terminate with Return/Throw, join_bb is unreachable
@@ -326,22 +472,19 @@ struct CFGAnalyzer:
         let exit_bb as ptr[BasicBlock] = self.new_block(cfg, "while_exit" to cstr)
 
         // Branch from current_bb to cond_bb
-        var to_cond as Terminator = make_terminator(TerminatorKind.Branch)
-        to_cond.target_bb = (deref cond_bb).id
-        (deref current_bb).terminator = to_cond
-        (deref current_bb).is_sealed = True
+        self.set_terminator_branch(current_bb, (deref cond_bb).id, node_span(while_node))
         self.add_edge(current_bb, cond_bb)
 
         // Condition block branches to body_bb or exit_bb
-        var if_term as Terminator = make_terminator(TerminatorKind.BranchIf)
-        if_term.then_bb = (deref body_bb).id
-        if_term.else_bb = (deref exit_bb).id
-        if_term.expr = cond_node
-        if_term.span = node_span(while_node)
-        (deref cond_bb).terminator = if_term
-        (deref cond_bb).is_sealed = True
+        self.set_terminator_branch_if(cond_bb, (deref body_bb).id, (deref exit_bb).id, cond_node, node_span(while_node))
         self.add_edge(cond_bb, body_bb)
         self.add_edge(cond_bb, exit_bb)
+
+        // Loop break and continue tracking
+        let prev_break as i64 = (deref self).current_loop_break_bb
+        let prev_cont as i64 = (deref self).current_loop_continue_bb
+        (deref self).current_loop_break_bb = (deref exit_bb).id
+        (deref self).current_loop_continue_bb = (deref cond_bb).id
 
         // Build while body
         var body_exit as ptr[BasicBlock] = body_bb
@@ -350,13 +493,15 @@ struct CFGAnalyzer:
                 body_exit = self.build_statements(cfg, body_bb, body_node)
             else:
                 (deref body_bb).statements.append(body_node)
+                let pt as Point = Point(bb_id = (deref body_bb).id, stmt_idx = (deref body_bb).statements.length() - 1)
+                self.record_node_point(cfg, body_node, pt)
+
+        (deref self).current_loop_break_bb = prev_break
+        (deref self).current_loop_continue_bb = prev_cont
 
         // Loop back to condition block
         if body_exit != None to ptr[BasicBlock] and (deref body_exit).is_sealed == False:
-            var back_term as Terminator = make_terminator(TerminatorKind.Branch)
-            back_term.target_bb = (deref cond_bb).id
-            (deref body_exit).terminator = back_term
-            (deref body_exit).is_sealed = True
+            self.set_terminator_branch(body_exit, (deref cond_bb).id, node_span(while_node))
             self.add_edge(body_exit, cond_bb)
 
         return exit_bb
@@ -368,20 +513,17 @@ struct CFGAnalyzer:
         let body_bb as ptr[BasicBlock] = self.new_block(cfg, "for_body" to cstr)
         let exit_bb as ptr[BasicBlock] = self.new_block(cfg, "for_exit" to cstr)
 
-        var to_cond as Terminator = make_terminator(TerminatorKind.Branch)
-        to_cond.target_bb = (deref cond_bb).id
-        (deref current_bb).terminator = to_cond
-        (deref current_bb).is_sealed = True
+        self.set_terminator_branch(current_bb, (deref cond_bb).id, node_span(for_node))
         self.add_edge(current_bb, cond_bb)
 
-        var if_term as Terminator = make_terminator(TerminatorKind.BranchIf)
-        if_term.then_bb = (deref body_bb).id
-        if_term.else_bb = (deref exit_bb).id
-        if_term.span = node_span(for_node)
-        (deref cond_bb).terminator = if_term
-        (deref cond_bb).is_sealed = True
+        self.set_terminator_branch_if(cond_bb, (deref body_bb).id, (deref exit_bb).id, None to ptr[Node], node_span(for_node))
         self.add_edge(cond_bb, body_bb)
         self.add_edge(cond_bb, exit_bb)
+
+        let prev_break_for as i64 = (deref self).current_loop_break_bb
+        let prev_cont_for as i64 = (deref self).current_loop_continue_bb
+        (deref self).current_loop_break_bb = (deref exit_bb).id
+        (deref self).current_loop_continue_bb = (deref cond_bb).id
 
         var body_exit as ptr[BasicBlock] = body_bb
         if body_node != None to ptr[Node]:
@@ -389,15 +531,53 @@ struct CFGAnalyzer:
                 body_exit = self.build_statements(cfg, body_bb, body_node)
             else:
                 (deref body_bb).statements.append(body_node)
+                let pt as Point = Point(bb_id = (deref body_bb).id, stmt_idx = (deref body_bb).statements.length() - 1)
+                self.record_node_point(cfg, body_node, pt)
+
+        (deref self).current_loop_break_bb = prev_break_for
+        (deref self).current_loop_continue_bb = prev_cont_for
 
         if body_exit != None to ptr[BasicBlock] and (deref body_exit).is_sealed == False:
-            var back_term as Terminator = make_terminator(TerminatorKind.Branch)
-            back_term.target_bb = (deref cond_bb).id
-            (deref body_exit).terminator = back_term
-            (deref body_exit).is_sealed = True
+            self.set_terminator_branch(body_exit, (deref cond_bb).id, node_span(for_node))
             self.add_edge(body_exit, cond_bb)
 
         return exit_bb
+
+    public fn build_match(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], current_bb as ptr[BasicBlock], match_node as ptr[Node]) as ptr[BasicBlock]:
+        let cases_raw as List[ptr[Node]] = node_declarations(match_node)
+        let cases as ptr[List[ptr[Node]]] = ref cases_raw
+        let case_count as i64 = (deref cases).length()
+        let join_bb as ptr[BasicBlock] = self.new_block(cfg, "match_join" to cstr)
+
+        var ci as i64 = 0 to i64
+        while ci < case_count:
+            let case_node as ptr[Node] = (deref cases)[ci]
+            let arm_bb as ptr[BasicBlock] = self.new_block(cfg, "case_arm" to cstr)
+            self.add_edge(current_bb, arm_bb)
+
+            var arm_exit as ptr[BasicBlock] = arm_bb
+            if case_node != None to ptr[Node]:
+                let arm_body as ptr[Node] = node_body(case_node)
+                if arm_body != None to ptr[Node]:
+                    if node_kind(arm_body) == NodeType.BlockStmt or node_kind(arm_body) == NodeType.ParamBlockStmt:
+                        arm_exit = self.build_statements(cfg, arm_bb, arm_body)
+                    else:
+                        (deref arm_bb).statements.append(arm_body)
+                        let pt as Point = Point(bb_id = (deref arm_bb).id, stmt_idx = (deref arm_bb).statements.length() - 1)
+                        self.record_node_point(cfg, arm_body, pt)
+
+            if arm_exit != None to ptr[BasicBlock] and (deref arm_exit).is_sealed == False:
+                self.set_terminator_branch(arm_exit, (deref join_bb).id, node_span(match_node))
+                self.add_edge(arm_exit, join_bb)
+            ci = ci + 1 to i64
+
+        if (deref current_bb).is_sealed == False:
+            (deref current_bb).is_sealed = True
+
+        if (deref join_bb).predecessors.length() == 0 to i64:
+            return None to ptr[BasicBlock]
+
+        return join_bb
 
     // ── Return-Path Completeness Validation ───────────────────────────────
     public fn validate_return_paths(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]) as bool:
@@ -445,8 +625,7 @@ struct CFGAnalyzer:
             if reachable[i]:
                 let bb as ptr[BasicBlock] = (deref cfg).blocks[i]
                 if (deref bb).successors.length() == 0 to i64:
-                    let term as Terminator = (deref bb).terminator
-                    if term.kind != TerminatorKind.Return and term.kind != TerminatorKind.Throw:
+                    if (deref bb).terminator_kind != tk_return() and (deref bb).terminator_kind != tk_throw():
                         if (deref self).engine != None to ptr[DiagnosticEngine]:
                             let s as Span = (deref cfg).span
                             var msg as StringBuilder = StringBuilder.make()
@@ -465,6 +644,223 @@ struct CFGAnalyzer:
 
         return True
 
+    // ── Backward Variable Liveness Analysis ───────────────────────────────────
+    public fn compute_cfg_liveness(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]):
+        let block_cnt as i64 = (deref cfg).blocks.length()
+        if block_cnt == 0 to i64:
+            return
+
+        var live_in as List[List[String]] = List[List[String]]()
+        var live_out as List[List[String]] = List[List[String]]()
+        var def_vars as List[List[String]] = List[List[String]]()
+        var use_vars as List[List[String]] = List[List[String]]()
+
+        var b as i64 = 0 to i64
+        while b < block_cnt:
+            live_in.append(List[String]())
+            live_out.append(List[String]())
+            def_vars.append(List[String]())
+            use_vars.append(List[String]())
+            b = b + 1 to i64
+
+        // 1. Compute Defs and Uses for each block
+        b = 0 to i64
+        while b < block_cnt:
+            let bb as ptr[BasicBlock] = (deref cfg).blocks[b]
+            let stmt_cnt as i64 = (deref bb).statements.length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < stmt_cnt:
+                let stmt as ptr[Node] = (deref bb).statements[s_idx]
+                if stmt != None to ptr[Node]:
+                    let k as NodeType = node_kind(stmt)
+                    if k == NodeType.VarDecl:
+                        let v_name as String = node_name(stmt)
+                        let init_expr as ptr[Node] = node_left(stmt)
+                        var stmt_uses as List[String] = List[String]()
+                        collect_expr_uses(init_expr, ref stmt_uses)
+                        var u_i as i64 = 0 to i64
+                        while u_i < stmt_uses.length():
+                            let u_var as String = stmt_uses[u_i]
+                            if not list_has_string(ref (def_vars[b]), u_var):
+                                list_add_string_unique(ref (use_vars[b]), u_var)
+                            u_i = u_i + 1 to i64
+                        list_add_string_unique(ref (def_vars[b]), v_name)
+                    elif k == NodeType.BinaryExpr:
+                        let op as String = node_op(stmt)
+                        let is_assign as bool = op.data != None and strcmp(op.data to cstr, "=" to cstr) == 0
+                        if is_assign:
+                            let lhs as ptr[Node] = node_left(stmt)
+                            let rhs as ptr[Node] = node_right(stmt)
+                            var rhs_uses as List[String] = List[String]()
+                            collect_expr_uses(rhs, ref rhs_uses)
+                            var u_i as i64 = 0 to i64
+                            while u_i < rhs_uses.length():
+                                let u_var as String = rhs_uses[u_i]
+                                if not list_has_string(ref (def_vars[b]), u_var):
+                                    list_add_string_unique(ref (use_vars[b]), u_var)
+                                u_i = u_i + 1 to i64
+                            if lhs != None to ptr[Node] and node_kind(lhs) == NodeType.Identifier:
+                                list_add_string_unique(ref (def_vars[b]), node_name(lhs))
+                            else:
+                                collect_expr_uses(lhs, ref rhs_uses)
+                        else:
+                            var stmt_uses as List[String] = List[String]()
+                            collect_expr_uses(stmt, ref stmt_uses)
+                            var u_i as i64 = 0 to i64
+                            while u_i < stmt_uses.length():
+                                let u_var as String = stmt_uses[u_i]
+                                if not list_has_string(ref (def_vars[b]), u_var):
+                                    list_add_string_unique(ref (use_vars[b]), u_var)
+                                u_i = u_i + 1 to i64
+                    else:
+                        var stmt_uses as List[String] = List[String]()
+                        collect_expr_uses(stmt, ref stmt_uses)
+                        var u_i as i64 = 0 to i64
+                        while u_i < stmt_uses.length():
+                            let u_var as String = stmt_uses[u_i]
+                            if not list_has_string(ref (def_vars[b]), u_var):
+                                list_add_string_unique(ref (use_vars[b]), u_var)
+                            u_i = u_i + 1 to i64
+                s_idx = s_idx + 1 to i64
+
+            if (deref bb).terminator_expr != None to ptr[Node]:
+                var term_uses as List[String] = List[String]()
+                collect_expr_uses((deref bb).terminator_expr, ref term_uses)
+                var u_i as i64 = 0 to i64
+                while u_i < term_uses.length():
+                    let u_var as String = term_uses[u_i]
+                    if not list_has_string(ref (def_vars[b]), u_var):
+                        list_add_string_unique(ref (use_vars[b]), u_var)
+                    u_i = u_i + 1 to i64
+            b = b + 1 to i64
+
+        // 2. Fixed-point backward dataflow iteration
+        var changed as bool = True
+        var iterations as i32 = 0 to i32
+        while changed and iterations < 100 to i32:
+            changed = False
+            iterations = iterations + 1 to i32
+            var b_idx as i64 = block_cnt - 1
+            while b_idx >= 0 to i64:
+                let bb as ptr[BasicBlock] = (deref cfg).blocks[b_idx]
+                var new_live_out as List[String] = List[String]()
+                var s_i as i64 = 0 to i64
+                let succ_cnt as i64 = (deref bb).successors.length()
+                while s_i < succ_cnt:
+                    let s_id as i64 = (deref bb).successors[s_i]
+                    if s_id >= 0 to i64 and s_id < block_cnt:
+                        let s_live_in as List[String] = live_in[s_id]
+                        var v_i as i64 = 0 to i64
+                        while v_i < s_live_in.length():
+                            list_add_string_unique(ref new_live_out, s_live_in[v_i])
+                            v_i = v_i + 1 to i64
+                    s_i = s_i + 1 to i64
+
+                var new_live_in as List[String] = List[String]()
+                let b_uses as List[String] = use_vars[b_idx]
+                var u_i as i64 = 0 to i64
+                while u_i < b_uses.length():
+                    list_add_string_unique(ref new_live_in, b_uses[u_i])
+                    u_i = u_i + 1 to i64
+
+                let b_defs as List[String] = def_vars[b_idx]
+                var o_i as i64 = 0 to i64
+                while o_i < new_live_out.length():
+                    let out_v as String = new_live_out[o_i]
+                    if not list_has_string(ref b_defs, out_v):
+                        list_add_string_unique(ref new_live_in, out_v)
+                    o_i = o_i + 1 to i64
+
+                if new_live_in.length() != live_in[b_idx].length() or new_live_out.length() != live_out[b_idx].length():
+                    changed = True
+                    live_in[b_idx] = new_live_in
+                    live_out[b_idx] = new_live_out
+                b_idx = b_idx - 1 to i64
+
+        (deref cfg).live_in = live_in
+        (deref cfg).live_out = live_out
+        (deref cfg).def_vars = def_vars
+        (deref cfg).use_vars = use_vars
+
+    public fn var_live_at(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], var_name as String, pt as Point) as bool:
+        if cfg == None to ptr[ControlFlowGraph] or var_name.len == 0 to usize:
+            return False
+        let block_cnt as i64 = (deref cfg).blocks.length()
+        if pt.bb_id < 0 to i64 or pt.bb_id >= block_cnt:
+            return False
+        if (deref cfg).live_out.length() <= pt.bb_id:
+            return False
+
+        let bb as ptr[BasicBlock] = (deref cfg).blocks[pt.bb_id]
+        let stmt_cnt as i64 = (deref bb).statements.length()
+
+        var curr_live as List[String] = List[String]()
+        let lo as List[String] = (deref cfg).live_out[pt.bb_id]
+        var li as i64 = 0 to i64
+        while li < lo.length():
+            curr_live.append(lo[li])
+            li = li + 1 to i64
+
+        if pt.stmt_idx >= stmt_cnt:
+            return list_has_string(ref curr_live, var_name)
+
+        var j as i64 = stmt_cnt - 1
+        while j >= pt.stmt_idx:
+            if j == pt.stmt_idx:
+                return list_has_string(ref curr_live, var_name)
+
+            let stmt as ptr[Node] = (deref bb).statements[j]
+            if stmt != None to ptr[Node]:
+                let k as NodeType = node_kind(stmt)
+                if k == NodeType.VarDecl:
+                    let def_nm as String = node_name(stmt)
+                    list_remove_string(ref curr_live, def_nm)
+                    var u_list as List[String] = List[String]()
+                    collect_expr_uses(node_left(stmt), ref u_list)
+                    var u_i as i64 = 0 to i64
+                    while u_i < u_list.length():
+                        list_add_string_unique(ref curr_live, u_list[u_i])
+                        u_i = u_i + 1 to i64
+                elif k == NodeType.BinaryExpr:
+                    let op as String = node_op(stmt)
+                    if op.data != None and strcmp(op.data to cstr, "=" to cstr) == 0:
+                        let lhs as ptr[Node] = node_left(stmt)
+                        if lhs != None and node_kind(lhs) == NodeType.Identifier:
+                            list_remove_string(ref curr_live, node_name(lhs))
+                        var u_list as List[String] = List[String]()
+                        collect_expr_uses(node_right(stmt), ref u_list)
+                        var u_i as i64 = 0 to i64
+                        while u_i < u_list.length():
+                            list_add_string_unique(ref curr_live, u_list[u_i])
+                            u_i = u_i + 1 to i64
+                    else:
+                        var u_list as List[String] = List[String]()
+                        collect_expr_uses(stmt, ref u_list)
+                        var u_i as i64 = 0 to i64
+                        while u_i < u_list.length():
+                            list_add_string_unique(ref curr_live, u_list[u_i])
+                            u_i = u_i + 1 to i64
+                else:
+                    var u_list as List[String] = List[String]()
+                    collect_expr_uses(stmt, ref u_list)
+                    var u_i as i64 = 0 to i64
+                    while u_i < u_list.length():
+                        list_add_string_unique(ref curr_live, u_list[u_i])
+                        u_i = u_i + 1 to i64
+            j = j - 1 to i64
+
+        return list_has_string(ref curr_live, var_name)
+
+    public fn is_borrower_live(self as ptr[CFGAnalyzer], borrower_name as String, node as ptr[Node]) as bool:
+        if node == None to ptr[Node] or borrower_name.len == 0 to usize:
+            return False
+        let k as usize = node to usize
+        if not (deref self).node_points.has(k) or not (deref self).node_cfgs.has(k):
+            return True
+        let pt as Point = (deref self).node_points[k]
+        let cfg as ptr[ControlFlowGraph] = (deref self).node_cfgs[k]
+        return self.var_live_at(cfg, borrower_name, pt)
+
     // ── Polonius Origin & Loan Safety Check ───────────────────────────────
     public fn analyze_polonius_borrows(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]):
         // Scans basic blocks for borrow creation (&var / ref var) and invalidating moves
@@ -482,7 +878,7 @@ struct CFGAnalyzer:
                         let v_name as String = node_name(stmt)
                         let init_expr as ptr[Node] = node_left(stmt)
                         if init_expr != None to ptr[Node] and node_kind(init_expr) == NodeType.UnaryExpr:
-                            let u_op as String = symbols.node_op(init_expr)
+                            let u_op as String = node_op(init_expr)
                             if u_op.data != None and strcmp(u_op.data to cstr, "ref" to cstr) == 0:
                                 let borrowed_var as ptr[Node] = node_left(init_expr)
                                 if borrowed_var != None to ptr[Node] and node_kind(borrowed_var) == NodeType.Identifier:

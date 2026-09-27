@@ -437,21 +437,22 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
     perf_end(perf, "typecheck", t2)
 
-    // ── Phase 4: Borrow Checking ──
-    let t3 as i64 = perf_begin(perf, "borrowck")
-    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
-    (deref bc).init_bc()
-    (deref bc).sema = sema
-    (deref bc).current_file = (deref sema).current_file
-    (deref bc).walk_ast(root)
-    perf_end(perf, "borrowck", t3)
-
-    // ── Phase 4.2: CFG Analysis & Drop Elaboration ──
+    // ── Phase 4: CFG Analysis & Drop Elaboration ──
     let t_cfg as i64 = perf_begin(perf, "cfg")
     let cfg_an as ptr[CFGAnalyzer] = make[CFGAnalyzer](1 to usize) to ptr[CFGAnalyzer]
     (deref cfg_an).init_cfg(engine, (deref sema).current_file)
     let _cfg_ok as bool = (deref cfg_an).analyze_program(root)
     perf_end(perf, "cfg", t_cfg)
+
+    // ── Phase 4.1: Borrow Checking ──
+    let t3 as i64 = perf_begin(perf, "borrowck")
+    let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
+    (deref bc).init_bc()
+    (deref bc).sema = sema
+    (deref bc).cfg_analyzer = cfg_an
+    (deref bc).current_file = (deref sema).current_file
+    (deref bc).walk_ast(root)
+    perf_end(perf, "borrowck", t3)
 
     if engine.has_errors():
         engine.emit_all_cached()

@@ -1,0 +1,59 @@
+// ── CFG Loops NLL Test Suite ─────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+fn test_loop_early_release():
+    var x as i32 = 10
+    var i as i32 = 0
+    while i < 5:
+        // Loan created inside loop
+        let r as ref i32 = ref x
+        let val as i32 = deref r
+        // r is dead here!
+        x = x + 1 // MUST BE PERMITTED under CFG NLL
+        i = i + 1
+    let r1 as i32 = printf("  [PASS] Loop Early Release (mutate x after loan end in while body)\n" to cstr)
+
+fn test_loop_multiple_iterations():
+    var counter as i32 = 100
+    var step as i32 = 0
+    while step < 3:
+        let r as ref i32 = ref counter
+        let reading as i32 = deref r
+        // Mutate counter after reading
+        counter = reading * 2
+        step = step + 1
+    let r2 as i32 = printf("  [PASS] Loop Multiple Iterations (independent loans across iterations)\n" to cstr)
+
+fn test_loop_with_break():
+    var data as i32 = 42
+    var n as i32 = 0
+    while n < 10:
+        if n == 3:
+            let r as ref i32 = ref data
+            let v as i32 = deref r
+            break
+        n = n + 1
+    // Mutate data after loop with break
+    data = 99
+    let r3 as i32 = printf("  [PASS] Loop With Break (CFG exit edge liveness)\n" to cstr)
+
+fn test_loop_with_continue():
+    var val as i32 = 50
+    var k as i32 = 0
+    while k < 4:
+        k = k + 1
+        if k % 2 == 0:
+            let r as ref i32 = ref val
+            let temp as i32 = deref r
+            continue
+        val = val + 10
+    let r4 as i32 = printf("  [PASS] Loop With Continue (CFG continue edge liveness)\n" to cstr)
+
+fn main() as i32:
+    let r0 as i32 = printf("=== Starting CFG Loops NLL Test Suite (Phase 1) ===\n" to cstr)
+    test_loop_early_release()
+    test_loop_multiple_iterations()
+    test_loop_with_break()
+    test_loop_with_continue()
+    let r5 as i32 = printf("=== All CFG Loops NLL Tests Passed! ===\n" to cstr)
+    return 0

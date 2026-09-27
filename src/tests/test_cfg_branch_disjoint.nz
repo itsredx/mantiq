@@ -1,0 +1,66 @@
+// ── CFG Branch Disjoint NLL Test Suite ─────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+fn test_if_else_disjoint_loans():
+    var x as i32 = 100
+    var cond as bool = True
+    if cond:
+        let r1 as ref i32 = ref x
+        let v1 as i32 = deref r1
+        // r1 dead here
+    else:
+        // In else branch, r1 was never live!
+        x = 200 // MUST BE PERMITTED
+        let r2 as ref i32 = ref x
+        let v2 as i32 = deref r2
+    let r_p1 as i32 = printf("  [PASS] If-Else Disjoint Loans (independent borrow scopes per branch)\n" to cstr)
+
+fn test_post_branch_join_mutation():
+    var val as i32 = 500
+    var mode as i32 = 1
+    if mode == 1:
+        let r_a as ref i32 = ref val
+        let v_a as i32 = deref r_a
+    else:
+        let r_b as ref i32 = ref val
+        let v_b as i32 = deref r_b
+    // At join block, both r_a and r_b are dead!
+    val = 999 // MUST BE PERMITTED after join
+    let r_p2 as i32 = printf("  [PASS] Post-Branch Join Mutation (all branch loans dead at join)\n" to cstr)
+
+fn test_nested_branch_disjoint():
+    var target as i32 = 77
+    var a as bool = True
+    var b as bool = False
+    if a:
+        if b:
+            let r_nested as ref i32 = ref target
+            let v_n as i32 = deref r_nested
+        else:
+            target = 88 // Inner else branch: r_nested is not live here!
+            let r_inner as ref i32 = ref target
+            let v_i as i32 = deref r_inner
+    else:
+        target = 99 // Outer else branch
+    let r_p3 as i32 = printf("  [PASS] Nested Branch Disjoint Scopes (hierarchical CFG regions)\n" to cstr)
+
+fn test_disjoint_branch_rebinding():
+    var resource as i32 = 42
+    var select as bool = False
+    if select:
+        let ref_sel as ref i32 = ref resource
+        let v_sel as i32 = deref ref_sel
+    else:
+        resource = resource + 10
+        let ref_other as ref i32 = ref resource
+        let v_oth as i32 = deref ref_other
+    let r_p4 as i32 = printf("  [PASS] Disjoint Branch Rebinding (mutate & re-borrow in alternate branch)\n" to cstr)
+
+fn main() as i32:
+    let r0 as i32 = printf("=== Starting CFG Branch Disjoint NLL Test Suite (Phase 1) ===\n" to cstr)
+    test_if_else_disjoint_loans()
+    test_post_branch_join_mutation()
+    test_nested_branch_disjoint()
+    test_disjoint_branch_rebinding()
+    let r5 as i32 = printf("=== All CFG Branch Disjoint Tests Passed! ===\n" to cstr)
+    return 0

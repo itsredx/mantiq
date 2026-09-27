@@ -12,6 +12,8 @@ import sema
 from sema import Sema, make_symbol
 import error
 from error import DiagnosticEngine, Diagnostic
+import cfg
+from cfg import CFGAnalyzer, ControlFlowGraph, Point
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn printf(format as cstr, ...) as i32
@@ -66,6 +68,7 @@ struct BorrowChecker:
     public var var_source_map as Dict[String, String]
     public var var_last_use as Dict[String, u32]
     public var current_row as u32
+    public var cfg_analyzer as ptr[CFGAnalyzer]
 
     public fn init_bc(self as ptr[BorrowChecker]):
         (deref self).errors = List[String]()
@@ -80,6 +83,7 @@ struct BorrowChecker:
         (deref self).var_source_map = Dict[String, String]()
         (deref self).var_last_use = Dict[String, u32]()
         (deref self).current_row = 0 to u32
+        (deref self).cfg_analyzer = None to ptr[CFGAnalyzer]
 
     public fn report_error(self as ptr[BorrowChecker], msg as String, span as Span):
         self.report_error_with_code("E0401" to cstr, msg, (deref self).current_file, span)
@@ -367,6 +371,20 @@ struct BorrowChecker:
         (deref ab_ref).append(new_rec)
         (deref sm_ref)[borrower_name] = source_name
 
+    public fn is_borrow_active_at_node(self as ptr[BorrowChecker], b as BorrowRecord, node as ptr[Node]) as bool:
+        if node != None to ptr[Node] and (deref self).cfg_analyzer != None to ptr[CFGAnalyzer]:
+            let ca as ptr[CFGAnalyzer] = (deref self).cfg_analyzer
+            return ca.is_borrower_live(b.borrower_name, node)
+
+        let row as u32 = if node != None to ptr[Node]: node_span(node).start_row + 1 to u32 else: (deref self).current_row
+        let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
+        var last_use as u32 = b.last_use_row
+        if (deref lu_ref).has(b.borrower_name):
+            last_use = (deref lu_ref)[b.borrower_name]
+        if row > last_use and last_use > 0 to u32:
+            return False
+        return b.is_active != 0 to u8
+
     public fn check_mutation_target(self as ptr[BorrowChecker], left as ptr[Node]):
         if left == None to ptr[Node]:
             return
@@ -381,7 +399,7 @@ struct BorrowChecker:
         var idx as i64 = 0 to i64
         while idx < count:
             let b as BorrowRecord = (deref ab_ref)[idx]
-            if b.is_active != 0 to u8 and strcmp(b.source_name.data to cstr, name.data to cstr) == 0:
+            if self.is_borrow_active_at_node(b, left) and strcmp(b.source_name.data to cstr, name.data to cstr) == 0:
                 if b.is_mut == 0 to u8:
                     let d as ptr[Diagnostic] = self.report_error_node("E0404" to cstr, String.make("cannot assign to variable while borrowed as immutable" to cstr), left)
                     if d != None to ptr[Diagnostic]:
@@ -430,7 +448,7 @@ struct BorrowChecker:
         var idx as i64 = 0 to i64
         while idx < count:
             let b as BorrowRecord = (deref ab_ref)[idx]
-            if b.is_active != 0 to u8 and strcmp(b.source_name.data to cstr, name.data to cstr) == 0:
+            if self.is_borrow_active_at_node(b, node) and strcmp(b.source_name.data to cstr, name.data to cstr) == 0:
                 let d as ptr[Diagnostic] = self.report_error_node("E0403" to cstr, String.make("cannot move variable while borrowed" to cstr), node)
                 if d != None to ptr[Diagnostic]:
                     d.set_explanation(String.make("Values cannot be moved or transferred while references to them are still active." to cstr))
@@ -662,7 +680,7 @@ struct BorrowChecker:
                             var idx as i64 = 0 to i64
                             while idx < count:
                                 let b as BorrowRecord = (deref self).active_borrows[idx]
-                                if b.is_active != 0 to u8 and strcmp(b.source_name.data to cstr, d_name.data to cstr) == 0:
+                                if self.is_borrow_active_at_node(b, node) and strcmp(b.source_name.data to cstr, d_name.data to cstr) == 0:
                                     let d as ptr[Diagnostic] = self.report_error_node("E0408" to cstr, String.make("cannot drop variable while borrowed" to cstr), node)
                                     if d != None to ptr[Diagnostic]:
                                         d.set_explanation(String.make("Cannot explicitly drop a variable while active references borrow from it." to cstr))

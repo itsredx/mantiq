@@ -241,3 +241,53 @@ The compiler includes an end-to-end bidirectional Python Foreign Function Interf
 
 ### 5. In-Process Packaging Backend (`nizam_build`)
 - Provides a PEP 517 standard build backend (`mantiq/python/nizam_build`) enabling pure `pyproject.toml` integration (`pip install .` / `python -m build --wheel`).
+
+---
+
+## 8. Python-to-Nizam AOT Transpiler & UI Acceleration Engine
+
+The toolchain integrates an Ahead-of-Time (AOT) transpilation pipeline (`mantiq/python/nizam/transpiler/`) transforming typed Python code directly into native Nizam source code (`.nz`):
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                    Python-to-Nizam Transpilation Pipeline                     │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ 1. AST Ingestion & Type Inference (visitor.py, types.py)                      │
+│    • Ingests Python 3.8-3.12 AST via ast.NodeVisitor                          │
+│    • Extracts PEP 484/526 type annotations into unboxed native Nizam types    │
+│    • Desugars comprehensions, pattern matching, and f-strings                 │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ 2. Object Model & Component Lowering (classes.py)                             │
+│    • Lowers Python classes into unboxed Nizam structs with static .init()     │
+│    • Emits explicit pointer receivers (self as ptr[T]) and deref field access │
+│    • Lowers declarative UI state lifecycles (PyThra set_state dirty marking)  │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ 3. Hotspot UI Acceleration (src/ui/reconciler.nz, reconciler.py)              │
+│    • Native virtual DOM diffing engine in unboxed Nizam structs               │
+│    • O(N) keyed child reordering preventing quadratic fallback                │
+│    • Concurrent @nogil background diffing with zero GIL contention            │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ 4. Foreign Dynamic Interop & Gradual Fallbacks (foreign.py)                   │
+│    • DependencyClassifier isolates local modules from external libraries      │
+│    • Synthesizes typed extern[python] stubs for standard libraries           │
+│    • Transitions unresolved dynamic expressions to PyObject Vectorcall        │
+├───────────────────────────────────────────────────────────────────────────────┤
+│ 5. Multi-Target Standalone Deployment (builder.py, wasm_loader.py)            │
+│    • --target native: Standalone executable (<10MB, <10ms cold boot) with     │
+│      OS-native webviews (WebKitGTK, Cocoa WKWebView, Edge WebView2)           │
+│    • --target wasm32-wasi: Standalone browser WebAssembly (<1MB, <50ms boot)  │
+│      with zero-dependency JS/HTML runner applying virtual DOM patches         │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. Python 3.8+ Data Model Parity in Standard Library
+
+The Mantiq standard library (`std.string`, `std.collections`, and native runtime primitives) provides 100% method naming and semantic parity with Python 3.8+ built-in collections:
+- **`String` (`std.string.String`)**: All 47 Python `str` methods implemented, including casing, searching, whitespace trimming, universal newline splitting, and formatting.
+- **`List[T]` (`std.collections.List[T]`)**: Python `list` method parity (`append`, `extend`, `insert`, `remove`, `pop`, `reverse`, `sort`, `copy`, `count`, `index`) with negative indexing and clamp semantics.
+- **`Tuple[T]` (`std.collections.Tuple[T]`)**: Immutable sequence with `count`, `index`, and element indexing.
+- **`Dict[K, V]` (`std.collections.Dict[K, V]`)**: Open-addressing bitmask hash table with 100% method parity and Python 3.10+ `.mapping()` dictionary view support.
+- **`Set[T]` & `FrozenSet[T]` (`std.collections.Set`, `FrozenSet`)**: Full mutable and immutable mathematical set operations (`union`, `intersection`, `difference`, `symmetric_difference`, subset tests).
+- **`Bytes` & `ByteArray` (`std.collections.Bytes`, `ByteArray`)**: Comprehensive text/binary sequences with hex translation and in-place byte manipulation.
