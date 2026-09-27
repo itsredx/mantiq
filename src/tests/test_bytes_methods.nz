@@ -1,7 +1,7 @@
 // ── Test Bytes and ByteArray Methods Parity ──────────────────────────
 
 import std.collections
-from std.collections import Bytes, ByteArray, List
+from std.collections import Bytes, ByteArray, List, Dict
 from std.string import String
 
 fn main() as i32:
@@ -250,6 +250,157 @@ fn main() as i32:
         print("  FAIL: ByteArray hex failed")
         return 1
     print("  PASS: ByteArray sequence methods (startswith, endswith, removeprefix, upper, replace, decode, hex)")
+
+    // ── Test 11: Bytes Advanced Operations (capitalize, title, center, join, partition, rpartition, rsplit, splitlines, expandtabs, maketrans, translate) ──
+    var b_cap as Bytes = Bytes.from_cstr("hELLO wORLD" to cstr).capitalize()
+    if b_cap.get(0 to i64) != 72 to u8 or b_cap.get(1 to i64) != 101 to u8 or b_cap.get(6 to i64) != 119 to u8:
+        print("  FAIL: Bytes.capitalize() failed")
+        return 1
+
+    var b_title as Bytes = Bytes.from_cstr("hello world" to cstr).title()
+    if b_title.get(0 to i64) != 72 to u8 or b_title.get(6 to i64) != 87 to u8:
+        print("  FAIL: Bytes.title() failed")
+        return 1
+
+    var b_cent as Bytes = Bytes.from_cstr("abc" to cstr).center(7 to i64)
+    if b_cent.length() != 7 to i64 or b_cent.get(0 to i64) != 32 to u8 or b_cent.get(2 to i64) != 97 to u8:
+        print("  FAIL: Bytes.center() failed")
+        return 1
+
+    var parts as List[Bytes] = List[Bytes]()
+    parts.append(Bytes.from_cstr("a" to cstr))
+    parts.append(Bytes.from_cstr("b" to cstr))
+    parts.append(Bytes.from_cstr("c" to cstr))
+    var sep_dash as Bytes = Bytes.from_cstr("-" to cstr)
+    var b_joined as Bytes = sep_dash.join(parts)
+    if b_joined.length() != 5 to i64 or b_joined.get(1 to i64) != 45 to u8 or b_joined.get(4 to i64) != 99 to u8:
+        print("  FAIL: Bytes.join() failed")
+        return 1
+
+    var b_colon as Bytes = Bytes.from_cstr("a:b:c" to cstr)
+    var b_part as List[Bytes] = b_colon.partition(58 to u8)
+    if b_part.length() != 3 to i64 or b_part[0].length() != 1 to i64 or b_part[1].get(0 to i64) != 58 to u8 or b_part[2].length() != 3 to i64:
+        print("  FAIL: Bytes.partition() failed")
+        return 1
+
+    var b_rpart as List[Bytes] = b_colon.rpartition(58 to u8)
+    if b_rpart.length() != 3 to i64 or b_rpart[0].length() != 3 to i64 or b_rpart[1].get(0 to i64) != 58 to u8 or b_rpart[2].length() != 1 to i64:
+        print("  FAIL: Bytes.rpartition() failed")
+        return 1
+
+    var b_miss_rpart as List[Bytes] = Bytes.from_cstr("abc" to cstr).rpartition(58 to u8)
+    if b_miss_rpart[0].length() != 0 to i64 or b_miss_rpart[1].length() != 0 to i64 or b_miss_rpart[2].length() != 3 to i64:
+        print("  FAIL: Bytes.rpartition() missing sep failed")
+        return 1
+
+    var b_multi as Bytes = Bytes.from_cstr("a:b:c:d" to cstr)
+    var b_rsplit as List[Bytes] = b_multi.rsplit(58 to u8, 2 to i64)
+    if b_rsplit.length() != 3 to i64 or b_rsplit[0].length() != 3 to i64 or b_rsplit[1].length() != 1 to i64 or b_rsplit[2].length() != 1 to i64:
+        print("  FAIL: Bytes.rsplit() failed")
+        return 1
+
+    var b_lines as Bytes = Bytes.from_cstr("line1\nline2\r\nline3" to cstr)
+    var b_spl_lines as List[Bytes] = b_lines.splitlines(False)
+    if b_spl_lines.length() != 3 to i64 or b_spl_lines[0].length() != 5 to i64 or b_spl_lines[1].length() != 5 to i64:
+        print("  FAIL: Bytes.splitlines() failed")
+        return 1
+
+    var b_tabs as Bytes = Bytes.from_cstr("a\tb" to cstr)
+    var b_exp as Bytes = b_tabs.expandtabs(4 to i64)
+    if b_exp.length() != 5 to i64 or b_exp.get(0 to i64) != 97 to u8 or b_exp.get(1 to i64) != 32 to u8 or b_exp.get(4 to i64) != 98 to u8:
+        print("  FAIL: Bytes.expandtabs() failed")
+        return 1
+
+    var trans_table as Dict[i64, i64] = Bytes.maketrans_cstr("abc" to cstr, "xyz" to cstr)
+    var b_to_trans as Bytes = Bytes.from_cstr("cab" to cstr)
+    var b_trans as Bytes = b_to_trans.translate(trans_table)
+    if b_trans.length() != 3 to i64 or b_trans.get(0 to i64) != 122 to u8 or b_trans.get(1 to i64) != 120 to u8 or b_trans.get(2 to i64) != 121 to u8:
+        print("  FAIL: Bytes.translate() failed")
+        return 1
+    print("  PASS: Bytes advanced operations (capitalize, title, center, join, partition, rpartition, rsplit, splitlines, expandtabs, maketrans, translate)")
+
+    // ── Test 12: ByteArray Advanced Operations Parity ──────────────────
+    var ba_full as ByteArray = ByteArray.from_cstr("a:b:c:d" to cstr)
+    var ba_parts as List[ByteArray] = ba_full.split(58 to u8)
+    if ba_parts.length() != 4 to i64 or ba_parts[0].get(0 to i64) != 97 to u8 or ba_parts[3].get(0 to i64) != 100 to u8:
+        print("  FAIL: ByteArray.split() failed")
+        return 1
+
+    var ba_rsplit as List[ByteArray] = ba_full.rsplit(58 to u8, 2 to i64)
+    if ba_rsplit.length() != 3 to i64 or ba_rsplit[0].length() != 3 to i64 or ba_rsplit[2].length() != 1 to i64:
+        print("  FAIL: ByteArray.rsplit() failed")
+        return 1
+
+    var ba_p as List[ByteArray] = ba_full.partition(58 to u8)
+    if ba_p.length() != 3 to i64 or ba_p[0].length() != 1 to i64 or ba_p[2].length() != 5 to i64:
+        print("  FAIL: ByteArray.partition() failed")
+        return 1
+
+    var ba_rp as List[ByteArray] = ba_full.rpartition(58 to u8)
+    if ba_rp.length() != 3 to i64 or ba_rp[0].length() != 5 to i64 or ba_rp[2].length() != 1 to i64:
+        print("  FAIL: ByteArray.rpartition() failed")
+        return 1
+
+    var ba_swap as ByteArray = ByteArray.from_cstr("HeLLo" to cstr).swapcase()
+    if ba_swap.get(0 to i64) != 104 to u8 or ba_swap.get(1 to i64) != 69 to u8:
+        print("  FAIL: ByteArray.swapcase() failed")
+        return 1
+
+    var ba_cap as ByteArray = ByteArray.from_cstr("hELLO wORLD" to cstr).capitalize()
+    if ba_cap.get(0 to i64) != 72 to u8 or ba_cap.get(1 to i64) != 101 to u8:
+        print("  FAIL: ByteArray.capitalize() failed")
+        return 1
+
+    var ba_title as ByteArray = ByteArray.from_cstr("hello world" to cstr).title()
+    if ba_title.get(0 to i64) != 72 to u8 or ba_title.get(6 to i64) != 87 to u8:
+        print("  FAIL: ByteArray.title() failed")
+        return 1
+
+    var ba_pad as ByteArray = ByteArray.from_cstr("  abc  " to cstr)
+    var ba_lstr as ByteArray = ba_pad.lstrip()
+    var ba_rstr as ByteArray = ba_pad.rstrip()
+    if ba_lstr.get(0 to i64) != 97 to u8 or ba_rstr.get(ba_rstr.length() - 1 to i64) != 99 to u8:
+        print("  FAIL: ByteArray.lstrip/rstrip() failed")
+        return 1
+
+    var ba_cent as ByteArray = ByteArray.from_cstr("abc" to cstr).center(7 to i64)
+    var ba_lj as ByteArray = ByteArray.from_cstr("abc" to cstr).ljust(5 to i64)
+    var ba_rj as ByteArray = ByteArray.from_cstr("abc" to cstr).rjust(5 to i64)
+    var ba_zf as ByteArray = ByteArray.from_cstr("123" to cstr).zfill(5 to i64)
+    if ba_cent.length() != 7 to i64 or ba_lj.length() != 5 to i64 or ba_rj.length() != 5 to i64 or ba_zf.get(0 to i64) != 48 to u8:
+        print("  FAIL: ByteArray center/ljust/rjust/zfill failed")
+        return 1
+
+    var ba_lines as ByteArray = ByteArray.from_cstr("row1\nrow2\r\nrow3" to cstr)
+    var ba_spl as List[ByteArray] = ba_lines.splitlines(False)
+    if ba_spl.length() != 3 to i64:
+        print("  FAIL: ByteArray.splitlines() failed")
+        return 1
+
+    var ba_tabs as ByteArray = ByteArray.from_cstr("x\ty" to cstr)
+    var ba_exp as ByteArray = ba_tabs.expandtabs(4 to i64)
+    if ba_exp.length() != 5 to i64 or ba_exp.get(1 to i64) != 32 to u8 or ba_exp.get(4 to i64) != 121 to u8:
+        print("  FAIL: ByteArray.expandtabs() failed")
+        return 1
+
+    var ba_trans as ByteArray = ByteArray.from_cstr("cab" to cstr).translate(trans_table)
+    if ba_trans.length() != 3 to i64 or ba_trans.get(0 to i64) != 122 to u8 or ba_trans.get(1 to i64) != 120 to u8:
+        print("  FAIL: ByteArray.translate() failed")
+        return 1
+
+    if ba_full.rfind(58 to u8) != 5 to i64 or ba_full.rindex(58 to u8) != 5 to i64:
+        print("  FAIL: ByteArray.rfind/rindex() failed")
+        return 1
+
+    var ba_alpha as ByteArray = ByteArray.from_cstr("Alpha" to cstr)
+    var ba_sp as ByteArray = ByteArray.from_cstr(" \t\n" to cstr)
+    if not ba_alpha.isalpha() or not ba_alpha.isalnum() or not ba_alpha.isascii():
+        print("  FAIL: ByteArray predicates failed")
+        return 1
+    if not ba_sp.isspace():
+        print("  FAIL: ByteArray isspace failed")
+        return 1
+    print("  PASS: ByteArray advanced operations (split, rsplit, partition, rpartition, swapcase, capitalize, title, lstrip, rstrip, center, ljust, rjust, zfill, splitlines, expandtabs, translate, rfind, rindex, predicates)")
 
     print("ALL BYTES AND BYTEARRAY TESTS PASSED")
     return 0
