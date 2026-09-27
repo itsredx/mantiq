@@ -44,10 +44,11 @@ Nizam is a purely functional and systems-level programming language designed for
 
 ### Memory Management & Lifetimes
 Manual and strict.
-- `let r as life a i32 = ref num` (Safe reference with lifetime 'a')
+- `let r as life[a] i32 = ref num` (Safe reference with lifetime `'a`, enforced via CFG point-based borrow checker)
 - `let p as ptr[i32] = ref num` (Unsafe raw pointer)
 - `deref p` to manually dereference.
 - `make[T]()` to allocate, `drop(val)` to deallocate.
+- Scope-based auto-drop injection and Non-Lexical Lifetimes (NLL).
 
 ### Systems Modifiers
 - `inline fn`, `static var`, `extern fn`, `volatile var`, `atomic var`.

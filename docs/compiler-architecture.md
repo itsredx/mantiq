@@ -38,16 +38,32 @@ Source text (*.nz, *.mq)
   │
   ▼
 ┌────────────────────────────────────────────────────────┐
-│ 5. Borrow Checking & Auto-Drops (src/borrowck.nz)      │
+│ 4. Type Checking & Monomorphization (src/typecheck.nz) │
+│    Bidirectional type inference, coercion rules,       │
+│    generic struct/function monomorphization,           │
+│    destination-driven literal type inference           │
+└────────────────────────────────────────────────────────┘
+  │
+  ▼
+┌────────────────────────────────────────────────────────┐
+│ 5. CFG Generation & Liveness Analysis (src/cfg.nz)     │
+│    AST → BasicBlock CFG lowering, control flow points  │
+│    Backward variable liveness analysis (var_live_at)   │
+│    Path-sensitive borrower liveness across loops/branch│
+└────────────────────────────────────────────────────────┘
+  │
+  ▼
+┌────────────────────────────────────────────────────────┐
+│ 6. Borrow Checking & Auto-Drops (src/borrowck.nz)      │
 │    Move semantics state machine (Owned → Moved)        │
-│    Use-after-move / use-after-drop verification        │
+│    CFG point-based loan validation (Aliasing XOR Mut)  │
 │    Scope auto-drop injection at block exits            │
 │    Context manager (`with` stmt) lifecycle drop        │
 └────────────────────────────────────────────────────────┘
   │
   ▼
 ┌────────────────────────────────────────────────────────┐
-│ 6. LLVM IR Code Generation (src/codegen.nz)            │
+│ 7. LLVM IR Code Generation (src/codegen.nz)            │
 │    AST → SSA LLVM IR text emission                     │
 │    Struct/union memory layout, mangling, ABI calls,    │
 │    closure environment boxing and function pointers    │
@@ -55,7 +71,7 @@ Source text (*.nz, *.mq)
   │
   ▼
 ┌────────────────────────────────────────────────────────┐
-│ 7. Native Linkage & Binary Generation (src/main.nz)    │
+│ 8. Native Linkage & Binary Generation (src/main.nz)    │
 │    LLVM IR + C Runtime (runtime.c) + Tree-sitter FFI   │
 │    Linked via zig cc / clang → Native Executable       │
 └────────────────────────────────────────────────────────┘
@@ -74,7 +90,8 @@ Source text (*.nz, *.mq)
 | **CST Lowering** | `src/lower.nz` | ~3,270 | CST to AST lowering, `extern[python]` blocks/inlines, decorators (`@nogil`), macros |
 | **Semantic Analysis** | `src/sema.nz` | ~1,700 | Two-pass symbol declaration, module loading, closure capture, static GIL analysis |
 | **Type Checker** | `src/typecheck.nz` | ~2,400 | Type validation, bidirectional inference, generic monomorphization, `PyObject` coercion |
-| **Borrow Checker** | `src/borrowck.nz` | ~450 | Move analysis, use-after-move detection, deterministic auto-drop injection |
+| **Control Flow & Liveness** | `src/cfg.nz` | ~570 | CFG construction, BasicBlock flattening, backward variable liveness, loan invalidation |
+| **Borrow Checker** | `src/borrowck.nz` | ~860 | Move analysis, CFG point borrow queries, use-after-move detection, auto-drop injection |
 | **LLVM Codegen** | `src/codegen.nz` | ~14,500 | SSA LLVM IR emission, Vectorcall trampolines, `%PyTypeObject`, PEP 3118 buffer protocol, lazy callable caching |
 | **Diagnostic Engine** | `src/error.nz` | ~1,070 | Box-drawing ANSI terminal renderer, multi-file source cache, error codes catalog |
 | **CLI Driver** | `src/main.nz` | ~560 | Multi-target driver (`build`, `run`, `version`), `--target`, `--lib-dir`, `--profile`, native/WASI/CPython runners |
@@ -95,7 +112,14 @@ The compiler incorporates a state-of-the-art terminal diagnostic renderer inspir
    - `[E0308]`: Type mismatch in expression / assignment / return.
    - `[E0401]`: Use of moved variable (borrow checker).
    - `[E0402]`: Use of dropped variable.
-   - `[E0403]`: Cannot borrow mutably.
+   - `[E0403]`: Cannot move variable while borrowed (`MoveWhileBorrowed`).
+   - `[E0404]`: Cannot mutate variable while borrowed as immutable (`MutateWhileBorrowed`).
+   - `[E0405]`: Cannot borrow mutably more than once concurrently (`ConcurrentMutableBorrow`).
+   - `[E0406]`: Cannot borrow immutably while borrowed mutably (`AliasingViolation`).
+   - `[E0407]`: Dangling stack reference returned from function.
+   - `[E0408]`: Borrowed value does not live long enough (inter-procedural outlives).
+   - `[E0409]`: Struct outlives borrowed data.
+   - `[E0410]`: Lifetime elision ambiguity.
    - `[E0501]`: Undefined macro invocation.
    - `[E0502]`: Macro argument count mismatch.
    - `[W0012]`: Unused variable warning.
@@ -291,3 +315,38 @@ The Mantiq standard library (`std.string`, `std.collections`, and native runtime
 - **`Dict[K, V]` (`std.collections.Dict[K, V]`)**: Open-addressing bitmask hash table with 100% method parity and Python 3.10+ `.mapping()` dictionary view support.
 - **`Set[T]` & `FrozenSet[T]` (`std.collections.Set`, `FrozenSet`)**: Full mutable and immutable mathematical set operations (`union`, `intersection`, `difference`, `symmetric_difference`, subset tests).
 - **`Bytes` & `ByteArray` (`std.collections.Bytes`, `ByteArray`)**: Comprehensive text/binary sequences with hex translation and in-place byte manipulation.
+
+---
+
+## 10. Advanced Lifetimes, CFG Point Liveness & Borrow Checking Subsystem (`src/cfg.nz`, `src/borrowck.nz`)
+
+The compiler implements a path-sensitive **CFG Point-Based Liveness Engine** that replaces linear row-based comparisons with graph-theoretic dataflow analysis across all language statements (`while`, `for`, `if`, `match`, `break`, `continue`, `return`):
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                 CFG Point-Based Liveness Architecture                  │
+├────────────────────────────────┬───────────────────────────────────────┤
+│ 1. Basic Block Lowering        │ 2. Point Dataflow Coordinates         │
+│ • BasicBlock with flattened    │ • Point { bb_id, stmt_idx }           │
+│   terminators (branch, return) │ • LoanRecord provenance tracking      │
+│ • Scalar loop-stack state      │ • Backward liveness: var_live_at      │
+├────────────────────────────────┼───────────────────────────────────────┤
+│ 3. Inter-Procedural Lifetimes  │ 4. Struct & Field Projections         │
+│ • choose[life a](x, y) binders │ • struct StringView[life a]           │
+│ • Call-site Origin mapping     │ • Disjoint pt.x / pt.y field borrows  │
+│ • Outlives checking (E0408)    │ • Reference covariance & invariance   │
+└────────────────────────────────┴───────────────────────────────────────┘
+```
+
+### 1. Dataflow Equations
+For each basic block $B$ and program point $P$:
+$$\text{In}[P] = \bigcup_{P' \in \text{preds}(P)} \text{Out}[P']$$
+$$\text{Out}[P] = (\text{In}[P] \setminus \text{Kill}[P]) \cup \text{Gen}[P]$$
+where $\text{Kill}[P]$ terminates a loan when the borrower variable is dead downstream:
+$$\text{Kill}[P] = \{ L \mid \text{borrower}(L) \notin \text{LiveVars}(P) \}$$
+
+### 2. Implementation Highlights
+- **Terminator Flattening**: `BasicBlock` directly embeds terminator fields (`terminator_kind`, `terminator_target_bb`, `terminator_then_bb`, `terminator_else_bb`, `terminator_expr`, `terminator_span`) with dedicated setter methods (`set_terminator_return`, `set_terminator_branch`, `set_terminator_branch_if`), eliminating LLVM IR struct-return and enum dispatch mismatches.
+- **Loop Stack Preservation**: Replaces dynamic list popping with scalar fields `current_loop_break_bb` and `current_loop_continue_bb` preserved across nested loop AST visitor stacks.
+- **Verification Suites**: Verified via `test_borrowck.nz`, `test_nll_borrowck.nz`, `test_cfg_loops_nll.nz`, and `test_cfg_branch_disjoint.nz` with 100% pass rate.
+

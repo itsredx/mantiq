@@ -475,15 +475,138 @@ fn test():
     // s is automatically freed here via auto_drops
 ```
 
-### Lifetime Annotation (Tracked Only)
+### Lifetime Annotations & Non-Lexical Lifetimes (NLL)
 
 ```nizam
 from std.string import String
-let source as String = String.make("Mantiq")
-let reference as life[a] mut String = source
-// Tracked but not enforced by the current borrow checker
+
+fn choose[life a](x as life[a] String, y as life[a] String) as life[a] String:
+    if True:
+        return x
+    return y
 ```
 
-### Allocator Choice at Compile Time
+Lifetimes in Nizam are verified via a **path-sensitive CFG point-based liveness engine** in `src/cfg.nz` and `src/borrowck.nz`, eliminating linear row-number fragility across loops and branch-divergent code.
+
+---
+
+## 11. Non-Lexical Lifetimes (NLL) & CFG Point-Based Liveness Engine
+
+### 11.1 The CFG Dataflow Model
+Rather than evaluating loan lifetimes through lexical scopes or source code line numbers (`row > last_use_row`), Nizam models execution as a Control Flow Graph (CFG) of basic blocks and program points:
+
+```nizam
+struct Point:
+    public var bb_id as i64
+    public var stmt_idx as i64
+```
+
+A loan record captures the provenance of a reference:
+```nizam
+struct LoanRecord:
+    public var loan_id as i64
+    public var source_var as String
+    public var is_mut as bool
+    public var span as Span
+    public var issued_point as Point
+    public var origin as String
+```
+
+### 11.2 Fixed-Point Dataflow Equations
+For each basic block $B$ and point $P$:
+$$\text{In}[P] = \bigcup_{P' \in \text{preds}(P)} \text{Out}[P']$$
+$$\text{Out}[P] = (\text{In}[P] \setminus \text{Kill}[P]) \cup \text{Gen}[P]$$
+
+- **$\text{Gen}[P]$**: Emits a loan $L$ when `ref x` or `ref mut x` is evaluated at point $P$.
+- **$\text{Kill}[P]$**: Terminates loan $L$ when the borrower variable $r$ is dead downstream, determined by backward variable liveness analysis (`var_live_at(Var, Point)`).
+
+### 11.3 Handling Loops & Branch Disjunction
+- **Loops (`while`, `for`)**: Loans created inside a loop body that are dropped before the loop back-edge are released immediately. However, if the loan is used across iterations or past the loop exit, the backward edge propagates loan liveness back to loop entry.
+- **Branch Disjunction (`if/else`, `match`)**: Independent branches maintain disjoint loan scopes. If branch `A` borrows `x` and drops it before the join point, branch `B` or the post-branch join block can freely mutate `x` without false positive aliasing conflicts.
+
+---
+
+## 12. Inter-Procedural Lifetime Propagation
+
+### 12.1 Generic Lifetime Parameters
+Functions returning references must parameterize input and output relationships:
+
+```nizam
+fn pick[life a](first as life[a] String, second as life[a] String) as life[a] String:
+    return first
+```
+
+- Each parameter stores `lifetime as String` in `Param`.
+- Return types store `lifetime as String`.
+- Call-site arguments map their loan origins to parameter lifetimes:
+  $$\text{Origin}('a) = \text{Origin}(first) \cup \text{Origin}(second)$$
+- The returned value reference inherits $\text{Origin}('a)$.
+
+### 12.2 Outlives Constraints (`'a: 'b`)
+A borrowed value cannot be returned into a scope that outlives any of the underlying arguments:
+- If a caller assigns the returned reference to a variable whose live range exceeds the lifetime of an input argument, the compiler emits **`[E0408]`** (`borrowed value does not live long enough`).
+
+### 12.3 Lifetime Elision Rules
+To eliminate boilerplate in common patterns, the compiler applies three deterministic elision rules:
+1. Each elided lifetime in the parameter list is assigned a distinct lifetime parameter.
+2. If there is exactly one input lifetime parameter, that lifetime is assigned to all elided output lifetimes.
+3. If there are multiple input lifetime parameters, but one of them is `self` or `ref self`, the lifetime of `self` is assigned to all elided output lifetimes.
+
+---
+
+## 13. Struct-Embedded Lifetimes & Field Projections
+
+### 13.1 Structs Wrapping References
+Composite types may safely encapsulate references with lifetime bounds:
+
+```nizam
+struct StringView[life a]:
+    public var buffer as life[a] String
+    public var length as i64
+```
+
+- Struct instantiations inherit the loan origins of their constituent fields.
+- Attempting to use a struct whose lifetime parameter bound has expired produces **`[E0409]`** (`struct outlives borrowed data`).
+
+### 13.2 Field Projection Disjoint Borrows
+Nizam tracks loan paths (`Base.Field`) to permit simultaneous disjoint borrowing of distinct struct fields:
+
+```nizam
+struct Point:
+    public var x as i32
+    public var y as i32
+
+fn mutate_coords(pt as ptr[Point]):
+    let p_x = ref mut pt.x // Borrows field pt.x
+    let p_y = ref mut pt.y // PERMITTED: Disjoint field borrow of pt.y
+```
+
+### 13.3 Variance & Subtyping
+- **Covariance**: Immutable references `life[a] T` are covariant over `'a` and `T`. If `'a: 'b` and `Sub: Super`, then `life[a] Sub` can be used where `life[b] Super` is expected.
+- **Invariance**: Mutable references `life[a] mut T` are covariant over `'a`, but **invariant** over `T`.
+- Structs inherit the variance of their constituent fields.
+
+---
+
+## 14. Standard Diagnostic & Error Codes
+
+The borrow checker and lifetime engine report structured diagnostics through `src/error.nz`:
+
+| Code | Title | Trigger Condition |
+| :--- | :--- | :--- |
+| `[E0401]` | `UseAfterMove` | Value used after its ownership was transferred via assignment or call. |
+| `[E0402]` | `UseAfterDrop` | Value accessed after explicit deallocation via `drop()`. |
+| `[E0403]` | `MoveWhileBorrowed` | Value moved while an active loan is live at the current CFG point. |
+| `[E0404]` | `MutateWhileBorrowed` | Variable mutated while an immutable loan is live at the current CFG point. |
+| `[E0405]` | `ConcurrentMutableBorrow` | Second mutable borrow attempted while an existing mutable borrow is live. |
+| `[E0406]` | `AliasingViolation` | Immutable borrow attempted while a mutable borrow is live. |
+| `[E0407]` | `DanglingStackReference` | Function attempts to return a reference to a local stack allocation. |
+| `[E0408]` | `BorrowedValueDoesNotLiveLongEnough` | Call return reference outlives one of the argument loans bound to its lifetime. |
+| `[E0409]` | `StructOutlivesBorrowedData` | Struct containing a lifetime-bounded reference outlives the source data. |
+| `[E0410]` | `LifetimeElisionAmbiguity` | Signature has multiple input references and an elided return without `self`. |
+
+---
+
+## 15. Memory Allocation & Runtime Selection
 
 The runtime selects the allocator automatically. If mimalloc is available during compilation, it is used; otherwise, libc malloc is the fallback. The allocator name is printed at runtime initialization.
