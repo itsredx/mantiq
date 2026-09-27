@@ -1,7 +1,7 @@
 // ── Test Dict Methods Parity ──────────────────────────────────────────
 
 import std.collections
-from std.collections import Dict, List
+from std.collections import Dict, List, Tuple2
 import std.string
 from std.string import String
 
@@ -114,6 +114,81 @@ fn main() as i32:
         print("  FAIL: d.len() after clear expected 0")
         return 1
     print("  PASS: clear()")
+
+    // ── Test 7: Fromkeys ───────────────────────────────────────────────
+    var keys_list as List[String] = List[String]()
+    keys_list.append(String.make("alpha" to cstr))
+    keys_list.append(String.make("beta" to cstr))
+    keys_list.append(String.make("gamma" to cstr))
+
+    var d_proto as Dict[String, i32] = {}
+    var d_fk as Dict[String, i32] = d_proto.fromkeys(keys_list, 42)
+    if d_fk.len() != 3 to usize:
+        print("  FAIL: d.fromkeys().len() expected 3")
+        return 1
+    if d_fk["alpha"] != 42 or d_fk["beta"] != 42 or d_fk["gamma"] != 42:
+        print("  FAIL: d.fromkeys() values expected 42")
+        return 1
+    print("  PASS: fromkeys()")
+
+    // ── Test 8: Items View & Mapping ───────────────────────────────────
+    let items_view = d_fk.items()
+    if items_view.len() != 3 to usize:
+        print("  FAIL: items_view.len() expected 3")
+        return 1
+    if items_view.length() != 3 to usize:
+        print("  FAIL: items_view.length() expected 3")
+        return 1
+    let m_dict as Dict[String, i32] = items_view.mapping()
+    if m_dict.len() != 3 to usize or m_dict["beta"] != 42:
+        print("  FAIL: items_view.mapping() expected underlying dict")
+        return 1
+    let iv_keys as List[String] = items_view.keys()
+    if iv_keys.len() != 3 to usize:
+        print("  FAIL: items_view.keys().len() expected 3")
+        return 1
+    let iv_vals as List[i32] = items_view.values()
+    if iv_vals.len() != 3 to usize:
+        print("  FAIL: items_view.values().len() expected 3")
+        return 1
+    let iv_list as List[Tuple2[String, i32]] = items_view.to_list()
+    if iv_list.len() != 3 to usize:
+        print("  FAIL: items_view.to_list().len() expected 3")
+        return 1
+    print("  PASS: items() and mapping()")
+
+    // ── Test 9: Popitem ────────────────────────────────────────────────
+    var pk as String = ""
+    var pv as i32 = 0
+    let popped as bool = d_fk.popitem(ref pk, ref pv)
+    if not popped:
+        print("  FAIL: popitem expected true")
+        return 1
+    if pv != 42:
+        print("  FAIL: popitem expected popped value 42")
+        return 1
+    if d_fk.len() != 2 to usize:
+        print("  FAIL: d_fk.len() after popitem expected 2")
+        return 1
+    if d_fk.has(pk):
+        print("  FAIL: popped key still in dict")
+        return 1
+
+    var pk2 as String = ""
+    var pv2 as i32 = 0
+    let popped2 as bool = d_fk.popitem(ref pk2, ref pv2)
+    let popped3 as bool = d_fk.popitem(ref pk2, ref pv2)
+    if not popped2 or not popped3:
+        print("  FAIL: popitem on remaining items expected true")
+        return 1
+    if d_fk.len() != 0 to usize:
+        print("  FAIL: dict should be empty after popping all")
+        return 1
+    let pop_empty as bool = d_fk.popitem(ref pk2, ref pv2)
+    if pop_empty:
+        print("  FAIL: popitem on empty dict expected false")
+        return 1
+    print("  PASS: popitem()")
 
     print("ALL DICT METHOD TESTS PASSED")
     return 0

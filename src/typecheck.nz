@@ -1578,6 +1578,20 @@ struct TypeChecker:
                                     ret_type = coll_recv_t
                                 elif strcmp(coll_mname.data to cstr, "update") == 0:
                                     ret_type = make_type(TypeKind.Void)
+                                elif strcmp(coll_mname.data to cstr, "fromkeys") == 0:
+                                    ret_type = coll_recv_t
+                                elif strcmp(coll_mname.data to cstr, "items") == 0:
+                                    let items_t as ptr[Type] = make_type(TypeKind.Struct)
+                                    (deref items_t).name = String.make("DictItems" to cstr)
+                                    (deref items_t).payload = coll_recv_t
+                                    ret_type = items_t
+                                elif strcmp(coll_mname.data to cstr, "popitem") == 0:
+                                    if arg_count >= 2 to i64:
+                                        ret_type = make_type(TypeKind.Boolean)
+                                    else:
+                                        let tup_t as ptr[Type] = make_type(TypeKind.Tuple)
+                                        (deref tup_t).name = String.make("Tuple2" to cstr)
+                                        ret_type = tup_t
                                 elif strcmp(coll_mname.data to cstr, "setdefault") == 0 or strcmp(coll_mname.data to cstr, "pop") == 0:
                                     if (deref coll_recv_t).payload != None to ptr[Type]:
                                         ret_type = (deref coll_recv_t).payload
@@ -1588,6 +1602,33 @@ struct TypeChecker:
                                         ret_type = (deref coll_recv_t).payload
                                     else:
                                         ret_type = make_type(TypeKind.Any)
+                                else:
+                                    coll_handled = False
+                            elif coll_recv_k == TypeKind.Struct and (deref coll_recv_t).name.data != None and strcmp((deref coll_recv_t).name.data to cstr, "DictItems" to cstr) == 0:
+                                if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
+                                    ret_type = make_type(TypeKind.USize)
+                                elif strcmp(coll_mname.data to cstr, "mapping") == 0:
+                                    if (deref coll_recv_t).payload != None to ptr[Type]:
+                                        ret_type = (deref coll_recv_t).payload
+                                    else:
+                                        ret_type = make_type(TypeKind.Dict)
+                                elif strcmp(coll_mname.data to cstr, "keys") == 0:
+                                    let coll_keys_t as ptr[Type] = make_type(TypeKind.List)
+                                    (deref coll_keys_t).payload = make_type(TypeKind.Any)
+                                    ret_type = coll_keys_t
+                                elif strcmp(coll_mname.data to cstr, "values") == 0:
+                                    let coll_vals_t as ptr[Type] = make_type(TypeKind.List)
+                                    if (deref coll_recv_t).payload != None to ptr[Type] and (deref (deref coll_recv_t).payload).payload != None to ptr[Type]:
+                                        (deref coll_vals_t).payload = (deref (deref coll_recv_t).payload).payload
+                                    else:
+                                        (deref coll_vals_t).payload = make_type(TypeKind.Any)
+                                    ret_type = coll_vals_t
+                                elif strcmp(coll_mname.data to cstr, "to_list") == 0:
+                                    let lst_t as ptr[Type] = make_type(TypeKind.List)
+                                    let tup_t as ptr[Type] = make_type(TypeKind.Tuple)
+                                    (deref tup_t).name = String.make("Tuple2" to cstr)
+                                    (deref lst_t).payload = tup_t
+                                    ret_type = lst_t
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.List:
