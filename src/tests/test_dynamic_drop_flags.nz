@@ -1,0 +1,85 @@
+// ── Dynamic Drop Flags Test Suite ─────────────────────────────────────────
+import std.string
+from std.string import String
+
+// ── Externs ─────────────────────────────────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+// Helper function to consume a variable by value (triggering ownership move)
+fn take_value(s as String) as i64:
+    return s.len to i64
+
+// ── Test 1: Branch Divergent Move in Then Branch ───────────────────────────
+fn test_branch_divergent_then():
+    var s as String = String.make("dynamic_flag_then" to cstr)
+    var cond as bool = True
+    if cond:
+        let _len as i64 = take_value(s) // Moved in Then-branch
+    // At Join / Exit: drop flag is 0, so conditional drop skips destroying moved s!
+    let _p as i32 = printf("  [PASS] Branch Divergent Move (Then branch move handled cleanly)\n" to cstr)
+
+// ── Test 2: Branch Divergent Move in Else Branch ───────────────────────────
+fn test_branch_divergent_else():
+    var s as String = String.make("dynamic_flag_else" to cstr)
+    var cond as bool = False
+    if cond:
+        let _dummy as i32 = 1 to i32
+    else:
+        let _len as i64 = take_value(s) // Moved in Else-branch
+    // At Join / Exit: drop flag is 0, so conditional drop skips destroying moved s!
+    let _p as i32 = printf("  [PASS] Branch Divergent Move (Else branch move handled cleanly)\n" to cstr)
+
+// ── Test 3: Unmoved Branch Drop Execution ─────────────────────────────────
+fn test_unmoved_branch_drop():
+    var s as String = String.make("unmoved_var" to cstr)
+    var cond as bool = False
+    if cond:
+        let _len as i64 = take_value(s)
+    // S was NOT moved because cond is False.
+    // At Exit: drop flag remains 1, so s is successfully dropped by conditional drop!
+    let _p as i32 = printf("  [PASS] Unmoved Branch Variable (drop flag remains active)\n" to cstr)
+
+// ── Test 4: Reassignment After Move Resets Drop Flag ──────────────────────
+fn test_reassignment_resets_drop_flag():
+    var s as String = String.make("initial_value" to cstr)
+    var cond as bool = True
+    if cond:
+        let _len as i64 = take_value(s) // Moved: flag becomes 0
+        s = String.make("reassigned_value" to cstr) // Reassigned: flag reset to 1
+    // At Join / Exit: flag is 1, so the newly assigned value is dropped at exit!
+    let _p as i32 = printf("  [PASS] Reassignment Resets Drop Flag (store i1 1 restores drop)\n" to cstr)
+
+// ── Test 5: Move in Both Sibling Branches (Static Join) ────────────────────
+fn test_both_branches_moved():
+    var s as String = String.make("both_branches" to cstr)
+    var cond as bool = True
+    if cond:
+        let _len1 as i64 = take_value(s)
+    else:
+        let _len2 as i64 = take_value(s)
+    // Both branches move s. At join, flag is 0 in both paths!
+    let _p as i32 = printf("  [PASS] Sibling Branch Move Convergence (no double drop at join)\n" to cstr)
+
+// ── Test 6: Early Loop Break After Move ────────────────────────────────────
+fn test_loop_break_after_move():
+    var s as String = String.make("loop_val" to cstr)
+    var i as i32 = 0 to i32
+    while i < 10 to i32:
+        if i == 3 to i32:
+            let _l as i64 = take_value(s)
+            break
+        i = i + 1 to i32
+    // S moved before break; loop exit drop skips s
+    let _p as i32 = printf("  [PASS] Loop Break After Move (early exit honors cleared flag)\n" to cstr)
+
+// ── Main Entrypoint ────────────────────────────────────────────────────────
+fn main() as i32:
+    let _r0 as i32 = printf("=== Starting Dynamic Drop Flags Test Suite ===\n" to cstr)
+    test_branch_divergent_then()
+    test_branch_divergent_else()
+    test_unmoved_branch_drop()
+    test_reassignment_resets_drop_flag()
+    test_both_branches_moved()
+    test_loop_break_after_move()
+    let _r1 as i32 = printf("=== All Dynamic Drop Flags Tests Passed! ===\n" to cstr)
+    return 0

@@ -211,6 +211,161 @@ struct Point:
     public var bb_id as i64
     public var stmt_idx as i64
 
+// ── Relational Origin & Subset Facts (Polonius Model) ──────────────────
+struct OriginFact:
+    public var origin_id as i64
+    public var loan_id as i64
+    public var point as Point
+
+struct SubsetFact:
+    public var sub_origin as i64
+    public var sup_origin as i64
+    public var point as Point
+
+struct RelationalFactEngine:
+    public var borrows as List[OriginFact]
+    public var subsets as List[SubsetFact]
+    public var invalidations as Dict[String, List[i64]]
+    public var live_origins as Dict[String, List[i64]]
+    public var origin_loans as Dict[String, List[i64]]
+    public var loan_liveness as Dict[String, bool]
+
+    public fn init_engine(self as ptr[RelationalFactEngine]):
+        (deref self).borrows = List[OriginFact]()
+        (deref self).subsets = List[SubsetFact]()
+        (deref self).invalidations = Dict[String, List[i64]]()
+        (deref self).live_origins = Dict[String, List[i64]]()
+        (deref self).origin_loans = Dict[String, List[i64]]()
+        (deref self).loan_liveness = Dict[String, bool]()
+
+    public fn point_str(self as ptr[RelationalFactEngine], pt as Point) as String:
+        let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+        let _sp0 as i32 = sprintf(buf, "%lld:%lld" to cstr, pt.bb_id, pt.stmt_idx)
+        let s as String = String.make(buf to cstr)
+        free(buf to ptr)
+        return s
+
+    public fn add_borrow_issued(self as ptr[RelationalFactEngine], origin_id as i64, loan_id as i64, pt as Point):
+        let f as OriginFact = OriginFact(origin_id = origin_id, loan_id = loan_id, point = pt)
+        (deref self).borrows.append(f)
+
+    public fn add_subset(self as ptr[RelationalFactEngine], sub_origin as i64, sup_origin as i64, pt as Point):
+        let sf as SubsetFact = SubsetFact(sub_origin = sub_origin, sup_origin = sup_origin, point = pt)
+        (deref self).subsets.append(sf)
+
+    public fn add_invalidation(self as ptr[RelationalFactEngine], pt as Point, loan_id as i64):
+        let ps as String = self.point_str(pt)
+        if not (deref self).invalidations.has(ps):
+            (deref self).invalidations[ps] = List[i64]()
+        var l as List[i64] = (deref self).invalidations[ps]
+        l.append(loan_id)
+
+    public fn add_origin_live_at(self as ptr[RelationalFactEngine], origin_id as i64, pt as Point):
+        let ps as String = self.point_str(pt)
+        if not (deref self).live_origins.has(ps):
+            (deref self).live_origins[ps] = List[i64]()
+        var l as List[i64] = (deref self).live_origins[ps]
+        var exists as bool = False
+        var i as i64 = 0 to i64
+        while i < l.length():
+            if l[i] == origin_id:
+                exists = True
+            i = i + 1 to i64
+        if not exists:
+            l.append(origin_id)
+
+    public fn solve_facts(self as ptr[RelationalFactEngine], cfg as ptr[ControlFlowGraph]):
+        var _sp as i32 = 0 to i32
+        var bi as i64 = 0 to i64
+        while bi < (deref self).borrows.length():
+            let bf as OriginFact = (deref self).borrows[bi]
+            let ps as String = self.point_str(bf.point)
+            let k_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+            _sp = sprintf(k_buf, "%lld@%s" to cstr, bf.origin_id, ps.data to cstr)
+            let op_key as String = String.make(k_buf to cstr)
+            free(k_buf to ptr)
+            if not (deref self).origin_loans.has(op_key):
+                (deref self).origin_loans[op_key] = List[i64]()
+            var ol as List[i64] = (deref self).origin_loans[op_key]
+            ol.append(bf.loan_id)
+            bi = bi + 1 to i64
+
+        var changed as bool = True
+        var iterations as i64 = 0 to i64
+        while changed and iterations < 50 to i64:
+            changed = False
+            iterations = iterations + 1 to i64
+
+            var si as i64 = 0 to i64
+            while si < (deref self).subsets.length():
+                let sf as SubsetFact = (deref self).subsets[si]
+                let ps as String = self.point_str(sf.point)
+                let k1 as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                _sp = sprintf(k1, "%lld@%s" to cstr, sf.sub_origin, ps.data to cstr)
+                let op1_key as String = String.make(k1 to cstr)
+                free(k1 to ptr)
+
+                let k2 as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                _sp = sprintf(k2, "%lld@%s" to cstr, sf.sup_origin, ps.data to cstr)
+                let op2_key as String = String.make(k2 to cstr)
+                free(k2 to ptr)
+
+                if (deref self).origin_loans.has(op1_key):
+                    let l1 as List[i64] = (deref self).origin_loans[op1_key]
+                    if not (deref self).origin_loans.has(op2_key):
+                        (deref self).origin_loans[op2_key] = List[i64]()
+                    var l2 as List[i64] = (deref self).origin_loans[op2_key]
+                    var li as i64 = 0 to i64
+                    while li < l1.length():
+                        let lid as i64 = l1[li]
+                        var has_lid as bool = False
+                        var check_i as i64 = 0 to i64
+                        while check_i < l2.length():
+                            if l2[check_i] == lid:
+                                has_lid = True
+                            check_i = check_i + 1 to i64
+                        if not has_lid:
+                            l2.append(lid)
+                            changed = True
+                        li = li + 1 to i64
+                si = si + 1 to i64
+
+        let live_keys as List[String] = (deref self).live_origins.keys()
+        var ki as i64 = 0 to i64
+        while ki < live_keys.length():
+            let ps as String = live_keys[ki]
+            let o_list as List[i64] = (deref self).live_origins[ps]
+            var oi as i64 = 0 to i64
+            while oi < o_list.length():
+                let o_id as i64 = o_list[oi]
+                let k_op as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                _sp = sprintf(k_op, "%lld@%s" to cstr, o_id, ps.data to cstr)
+                let op_key as String = String.make(k_op to cstr)
+                free(k_op to ptr)
+                if (deref self).origin_loans.has(op_key):
+                    let loans_in_o as List[i64] = (deref self).origin_loans[op_key]
+                    var l_idx as i64 = 0 to i64
+                    while l_idx < loans_in_o.length():
+                        let lid as i64 = loans_in_o[l_idx]
+                        let k_lp as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                        _sp = sprintf(k_lp, "%lld@%s" to cstr, lid, ps.data to cstr)
+                        let lp_key as String = String.make(k_lp to cstr)
+                        free(k_lp to ptr)
+                        (deref self).loan_liveness[lp_key] = True
+                        l_idx = l_idx + 1 to i64
+                oi = oi + 1 to i64
+            ki = ki + 1 to i64
+
+    public fn is_loan_live_at(self as ptr[RelationalFactEngine], loan_id as i64, pt as Point) as bool:
+        let ps as String = self.point_str(pt)
+        let k_lp as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        let _sp_live as i32 = sprintf(k_lp, "%lld@%s" to cstr, loan_id, ps.data to cstr)
+        let lp_key as String = String.make(k_lp to cstr)
+        free(k_lp to ptr)
+        if (deref self).loan_liveness.has(lp_key):
+            return (deref self).loan_liveness[lp_key]
+        return False
+
 // ── CFG Builder & Analyzer ───────────────────────────────────────────────
 struct CFGAnalyzer:
     public var cfgs as Dict[String, ptr[ControlFlowGraph]]
@@ -225,6 +380,8 @@ struct CFGAnalyzer:
     public var node_points as Dict[usize, Point]
     public var current_loop_break_bb as i64
     public var current_loop_continue_bb as i64
+    public var fact_engine as ptr[RelationalFactEngine]
+    public var borrower_origins as Dict[String, i64]
 
     public fn init_cfg(self as ptr[CFGAnalyzer], engine as ptr[DiagnosticEngine], current_file as String):
         (deref self).cfgs = Dict[String, ptr[ControlFlowGraph]]()
@@ -239,6 +396,44 @@ struct CFGAnalyzer:
         (deref self).node_points = Dict[usize, Point]()
         (deref self).current_loop_break_bb = -1 to i64
         (deref self).current_loop_continue_bb = -1 to i64
+        (deref self).fact_engine = make[RelationalFactEngine](1 to usize) to ptr[RelationalFactEngine]
+        (deref (deref self).fact_engine).init_engine()
+        (deref self).borrower_origins = Dict[String, i64]()
+
+    public fn record_var_move(self as ptr[CFGAnalyzer], moved_nm as String, pt as Point):
+        if not (deref self).var_moves.has(moved_nm):
+            (deref self).var_moves[moved_nm] = List[Point]()
+        var mv_list as List[Point] = (deref self).var_moves[moved_nm]
+        mv_list.append(pt)
+
+    public fn check_call_moves(self as ptr[CFGAnalyzer], call_node as ptr[Node], pt as Point):
+        let callee as ptr[Node] = node_left(call_node)
+        var fn_nm as cstr = None to cstr
+        if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
+            let np as ptr[String] = node_name_ptr(callee)
+            if (np to ptr[u8]) != (None to ptr[u8]) and (deref np).data != None:
+                fn_nm = (deref np).data to cstr
+        if fn_nm != None to cstr:
+            if strcmp(fn_nm, "print" to cstr) == 0 or strcmp(fn_nm, "printf" to cstr) == 0 or strcmp(fn_nm, "sprintf" to cstr) == 0 or strcmp(fn_nm, "snprintf" to cstr) == 0:
+                return
+        let c_args as List[ptr[Node]] = node_params(call_node)
+        var a_i as i64 = 0 to i64
+        while a_i < c_args.length():
+            let arg as ptr[Node] = c_args[a_i]
+            if arg != None to ptr[Node] and node_kind(arg) == NodeType.Identifier:
+                self.record_var_move(node_name(arg), pt)
+            a_i = a_i + 1 to i64
+
+    public fn is_loan_live(self as ptr[CFGAnalyzer], loan_id as i64, pt as Point) as bool:
+        if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+            return (deref (deref self).fact_engine).is_loan_live_at(loan_id, pt)
+        return False
+
+    public fn is_borrower_loan_live(self as ptr[CFGAnalyzer], borrower_name as String, pt as Point) as bool:
+        if (deref self).borrower_origins.has(borrower_name):
+            let lid as i64 = (deref self).borrower_origins[borrower_name]
+            return self.is_loan_live(lid, pt)
+        return False
 
     public fn new_block(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph], prefix as cstr) as ptr[BasicBlock]:
         let bid as i64 = (deref cfg).blocks.length()
@@ -873,46 +1068,87 @@ struct CFGAnalyzer:
             while s_idx < stmt_cnt:
                 let stmt as ptr[Node] = (deref bb).statements[s_idx]
                 if stmt != None to ptr[Node]:
+                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = s_idx)
                     let k as NodeType = node_kind(stmt)
                     if k == NodeType.VarDecl:
                         let v_name as String = node_name(stmt)
                         let init_expr as ptr[Node] = node_left(stmt)
-                        if init_expr != None to ptr[Node] and node_kind(init_expr) == NodeType.UnaryExpr:
-                            let u_op as String = node_op(init_expr)
-                            if u_op.data != None and strcmp(u_op.data to cstr, "ref" to cstr) == 0:
-                                let borrowed_var as ptr[Node] = node_left(init_expr)
-                                if borrowed_var != None to ptr[Node] and node_kind(borrowed_var) == NodeType.Identifier:
-                                    let src_nm as String = node_name(borrowed_var)
-                                    let lid as i64 = (deref self).loans.length()
-                                    let lr as LoanRecord = LoanRecord(
-                                        loan_id = lid,
-                                        source_var = src_nm,
-                                        is_mut = False,
-                                        span = node_span(stmt),
-                                        issued_bb = (deref bb).id,
-                                        issued_stmt = s_idx
-                                    )
-                                    (deref self).loans.append(lr)
+                        if init_expr != None to ptr[Node]:
+                            let ik as NodeType = node_kind(init_expr)
+                            if ik == NodeType.UnaryExpr:
+                                let u_op as String = node_op(init_expr)
+                                if u_op.data != None and strcmp(u_op.data to cstr, "ref" to cstr) == 0:
+                                    let borrowed_var as ptr[Node] = node_left(init_expr)
+                                    if borrowed_var != None to ptr[Node] and node_kind(borrowed_var) == NodeType.Identifier:
+                                        let src_nm as String = node_name(borrowed_var)
+                                        let lid as i64 = (deref self).loans.length()
+                                        let lr as LoanRecord = LoanRecord(
+                                            loan_id = lid,
+                                            source_var = src_nm,
+                                            is_mut = False,
+                                            span = node_span(stmt),
+                                            issued_bb = (deref bb).id,
+                                            issued_stmt = s_idx
+                                        )
+                                        (deref self).loans.append(lr)
+                                        if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+                                            (deref (deref self).fact_engine).add_borrow_issued(lid, lid, pt)
+                                        (deref self).borrower_origins[v_name] = lid
+                            elif ik == NodeType.Identifier:
+                                let rhs_id_nm as String = node_name(init_expr)
+                                if (deref self).borrower_origins.has(rhs_id_nm):
+                                    let orig_src as i64 = (deref self).borrower_origins[rhs_id_nm]
+                                    let orig_dst as i64 = (deref self).loans.length() + (deref self).borrower_origins.length() + 1 to i64
+                                    (deref self).borrower_origins[v_name] = orig_dst
+                                    if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+                                        (deref (deref self).fact_engine).add_subset(orig_src, orig_dst, pt)
+                                else:
+                                    self.record_var_move(rhs_id_nm, pt)
+                            elif ik == NodeType.CallExpr:
+                                self.check_call_moves(init_expr, pt)
                     elif k == NodeType.CallExpr:
-                        // Check arguments for moves
-                        let args_node as ptr[Node] = node_right(stmt)
-                        if args_node != None to ptr[Node]:
-                            let decls_raw as List[ptr[Node]] = node_declarations(args_node)
-                            let decls as ptr[List[ptr[Node]]] = ref decls_raw
-                            var a_idx as i64 = 0 to i64
-                            while a_idx < (deref decls).length():
-                                let arg as ptr[Node] = (deref decls)[a_idx]
-                                if arg != None to ptr[Node] and node_kind(arg) == NodeType.Identifier:
-                                    let moved_nm as String = node_name(arg)
-                                    // Record move at point
-                                    let pt as Point = Point(bb_id = (deref bb).id, stmt_idx = s_idx)
-                                    if not (deref self).var_moves.has(moved_nm):
-                                        (deref self).var_moves[moved_nm] = List[Point]()
-                                    var mv_list as List[Point] = (deref self).var_moves[moved_nm]
-                                    mv_list.append(pt)
-                                a_idx = a_idx + 1 to i64
+                        self.check_call_moves(stmt, pt)
+                    elif k == NodeType.BinaryExpr:
+                        let op as String = node_op(stmt)
+                        if op.data != None and strcmp(op.data to cstr, "=" to cstr) == 0:
+                            let rhs as ptr[Node] = node_right(stmt)
+                            let lhs as ptr[Node] = node_left(stmt)
+                            if rhs != None to ptr[Node]:
+                                let rk as NodeType = node_kind(rhs)
+                                if rk == NodeType.Identifier:
+                                    let r_id as String = node_name(rhs)
+                                    if lhs != None to ptr[Node] and node_kind(lhs) == NodeType.Identifier and (deref self).borrower_origins.has(r_id):
+                                        let l_id as String = node_name(lhs)
+                                        let orig_src as i64 = (deref self).borrower_origins[r_id]
+                                        let orig_dst as i64 = (deref self).loans.length() + (deref self).borrower_origins.length() + 1 to i64
+                                        (deref self).borrower_origins[l_id] = orig_dst
+                                        if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+                                            (deref (deref self).fact_engine).add_subset(orig_src, orig_dst, pt)
+                                    else:
+                                        self.record_var_move(r_id, pt)
+                                elif rk == NodeType.CallExpr:
+                                    self.check_call_moves(rhs, pt)
+                    elif k == NodeType.ReturnStmt:
+                        let ret_expr as ptr[Node] = node_left(stmt)
+                        if ret_expr != None to ptr[Node] and node_kind(ret_expr) == NodeType.Identifier:
+                            self.record_var_move(node_name(ret_expr), pt)
+
+                    var u_list as List[String] = List[String]()
+                    collect_expr_uses(stmt, ref u_list)
+                    var u_i as i64 = 0 to i64
+                    while u_i < u_list.length():
+                        let u_var as String = u_list[u_i]
+                        if (deref self).borrower_origins.has(u_var):
+                            let o_id as i64 = (deref self).borrower_origins[u_var]
+                            if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+                                (deref (deref self).fact_engine).add_origin_live_at(o_id, pt)
+                        u_i = u_i + 1 to i64
+
                 s_idx = s_idx + 1 to i64
             b_idx = b_idx + 1 to i64
+
+        if (deref self).fact_engine != None to ptr[RelationalFactEngine]:
+            (deref (deref self).fact_engine).solve_facts(cfg)
 
     // ── Path-Sensitive Drop Elaboration ───────────────────────────────────
     public fn elaborate_branch_divergent_drops(self as ptr[CFGAnalyzer], cfg as ptr[ControlFlowGraph]):
@@ -937,8 +1173,16 @@ struct CFGAnalyzer:
                     var b_i as i64 = 0 to i64
                     while b_i < block_cnt:
                         let other_bb as ptr[BasicBlock] = (deref cfg).blocks[b_i]
-                        if (deref other_bb).id != pt.bb_id and (deref other_bb).successors.length() > 0 to i64:
-                            has_unmoved_path = True
+                        let o_id as i64 = (deref other_bb).id
+                        if o_id != pt.bb_id and ((deref other_bb).successors.length() > 0 to i64 or (deref other_bb).terminator_kind == tk_return()):
+                            var other_has_move as bool = False
+                            var chk_i as i64 = 0 to i64
+                            while chk_i < mvs.length():
+                                if mvs[chk_i].bb_id == o_id:
+                                    other_has_move = True
+                                chk_i = chk_i + 1 to i64
+                            if not other_has_move:
+                                has_unmoved_path = True
                         b_i = b_i + 1 to i64
                     m_i = m_i + 1 to i64
 

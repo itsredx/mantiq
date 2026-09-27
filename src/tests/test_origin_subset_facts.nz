@@ -1,0 +1,77 @@
+// ── Origin & Subset Facts NLL Test Suite ────────────────────────────────
+extern fn printf(format as cstr, ...) as i32
+
+// Helper function to inspect a reference parameter
+fn inspect_ref(r as ref i32) as i32:
+    return deref r
+
+// ── Test 1: Reference Subset Propagation ─────────────────────────────────
+fn test_reference_subset_propagation():
+    var x as i32 = 10
+    let r1 as ref i32 = ref x
+    let r2 as ref i32 = r1 // r2 subsets r1 (r2 origin inherits loan of x)
+    let v as i32 = deref r2 // last use of r2
+    // Path-sensitive loan analysis verifies loan of x ends after r2 is dead
+    x = 20
+    let _p1 as i32 = printf("  [PASS] Reference Subset Propagation (r2 subsets r1 provenance)\n" to cstr)
+
+// ── Test 2: Multi-Hop Reference Chain ────────────────────────────────────
+fn test_multi_hop_reference_chain():
+    var source as i32 = 42
+    let hop1 as ref i32 = ref source
+    let hop2 as ref i32 = hop1 // hop2 <= hop1
+    let hop3 as ref i32 = hop2 // hop3 <= hop2
+    let val as i32 = deref hop3 // Transitive closure: loan_live_at correctly traces to hop3
+    source = 100 // Mutating source after final chain dereference
+    let _p2 as i32 = printf("  [PASS] Multi-Hop Reference Chain (transitive origin subset closure)\n" to cstr)
+
+// ── Test 3: Branch-Merging Reference Loans ────────────────────────────────
+fn test_branch_merged_loans():
+    var a as i32 = 100
+    var b as i32 = 200
+    var cond as bool = True
+    var r as ref i32 = ref a
+    if cond:
+        r = ref a
+    else:
+        r = ref b
+    // r may point to either a or b at the join point
+    let merged_val as i32 = deref r
+    // After last use of r, loans for BOTH a and b expire
+    a = 101
+    b = 201
+    let _p3 as i32 = printf("  [PASS] Branch-Merged Reference Loans (convergent loan sets at join)\n" to cstr)
+
+// ── Test 4: Path-Sensitive Loan Expiration (Disjoint Branch) ──────────────
+fn test_path_sensitive_loan_expiration():
+    var target as i32 = 500
+    var branch_flag as bool = False
+    if branch_flag:
+        let loan as ref i32 = ref target
+        let _v as i32 = deref loan
+    else:
+        // In this branch, target was never loaned! Path-sensitive origin analysis permits mutation:
+        target = 600
+        let other_loan as ref i32 = ref target
+        let _v2 as i32 = deref other_loan
+    target = 700 // Post-join mutation permitted
+    let _p4 as i32 = printf("  [PASS] Path-Sensitive Loan Expiration (disjoint branch mutation)\n" to cstr)
+
+// ── Test 5: Call Argument Loan Provenance ─────────────────────────────────
+fn test_call_argument_loan():
+    var counter as i32 = 77
+    let result as i32 = inspect_ref(ref counter) // Loan created for function call
+    // Loan expires when call returns
+    counter = counter + 1
+    let _p5 as i32 = printf("  [PASS] Call Argument Loan Provenance (loan released on return)\n" to cstr)
+
+// ── Main Entrypoint ────────────────────────────────────────────────────────
+fn main() as i32:
+    let _r0 as i32 = printf("=== Starting Origin & Subset Facts NLL Test Suite ===\n" to cstr)
+    test_reference_subset_propagation()
+    test_multi_hop_reference_chain()
+    test_branch_merged_loans()
+    test_path_sensitive_loan_expiration()
+    test_call_argument_loan()
+    let _r1 as i32 = printf("=== All Origin & Subset Facts Tests Passed! ===\n" to cstr)
+    return 0

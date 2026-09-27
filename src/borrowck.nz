@@ -374,6 +374,11 @@ struct BorrowChecker:
     public fn is_borrow_active_at_node(self as ptr[BorrowChecker], b as BorrowRecord, node as ptr[Node]) as bool:
         if node != None to ptr[Node] and (deref self).cfg_analyzer != None to ptr[CFGAnalyzer]:
             let ca as ptr[CFGAnalyzer] = (deref self).cfg_analyzer
+            let k as usize = node to usize
+            if (deref ca).node_points.has(k) and (deref ca).fact_engine != None to ptr[RelationalFactEngine]:
+                let pt as Point = (deref ca).node_points[k]
+                if (deref (deref ca).fact_engine).loan_liveness.length() > 0 to i64:
+                    return ca.is_borrower_loan_live(b.borrower_name, pt)
             return ca.is_borrower_live(b.borrower_name, node)
 
         let row as u32 = if node != None to ptr[Node]: node_span(node).start_row + 1 to u32 else: (deref self).current_row

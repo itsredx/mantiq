@@ -610,3 +610,53 @@ The borrow checker and lifetime engine report structured diagnostics through `sr
 ## 15. Memory Allocation & Runtime Selection
 
 The runtime selects the allocator automatically. If mimalloc is available during compilation, it is used; otherwise, libc malloc is the fallback. The allocator name is printed at runtime initialization.
+
+---
+
+## 16. Dynamic Drop Flags
+
+When ownership transfers occur along divergent control-flow paths (such as `if/else`, `match`, or early loop `break`), variables may be moved along path $A$ but remain live along path $B$. Rather than permitting memory leaks on unmoved paths or double-free errors on moved paths, Nizam synthesizes **Dynamic Stack Drop Flags**:
+
+### 16.1 Stack Flag Lifecycle
+1. **Identification**: `CFGAnalyzer.elaborate_branch_divergent_drops` detects variables with non-uniform reaching moves across exit blocks and records them in `divergent_vars`.
+2. **Allocation & Initialization**: `emit_var_decl` allocates a 1-bit boolean stack flag `%<var>_drop_flag = alloca i1` and initializes it to `1` (`store i1 1, ptr %<var>_drop_flag`).
+3. **Move-Site Clearing**: At every ownership transfer (value pass to function call, assignment RHS move, `return <var>`), codegen emits `store i1 0, ptr %<var>_drop_flag`.
+4. **Reassignment Reset**: If the variable is reassigned an owned value, codegen resets the flag: `store i1 1, ptr %<var>_drop_flag`.
+5. **Conditional Drop**: At scope exit blocks, return points, and function epilogues, drops for divergent variables are guarded by a dynamic branch:
+   ```llvm
+   %v_is_live = load i1, ptr %v_drop_flag
+   br i1 %v_is_live, label %drop_v, label %drop_v_skip
+   drop_v:
+     call void @__nizam_drop_T(ptr %v)
+     store i1 0, ptr %v_drop_flag
+     br label %drop_v_skip
+   drop_v_skip:
+   ```
+
+---
+
+## 17. Relational Origin & Subset Facts (Polonius Model)
+
+To eliminate line-number fragility in backward jumps and control merges, Nizam's borrow engine implements a relational, path-sensitive fact deduction system over CFG points:
+
+### 17.1 Mathematical Fact Engine
+The engine computes loan liveness using five base relations:
+1. `borrow_issued_at(Origin, Loan, Point)`: Emitted when `ref x` or `ref mut x` creates a loan.
+2. `subset(Origin1, Origin2, Point)`: Emitted when reference provenance flows (`let r2 = r1` or function returns).
+3. `origin_live_at(Origin, Point)`: Emitted at each CFG statement where a reference belonging to `Origin` is dereferenced or read.
+4. `loan_invalidated_at(Point, Loan)`: Emitted when a storage location is mutated or moved.
+5. `cfg_edge(Point1, Point2)`: Control-flow connectivity between basic blocks and statements.
+
+### 17.2 Fixed-Point Deduction Rules
+- **Containment Propagation**:
+  $$\text{borrow\_issued\_at}(O, L, P) \implies \text{origin\_contains\_loan}(O, L, P)$$
+  $$\text{origin\_contains\_loan}(O_1, L, P) \wedge \text{subset}(O_1, O_2, P) \implies \text{origin\_contains\_loan}(O_2, L, P)$$
+- **Transitive Flow Across Edges**:
+  $$\text{origin\_contains\_loan}(O, L, P_1) \wedge \text{cfg\_edge}(P_1, P_2) \implies \text{origin\_contains\_loan}(O, L, P_2)$$
+- **Path-Sensitive Loan Liveness**:
+  $$\text{origin\_live\_at}(O, P) \wedge \text{origin\_contains\_loan}(O, L, P) \implies \text{loan\_live\_at}(L, P)$$
+- **Borrow Conflict**:
+  $$\text{loan\_invalidated\_at}(P, L) \wedge \text{loan\_live\_at}(L, P) \implies \text{borrow\_conflict}(P, L)$$
+
+By validating conflicts strictly against `loan_live_at(L, P)`, Nizam correctly allows mutations in sibling branches where a loan was never live, supports multi-hop reference chains, and handles branch-merged reference loans without false positives.
+

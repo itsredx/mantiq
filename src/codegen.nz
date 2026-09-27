@@ -2632,6 +2632,17 @@ struct LLVMCodegen:
             if (node_inferred_type(init_node) == None to ptr[Type] or (deref (node_inferred_type(init_node))).kind == TypeKind.Any) and node_inferred_type(node) != None to ptr[Type]:
                 set_node_inferred_type(init_node, node_inferred_type(node))
             let val_reg as ptr[u8] = self.emit_expr(init_node)
+            if node_kind(init_node) == NodeType.Identifier:
+                let rhs_nm as String = node_name(init_node)
+                let div_k2 as StringBuilder = StringBuilder.make()
+                append_cstr(ref div_k2, "__divergent_" to cstr)
+                append_str(ref div_k2, rhs_nm)
+                let is_div2 as bool = (deref self).type_aliases.has(div_k2.to_string())
+                div_k2.deinit()
+                if is_div2:
+                    append_cstr(ref (deref self).main_out, "  store i1 0, ptr %")
+                    append_str(ref (deref self).main_out, rhs_nm)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
             var final_reg as ptr[u8] = val_reg
             var val_type as String = self.llvm_type(node_inferred_type(init_node))
             if node_kind(init_node) == NodeType.StringLiteral and (deref var_type.data) == 123 to u8:
@@ -4263,6 +4274,28 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, target_ptr_reg to cstr)
             append_cstr(ref (deref self).main_out, "\n")
+            if node_kind(right) == NodeType.Identifier:
+                let r_id_nm as String = node_name(right)
+                let div_kr as StringBuilder = StringBuilder.make()
+                append_cstr(ref div_kr, "__divergent_" to cstr)
+                append_str(ref div_kr, r_id_nm)
+                let is_div_r as bool = (deref self).type_aliases.has(div_kr.to_string())
+                div_kr.deinit()
+                if is_div_r:
+                    append_cstr(ref (deref self).main_out, "  store i1 0, ptr %")
+                    append_str(ref (deref self).main_out, r_id_nm)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
+            if node_kind(left) == NodeType.Identifier:
+                let l_id_nm as String = node_name(left)
+                let div_kl as StringBuilder = StringBuilder.make()
+                append_cstr(ref div_kl, "__divergent_" to cstr)
+                append_str(ref div_kl, l_id_nm)
+                let is_div_l as bool = (deref self).type_aliases.has(div_kl.to_string())
+                div_kl.deinit()
+                if is_div_l:
+                    append_cstr(ref (deref self).main_out, "  store i1 1, ptr %")
+                    append_str(ref (deref self).main_out, l_id_nm)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
             self.consume_temp(val_reg)
             return
 
@@ -6292,6 +6325,22 @@ struct LLVMCodegen:
                         arg_node = r_node
             var arg_val as ptr[u8] = self.emit_expr(arg_node)
             self.consume_temp(arg_val)
+            if node_kind(arg_node) == NodeType.Identifier:
+                let arg_id_nm as String = node_name(arg_node)
+                var is_non_moving_call as bool = False
+                if fn_cname != None to cstr:
+                    if strcmp(fn_cname, "print" to cstr) == 0 or strcmp(fn_cname, "printf" to cstr) == 0 or strcmp(fn_cname, "sprintf" to cstr) == 0 or strcmp(fn_cname, "snprintf" to cstr) == 0:
+                        is_non_moving_call = True
+                if not is_non_moving_call:
+                    let div_k as StringBuilder = StringBuilder.make()
+                    append_cstr(ref div_k, "__divergent_" to cstr)
+                    append_str(ref div_k, arg_id_nm)
+                    let is_div as bool = (deref self).type_aliases.has(div_k.to_string())
+                    div_k.deinit()
+                    if is_div:
+                        append_cstr(ref (deref self).main_out, "  store i1 0, ptr %")
+                        append_str(ref (deref self).main_out, arg_id_nm)
+                        append_cstr(ref (deref self).main_out, "_drop_flag\n")
             var arg_type as String = type_to_llvm(node_inferred_type(arg_node))
             let orig_arg_type as String = arg_type
             if strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
@@ -9821,6 +9870,19 @@ struct LLVMCodegen:
             self.consume_temp(val_reg)
             self.consume_temp(real_val)
             self.flush_statement_temps()
+            if node_kind(val) == NodeType.Identifier:
+                let ret_id_nm as String = node_name(val)
+                let div_kret as StringBuilder = StringBuilder.make()
+                append_cstr(ref div_kret, "__divergent_" to cstr)
+                append_str(ref div_kret, ret_id_nm)
+                let is_div_ret as bool = (deref self).type_aliases.has(div_kret.to_string())
+                div_kret.deinit()
+                if is_div_ret:
+                    append_cstr(ref (deref self).main_out, "  store i1 0, ptr %")
+                    append_str(ref (deref self).main_out, ret_id_nm)
+                    append_cstr(ref (deref self).main_out, "_drop_flag\n")
+            if drops.length() > 0 to i64:
+                self.emit_auto_drops(drops)
             append_cstr(ref (deref self).main_out, "  ret ")
             append_str(ref (deref self).main_out, ret_type)
             append_cstr(ref (deref self).main_out, " ")
@@ -9828,6 +9890,8 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, "\n")
         else:
             self.flush_statement_temps()
+            if drops.length() > 0 to i64:
+                self.emit_auto_drops(drops)
             let cur_ret as String = (deref self).current_return_type
             if strcmp(cur_ret.data to cstr, "i32" to cstr) == 0:
                 append_cstr(ref (deref self).main_out, "  ret i32 0\n")
