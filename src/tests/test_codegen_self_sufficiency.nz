@@ -1,0 +1,105 @@
+// ── Test Codegen Self-Sufficiency ──────────────────────────────────────
+// Verifies that pure-Nizam fresh_temp, fresh_label, and native TempTracker
+// generate correct LLVM IR for complex SSA expressions, labels, and closures.
+import std.string
+from std.string import String
+
+extern fn printf(format as cstr, ...) as i32
+
+// ── Test 1: Complex Expression SSA Temporary Generation ─────────────────
+fn compute_chained_expression(a as i32, b as i32, c as i32, d as i32) -> i32:
+    let step1 as i32 = (a * 7) + (b / 3) - (c % 5)
+    let step2 as i32 = (step1 * 2) + ((a + b) * (c - d))
+    let step3 as i32 = (step2 ^ (a | b)) & 1023
+    return step3
+
+fn test_chained_expressions() -> bool:
+    let result as i32 = compute_chained_expression(10, 9, 8, 3)
+    // 10*7 = 70; 9/3 = 3; 8%5 = 3; step1 = 70 + 3 - 3 = 70
+    // step1*2 = 140; (10+9)*(8-3) = 19*5 = 95; step2 = 140 + 95 = 235
+    // a|b = 10|9 = 11; step2 ^ 11 = 235 ^ 11 = 224; 224 & 1023 = 224
+    if result != 224:
+        let _ as i32 = printf("FAILED: test_chained_expressions expected 224, got %d\n" to cstr, result)
+        return False
+    return True
+
+// ── Test 2: Control Flow Labels & Loops ─────────────────────────────────
+fn compute_nested_labels(iterations as i32) -> i32:
+    var acc as i32 = 0
+    var i as i32 = 0
+    while i < iterations:
+        if i % 3 == 0:
+            acc = acc + (i * 2)
+        elif i % 3 == 1:
+            acc = acc + i
+        else:
+            acc = acc - 1
+        i = i + 1
+    return acc
+
+fn test_control_flow_labels() -> bool:
+    let res as i32 = compute_nested_labels(10)
+    // i=0: acc += 0 -> 0
+    // i=1: acc += 1 -> 1
+    // i=2: acc -= 1 -> 0
+    // i=3: acc += 6 -> 6
+    // i=4: acc += 4 -> 10
+    // i=5: acc -= 1 -> 9
+    // i=6: acc += 12 -> 21
+    // i=7: acc += 7 -> 28
+    // i=8: acc -= 1 -> 27
+    // i=9: acc += 18 -> 45
+    if res != 45:
+        let _ as i32 = printf("FAILED: test_control_flow_labels expected 45, got %d\n" to cstr, res)
+        return False
+    return True
+
+// ── Test 3: Temporaries with String Interpolation ────────────────────────
+fn test_string_temporaries() -> bool:
+    var total_len as i64 = 0
+    var k as i32 = 0
+    while k < 20:
+        let s as String = f"elem_{k}_val_{k * k}"
+        total_len = total_len + (s.len to i64)
+        k = k + 1
+    if total_len <= 0:
+        return False
+    return True
+
+// ── Test 4: Multi-Branch Merging & Temporaries ───────────────────────────
+fn compute_branch_temps(x as i32, y as i32) -> i32:
+    let t1 as i32 = if x > 5: x * 3 + y else: y * 2 - x
+    let t2 as i32 = if y < 10: t1 * 2 + x else: t1 - y
+    return t1 + t2
+
+fn test_branch_temps() -> bool:
+    let r1 as i32 = compute_branch_temps(10, 4)
+    // x=10 > 5: t1 = 10*3 + 4 = 34
+    // y=4 < 10: t2 = 34*2 + 10 = 78
+    // r1 = 34 + 78 = 112
+    if r1 != 112:
+        let _ as i32 = printf("FAILED: test_branch_temps expected 112, got %d\n" to cstr, r1)
+        return False
+    return True
+
+fn main() -> i32:
+    let _h as i32 = printf("Running Codegen Self-Sufficiency Verification Suite...\n" to cstr)
+
+    if not test_chained_expressions():
+        return 1
+    let _p1 as i32 = printf("  PASS: test_chained_expressions\n" to cstr)
+
+    if not test_control_flow_labels():
+        return 2
+    let _p2 as i32 = printf("  PASS: test_control_flow_labels\n" to cstr)
+
+    if not test_string_temporaries():
+        return 3
+    let _p3 as i32 = printf("  PASS: test_string_temporaries\n" to cstr)
+
+    if not test_branch_temps():
+        return 4
+    let _p4 as i32 = printf("  PASS: test_branch_temps\n" to cstr)
+
+    let _done as i32 = printf("ALL 4 TESTS PASSED: Codegen self-sufficiency validated!\n" to cstr)
+    return 0

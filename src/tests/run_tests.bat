@@ -76,7 +76,8 @@ src\tests\test_string_interpolation.mq ^
 src\tests\test_spread_operator.mq ^
 src\tests\test_async_concurrency.mq ^
 src\tests\test_channels_actors.mq ^
-src\tests\test_closures_lambdas.mq
+src\tests\test_closures_lambdas.mq ^
+src\tests\test_allocator_suite.nz
 
 cd /d "%MANTIQ_DIR%"
 

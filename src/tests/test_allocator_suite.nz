@@ -1,0 +1,219 @@
+// ── Test Allocator Suite ──────────────────────────────────────────────
+// Phase 2: Zero-Runtime Pluggable Memory Allocator Suite
+// Verifies PageAllocator, ArenaAllocator, FixedBufferAllocator,
+// HeapAllocator, and compiler lowering of make[T](count, alloc) / drop(ptr, alloc).
+
+import std.mem
+from std.mem import Allocator, PageAllocator, ArenaAllocator, FixedBufferAllocator, HeapAllocator, get_page_allocator, get_heap_allocator, make, drop
+
+extern fn printf(fmt as cstr, ...) as i32
+
+struct NodeItem:
+    public var id as usize
+    public var value as usize
+    public var next as ptr[NodeItem]
+
+// ── Test 1: Page Allocator ────────────────────────────────────────────
+fn test_page_allocator() as i32:
+    var pa as PageAllocator = PageAllocator(dummy = 0 to usize)
+    
+    // Allocate 16384 bytes (4 OS pages)
+    let p_mem as ptr[u8] = pa.alloc(16384 to usize, 4096 to usize)
+    if p_mem == None to ptr[u8]:
+        let _ = printf("  FAIL: PageAllocator.alloc returned null for 16KB\n" to cstr)
+        return 1
+    
+    // Write and verify across page boundaries
+    p_mem[0] = 111 to u8
+    p_mem[4095] = 222 to u8
+    p_mem[8191] = 233 to u8
+    p_mem[16383] = 244 to u8
+    
+    if p_mem[0] != 111 to u8 or p_mem[4095] != 222 to u8 or p_mem[8191] != 233 to u8 or p_mem[16383] != 244 to u8:
+        let _ = printf("  FAIL: PageAllocator memory read/write boundary mismatch\n" to cstr)
+        return 2
+
+    // Resize expanding to 32768 bytes
+    let resized_mem as ptr[u8] = pa.resize(p_mem, 16384 to usize, 32768 to usize)
+    if resized_mem == None to ptr[u8]:
+        let _ = printf("  FAIL: PageAllocator.resize returned null\n" to cstr)
+        return 3
+    
+    if resized_mem[0] != 111 to u8 or resized_mem[4095] != 222 to u8 or resized_mem[8191] != 233 to u8 or resized_mem[16383] != 244 to u8:
+        let _ = printf("  FAIL: PageAllocator resize data preservation mismatch\n" to cstr)
+        return 4
+
+    pa.free(resized_mem, 32768 to usize)
+    let _p = printf("  [PASS] PageAllocator (16KB alloc, page boundaries, resize to 32KB, free)\n" to cstr)
+    return 0
+
+// ── Test 2: Fixed Buffer Allocator ────────────────────────────────────
+fn test_fixed_buffer_allocator() as i32:
+    let buf_capacity as usize = 512 to usize
+    let stack_raw as ptr[u8] = make[u8](buf_capacity)
+    var fba as FixedBufferAllocator = FixedBufferAllocator(buffer = stack_raw, capacity = buf_capacity, offset = 0 to usize)
+
+    // Verify initial accounting
+    if fba.bytes_used() != 0 to usize or fba.bytes_free() != buf_capacity:
+        let _ = printf("  FAIL: FixedBufferAllocator initial accounting incorrect\n" to cstr)
+        return 1
+
+    // Suballocation 1: 64 bytes
+    let a1 as ptr[u8] = fba.alloc(64 to usize, 8 to usize)
+    if a1 == None to ptr[u8]:
+        let _ = printf("  FAIL: FixedBufferAllocator alloc 64 bytes returned null\n" to cstr)
+        return 2
+    a1[0] = 55 to u8
+    a1[63] = 66 to u8
+
+    // Suballocation 2: 128 bytes with 16-byte alignment
+    let a2 as ptr[u8] = fba.alloc(128 to usize, 16 to usize)
+    if a2 == None to ptr[u8]:
+        let _ = printf("  FAIL: FixedBufferAllocator alloc 128 bytes returned null\n" to cstr)
+        return 3
+    if ((a2 to usize) % 16 to usize) != 0 to usize:
+        let _ = printf("  FAIL: FixedBufferAllocator alignment violated (expected 16-byte aligned)\n" to cstr)
+        return 4
+
+    // Test buffer exhaustion: requesting more than remaining capacity
+    let over_alloc as ptr[u8] = fba.alloc(1024 to usize, 8 to usize)
+    if over_alloc != None to ptr[u8]:
+        let _ = printf("  FAIL: FixedBufferAllocator should reject over-capacity allocation\n" to cstr)
+        return 5
+
+    // Verify reset capability
+    fba.reset()
+    if fba.bytes_used() != 0 to usize or fba.bytes_free() != buf_capacity:
+        let _ = printf("  FAIL: FixedBufferAllocator reset did not restore capacity\n" to cstr)
+        return 6
+
+    let a3 as ptr[u8] = fba.alloc(buf_capacity, 8 to usize)
+    if a3 == None to ptr[u8]:
+        let _ = printf("  FAIL: FixedBufferAllocator realloc after reset failed\n" to cstr)
+        return 7
+
+    drop(stack_raw to ptr)
+    let _p = printf("  [PASS] FixedBufferAllocator (capacity accounting, alignment, exhaustion guard, reset)\n" to cstr)
+    return 0
+
+// ── Test 3: Arena Allocator (100,000 Bulk Allocations) ────────────────
+fn test_arena_allocator() as i32:
+    var arena as ArenaAllocator = ArenaAllocator(backing = None to ptr[Allocator], head = None to ptr[std.mem.ArenaChunk], default_chunk_size = 65536 to usize, total_allocated = 0 to usize)
+    arena.init(None to ptr[Allocator], 65536 to usize)
+    let arena_al as Allocator = arena.allocator()
+
+    var i as usize = 0 to usize
+    var head_node as ptr[NodeItem] = None to ptr[NodeItem]
+    
+    // Allocate 100,000 nodes in the monotonic arena
+    while i < 100000 to usize:
+        let item as ptr[NodeItem] = make[NodeItem](1 to usize, arena_al)
+        if item == None to ptr[NodeItem]:
+            let _ = printf("  FAIL: ArenaAllocator node allocation failed at iteration %lld\n" to cstr, i)
+            return 1
+        (deref item).id = i
+        (deref item).value = i * 2 to usize
+        (deref item).next = head_node
+        head_node = item
+        i = i + 1 to usize
+
+    if arena.total_allocated < 100000 to usize * 24 to usize:
+        let _ = printf("  FAIL: ArenaAllocator total_allocated accounting incorrect\n" to cstr)
+        return 2
+
+    // Verify recent nodes in chain
+    if (deref head_node).id != 99999 to usize or (deref head_node).value != 199998 to usize:
+        let _ = printf("  FAIL: ArenaAllocator node data mismatch\n" to cstr)
+        return 3
+
+    // O(1) single-operation batch teardown
+    arena.deinit()
+    if arena.head != None to ptr[std.mem.ArenaChunk] or arena.total_allocated != 0 to usize:
+        let _ = printf("  FAIL: ArenaAllocator deinit did not zero head or total_allocated\n" to cstr)
+        return 4
+
+    let _p = printf("  [PASS] ArenaAllocator (100,000 bulk node allocations, chunk chaining, O(1) batch deinit)\n" to cstr)
+    return 0
+
+// ── Test 4: Heap Allocator ────────────────────────────────────────────
+fn test_heap_allocator() as i32:
+    var ha as HeapAllocator = HeapAllocator(dummy = 0 to usize)
+    let ha_al as Allocator = ha.allocator()
+
+    let p as ptr[u8] = make[u8](512 to usize, ha_al)
+    if p == None to ptr[u8]:
+        let _ = printf("  FAIL: HeapAllocator make[u8](512) returned null\n" to cstr)
+        return 1
+    p[0] = 77 to u8
+    p[511] = 88 to u8
+
+    let resized as ptr[u8] = ha_al.resize(p, 512 to usize, 1024 to usize)
+    if resized == None to ptr[u8]:
+        let _ = printf("  FAIL: HeapAllocator resize to 1024 returned null\n" to cstr)
+        return 2
+    if resized[0] != 77 to u8 or resized[511] != 88 to u8:
+        let _ = printf("  FAIL: HeapAllocator resize data preservation mismatch\n" to cstr)
+        return 3
+    resized[1023] = 99 to u8
+
+    drop(resized to ptr, ha_al)
+    let _p = printf("  [PASS] HeapAllocator (make[T], resize, drop)\n" to cstr)
+    return 0
+
+// ── Test 5: Compiler Lowering & Generic Interface ─────────────────────
+fn test_compiler_lowering_and_polymorphism() as i32:
+    // Verify default getters
+    let page_al as Allocator = get_page_allocator()
+    let heap_al as Allocator = get_heap_allocator()
+
+    let m1 as ptr[u8] = make[u8](256 to usize, page_al)
+    if m1 == None to ptr[u8]:
+        let _ = printf("  FAIL: make with get_page_allocator() returned null\n" to cstr)
+        return 1
+    m1[0] = 12 to u8
+    drop(m1 to ptr, page_al)
+
+    let m2 as ptr[u8] = make[u8](256 to usize, heap_al)
+    if m2 == None to ptr[u8]:
+        let _ = printf("  FAIL: make with get_heap_allocator() returned null\n" to cstr)
+        return 2
+    m2[0] = 34 to u8
+    drop(m2 to ptr, heap_al)
+
+    // Standard make without allocator falls back to default
+    let m3 as ptr[u8] = make[u8](128 to usize)
+    if m3 == None to ptr[u8]:
+        let _ = printf("  FAIL: default make[u8](128) returned null\n" to cstr)
+        return 3
+    m3[0] = 56 to u8
+    drop(m3 to ptr)
+
+    let _p = printf("  [PASS] Compiler Lowering & Polymorphic Allocator vtable dispatch\n" to cstr)
+    return 0
+
+// ── Main Entrypoint ───────────────────────────────────────────────────
+fn main() as i32:
+    let _p0 = printf("[TEST SUITE] Phase 2: Pluggable Memory Allocator Interface (std.mem)\n" to cstr)
+
+    let res1 as i32 = test_page_allocator()
+    if res1 != 0:
+        return 1
+
+    let res2 as i32 = test_fixed_buffer_allocator()
+    if res2 != 0:
+        return 2
+
+    let res3 as i32 = test_arena_allocator()
+    if res3 != 0:
+        return 3
+
+    let res4 as i32 = test_heap_allocator()
+    if res4 != 0:
+        return 4
+
+    let res5 as i32 = test_compiler_lowering_and_polymorphism()
+    if res5 != 0:
+        return 5
+
+    let _p_all = printf("\n[ALL PASS] 5/5 Allocator Test Suites Passed with 100%% Precision!\n" to cstr)
+    return 0

@@ -66,6 +66,7 @@ TEST_FILES=(
     "src/tests/test_set_methods.nz"
     "src/tests/test_tuple_methods.nz"
     "src/tests/test_bytes_methods.nz"
+    "src/tests/test_allocator_suite.nz"
 )
 
 TOTAL_SUITES=${#TEST_FILES[@]}

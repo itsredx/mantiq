@@ -491,6 +491,12 @@ struct TypeChecker:
                         while p_tok != None to cstr:
                             while (deref (p_tok to ptr[u8])) == 32 to u8:
                                 p_tok = (p_tok to usize + 1 to usize) to cstr
+                            extern fn strstr(haystack as cstr, needle as cstr) as cstr
+                            let as_pos as cstr = strstr(p_tok, " as " to cstr)
+                            if as_pos != None to cstr:
+                                p_tok = (as_pos to usize + 4 to usize) to cstr
+                                while (deref (p_tok to ptr[u8])) == 32 to u8:
+                                    p_tok = (p_tok to usize + 1 to usize) to cstr
                             if (deref (p_tok to ptr[u8])) != 0 to u8:
                                 let p_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
                                 (deref p_annot).name = String.make(p_tok)
@@ -779,6 +785,19 @@ struct TypeChecker:
             extern fn strchr(s as cstr, c as i32) as cstr
             extern fn strtok(str as cstr, delim as cstr) as cstr
             extern fn strlen(s as cstr) as usize
+            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+
+            if strncmp(name, "fn(" to cstr, 3 to usize) == 0 or strcmp(name, "fn" to cstr) == 0:
+                return
+
+            extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+            if (deref self).current_struct_type != None to ptr[Type]:
+                let cur_sn as String = (deref (deref self).current_struct_type).name
+                if cur_sn.data != None to ptr[u8] and strcmp(name, cur_sn.data to cstr) == 0:
+                    return
+            if file_path.data != None to ptr[u8] and (deref (deref self).sema).current_file.data != None to ptr[u8]:
+                if strcmp(file_path.data to cstr, (deref (deref self).sema).current_file.data to cstr) != 0:
+                    return
 
             let name_len as usize = strlen(name)
             if name_len > 1 to usize and (deref ((name to usize + name_len - 1 to usize) to ptr[u8])) == 63 to u8:

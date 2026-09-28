@@ -53,8 +53,9 @@ fn list_has_string(list as ptr[List[String]], s as String) as bool:
         return False
     let cnt as i64 = (deref list).length()
     var i as i64 = 0 to i64
+    var item as String = String.make("" to cstr)
     while i < cnt:
-        let item as String = (deref list)[i]
+        item = (deref list)[i]
         if item.data != None to ptr[u8]:
             if strcmp(item.data to cstr, s.data to cstr) == 0:
                 return True
@@ -72,8 +73,9 @@ fn list_remove_string(list as ptr[List[String]], s as String):
     var new_list as List[String] = List[String]()
     var i as i64 = 0 to i64
     var found as bool = False
+    var item as String = String.make("" to cstr)
     while i < cnt:
-        let item as String = (deref list)[i]
+        item = (deref list)[i]
         if not found and item.data != None to ptr[u8] and strcmp(item.data to cstr, s.data to cstr) == 0:
             found = True
         else:
