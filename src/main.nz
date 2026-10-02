@@ -542,7 +542,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         let extra_flags_str as String = extra_flags.to_string()
         let extra_flags_c as cstr = extra_flags_str.data to cstr
 
-        let opt_flag as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
+        let opt_flag as cstr = if is_debug: "-O0 -g -Wl,--gc-sections" to cstr else: "-O2 -fno-strict-aliasing -Wl,--gc-sections" to cstr
         let wasm_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-Oz" to cstr
         let py_opt as cstr = if is_debug: "-O0 -g" to cstr else: "-O2 -fno-strict-aliasing" to cstr
 

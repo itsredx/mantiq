@@ -222,14 +222,13 @@ struct TypeChecker:
         let pa as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
         if pa == None to ptr[List[Option[ptr[TypeAnnotation]]]]:
             return None to ptr[Type]
-        let palist as List[Option[ptr[TypeAnnotation]]] = deref pa
-        if palist.length() < 1 to i64:
+        if (deref pa).length() < 1 to i64:
             return None to ptr[Type]
-        let opt as Option[ptr[TypeAnnotation]] = palist[0 to i64]
-        let optref as ptr[u8] = (ref opt) to ptr[u8]
-        if not option_has_value(optref):
+        let opt_annot as Option[ptr[TypeAnnotation]] = (deref pa)[0]
+        let opt_ref as ptr[OptionLayout] = (ref opt_annot) to ptr[OptionLayout]
+        if not option_has_value(opt_ref to ptr[u8]):
             return None to ptr[Type]
-        let pa_node as ptr[TypeAnnotation] = option_value(optref) to ptr[TypeAnnotation]
+        let pa_node as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
         if pa_node == None to ptr[TypeAnnotation]:
             return None to ptr[Type]
         return self.resolve_type_annotation(pa_node)
@@ -455,14 +454,9 @@ struct TypeChecker:
                         let k_buf as ptr[u8] = make[u8](k_len + 1 to usize) to ptr[u8]
                         let _mk as ptr = memcpy(k_buf to ptr, (inner_buf to usize + k_off) to ptr, k_len)
                         k_buf[k_len] = 0 to u8
-                        (deref t2).name = String.make(k_buf to cstr)
-                        free(k_buf to ptr)
+                        (deref t2).name = String(data = k_buf, len = k_len, capacity = k_len + 1 to usize)
                     (deref t2).payload = v_type
-                    free(v_buf to ptr)
-                    free(v_annot to ptr)
-                    free(inner_buf to ptr)
                     return t2
-            free(inner_buf to ptr)
             let t2 as ptr[Type] = make_type(TypeKind.Dict)
             (deref t2).payload = make_type(TypeKind.Any)
             return t2
@@ -508,7 +502,6 @@ struct TypeChecker:
                                 (deref f_type).param_types.append(deref pt)
                                 free(p_annot to ptr)
                             p_tok = strtok(None to cstr, "," to cstr)
-                        free(p_buf to ptr)
                     // Check return type after ')'
                     var after_cp as cstr = (close_paren to usize + 1 to usize) to cstr
                     while (deref (after_cp to ptr[u8])) == 32 to u8:
@@ -536,13 +529,12 @@ struct TypeChecker:
             let _m1 as ptr = memcpy(inner_buf to ptr, (name_data to usize + 4 to usize) to ptr, inner_len)
             inner_buf[inner_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String(data = inner_buf, len = inner_len, capacity = inner_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             return make_ptr_type(elem_type)
 
@@ -565,14 +557,12 @@ struct TypeChecker:
                     let _mk as ptr = memcpy(k_buf to ptr, (inner_buf to usize + k_off) to ptr, k_len)
                     k_buf[k_len] = 0 to u8
                     let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-                    (deref inner_annot).name = String.make(k_buf to cstr)
+                    (deref inner_annot).name = String(data = k_buf, len = k_len, capacity = k_len + 1 to usize)
                     (deref inner_annot).lifetime = Empty
                     (deref inner_annot).generics = Empty
                     (deref inner_annot).params = Empty
                     (deref inner_annot).return_type = None to ptr[TypeAnnotation]
                     let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-                    free(k_buf to ptr)
-                    free(inner_buf to ptr)
                     free(inner_annot to ptr)
                     let t as ptr[Type] = make_type(TypeKind.List)
                     (deref t).payload = elem_type
@@ -588,14 +578,12 @@ struct TypeChecker:
             let _mi as ptr = memcpy(i_buf to ptr, (inner_buf to usize + i_off) to ptr, i_len)
             i_buf[i_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(i_buf to cstr)
+            (deref inner_annot).name = String(data = i_buf, len = i_len, capacity = i_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(i_buf to ptr)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.List)
             (deref t).payload = elem_type
@@ -617,14 +605,12 @@ struct TypeChecker:
             let _mo as ptr = memcpy(o_buf to ptr, (inner_buf to usize + o_off) to ptr, o_len)
             o_buf[o_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(o_buf to cstr)
+            (deref inner_annot).name = String(data = o_buf, len = o_len, capacity = o_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(o_buf to ptr)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Option)
             (deref t).payload = elem_type
@@ -649,26 +635,23 @@ struct TypeChecker:
                     let _mk as ptr = memcpy(k_buf to ptr, (inner_buf to usize + k_off) to ptr, k_len)
                     k_buf[k_len] = 0 to u8
                     let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-                    (deref inner_annot).name = String.make(k_buf to cstr)
+                    (deref inner_annot).name = String(data = k_buf, len = k_len, capacity = k_len + 1 to usize)
                     (deref inner_annot).lifetime = Empty
                     (deref inner_annot).generics = Empty
                     (deref inner_annot).params = Empty
                     (deref inner_annot).return_type = None to ptr[TypeAnnotation]
                     let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-                    free(k_buf to ptr)
-                    free(inner_buf to ptr)
                     free(inner_annot to ptr)
                     let t as ptr[Type] = make_type(TypeKind.Result)
                     (deref t).payload = elem_type
                     return t
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String(data = inner_buf, len = inner_len, capacity = inner_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Result)
             (deref t).payload = elem_type
@@ -680,13 +663,12 @@ struct TypeChecker:
             let _m_chan as ptr = memcpy(inner_buf to ptr, (name_data to usize + 8 to usize) to ptr, inner_len)
             inner_buf[inner_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String(data = inner_buf, len = inner_len, capacity = inner_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_channel_type(elem_type)
             return t
@@ -697,13 +679,12 @@ struct TypeChecker:
             let _m_tsk as ptr = memcpy(inner_buf to ptr, (name_data to usize + 5 to usize) to ptr, inner_len)
             inner_buf[inner_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String(data = inner_buf, len = inner_len, capacity = inner_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Task)
             (deref t).payload = elem_type
@@ -716,13 +697,12 @@ struct TypeChecker:
             let _m4 as ptr = memcpy(inner_buf to ptr, name_data to ptr, inner_len)
             inner_buf[inner_len] = 0 to u8
             let inner_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-            (deref inner_annot).name = String.make(inner_buf to cstr)
+            (deref inner_annot).name = String(data = inner_buf, len = inner_len, capacity = inner_len + 1 to usize)
             (deref inner_annot).lifetime = Empty
             (deref inner_annot).generics = Empty
             (deref inner_annot).params = Empty
             (deref inner_annot).return_type = None to ptr[TypeAnnotation]
             let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
-            free(inner_buf to ptr)
             free(inner_annot to ptr)
             let t as ptr[Type] = make_type(TypeKind.Option)
             (deref t).payload = elem_type
@@ -1096,13 +1076,11 @@ struct TypeChecker:
                 var p_type as ptr[Type] = None to ptr[Type]
                 if node_type_annots(p_node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                     let p_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
-                    let p_annots as List[Option[ptr[TypeAnnotation]]] = deref p_annots_ptr
-                    if p_annots.length() > 0 to i64:
-                        let opt as Option[ptr[TypeAnnotation]] = p_annots[0 to i64]
-                        let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                    if (deref p_annots_ptr).length() > 0 to i64:
+                        let opt_annot as Option[ptr[TypeAnnotation]] = (deref p_annots_ptr)[0]
+                        let opt_ref as ptr[OptionLayout] = (ref opt_annot) to ptr[OptionLayout]
                         if option_has_value(opt_ref to ptr[u8]):
-                            let p_val_p as ptr[u8] = option_value(opt_ref to ptr[u8])
-                            let p_annot_val as ptr[TypeAnnotation] = p_val_p to ptr[TypeAnnotation]
+                            let p_annot_val as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
                             if p_annot_val != None to ptr[TypeAnnotation]:
                                 p_type = self.resolve_type_annotation(p_annot_val)
                 if p_type == None to ptr[Type]:
@@ -1132,14 +1110,15 @@ struct TypeChecker:
             if node_type_annots(node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                 let type_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
                 if (deref type_annots).length() > 0 to i64:
-                    let opt as Option[ptr[TypeAnnotation]] = (deref type_annots)[0 to i64]
-                    let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                    let opt_annot as Option[ptr[TypeAnnotation]] = (deref type_annots)[0]
+                    let opt_ref as ptr[OptionLayout] = (ref opt_annot) to ptr[OptionLayout]
                     if option_has_value(opt_ref to ptr[u8]):
-                        let val_p as ptr[u8] = option_value(opt_ref to ptr[u8])
-                        annot_val = val_p to ptr[TypeAnnotation]
-                        if annot_val != None to ptr[TypeAnnotation]:
+                        let val_p as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
+                        if val_p != None to ptr[TypeAnnotation]:
+                            annot_val = val_p
                             annotated_type = self.resolve_type_annotation(annot_val)
-                            self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
+                            if (deref self).current_struct_type == None to ptr[Type]:
+                                self.check_nizam_import((deref annot_val).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
             
             if node_left(node) != None to ptr[Node]:
                 let init_node as ptr[Node] = node_left(node)
@@ -1193,7 +1172,8 @@ struct TypeChecker:
             if ret_annot != None to ptr[TypeAnnotation]:
                 if (deref ret_annot).name.len > 0 to usize:
                     (deref f_type).return_type = self.resolve_type_annotation(ret_annot)
-                    self.check_nizam_import((deref ret_annot).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
+                    if not node_is_extern(node):
+                        self.check_nizam_import((deref ret_annot).name.data to cstr, node_span(node), node_file_path(node, (deref (deref self).sema).current_file))
                 elif (deref self).current_struct_type != None to ptr[Type] and (deref (deref self).current_struct_type).kind == TypeKind.Enum:
                     (deref f_type).return_type = (deref self).current_struct_type
                 else:
@@ -1221,16 +1201,15 @@ struct TypeChecker:
                 var p_type as ptr[Type] = None to ptr[Type]
                 if node_type_annots(p_node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                     let p_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
-                    let p_annots as List[Option[ptr[TypeAnnotation]]] = deref p_annots_ptr
-                    if p_annots.length() > 0 to i64:
-                        let opt as Option[ptr[TypeAnnotation]] = p_annots[0 to i64]
-                        let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                    if (deref p_annots_ptr).length() > 0 to i64:
+                        let opt_annot as Option[ptr[TypeAnnotation]] = (deref p_annots_ptr)[0]
+                        let opt_ref as ptr[OptionLayout] = (ref opt_annot) to ptr[OptionLayout]
                         if option_has_value(opt_ref to ptr[u8]):
-                            let p_val_p as ptr[u8] = option_value(opt_ref to ptr[u8])
-                            let p_annot_val as ptr[TypeAnnotation] = p_val_p to ptr[TypeAnnotation]
+                            let p_annot_val as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
                             if p_annot_val != None to ptr[TypeAnnotation]:
                                 p_type = self.resolve_type_annotation(p_annot_val)
-                                self.check_nizam_import((deref p_annot_val).name.data to cstr, node_span(p_node), node_file_path(p_node, (deref (deref self).sema).current_file))
+                                if not node_is_extern(node):
+                                    self.check_nizam_import((deref p_annot_val).name.data to cstr, node_span(p_node), node_file_path(p_node, (deref (deref self).sema).current_file))
                 
                 if p_type == None to ptr[Type]:
                     if p_idx == 0 to i64 and strcmp(p_name, "self" to cstr) == 0 and (deref self).current_struct_type != None to ptr[Type]:
@@ -1331,13 +1310,11 @@ struct TypeChecker:
                 var p_type as ptr[Type] = None to ptr[Type]
                 if node_type_annots(p_node) != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
                     let p_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
-                    let p_annots as List[Option[ptr[TypeAnnotation]]] = deref p_annots_ptr
-                    if p_annots.length() > 0 to i64:
-                        let opt as Option[ptr[TypeAnnotation]] = p_annots[0 to i64]
-                        let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                    if (deref p_annots_ptr).length() > 0 to i64:
+                        let opt_annot as Option[ptr[TypeAnnotation]] = (deref p_annots_ptr)[0]
+                        let opt_ref as ptr[OptionLayout] = (ref opt_annot) to ptr[OptionLayout]
                         if option_has_value(opt_ref to ptr[u8]):
-                            let p_val_p as ptr[u8] = option_value(opt_ref to ptr[u8])
-                            let p_annot_val as ptr[TypeAnnotation] = p_val_p to ptr[TypeAnnotation]
+                            let p_annot_val as ptr[TypeAnnotation] = (deref opt_ref).val_ptr to ptr[TypeAnnotation]
                             if p_annot_val != None to ptr[TypeAnnotation]:
                                 p_type = self.resolve_type_annotation(p_annot_val)
 
@@ -1894,9 +1871,14 @@ struct TypeChecker:
                 let prop_n as String = node_name(node)
                 if prop_n.data != None to ptr[u8]:
                     if strcmp(prop_n.data to cstr, "data" to cstr) == 0:
-                        ret_type = make_ptr_type(make_type(TypeKind.U8))
-                    elif strcmp(prop_n.data to cstr, "len" to cstr) == 0 or strcmp(prop_n.data to cstr, "capacity" to cstr) == 0:
-                        ret_type = make_type(TypeKind.USize)
+                        if obj_kind == TypeKind.List and (deref obj_t).payload != None to ptr[Type]:
+                            ret_type = make_ptr_type((deref obj_t).payload)
+                        else:
+                            ret_type = make_ptr_type(make_type(TypeKind.U8))
+                    elif strcmp(prop_n.data to cstr, "buckets" to cstr) == 0:
+                        ret_type = make_ptr_type(make_type(TypeKind.Struct))
+                    elif strcmp(prop_n.data to cstr, "len" to cstr) == 0 or strcmp(prop_n.data to cstr, "_len" to cstr) == 0 or strcmp(prop_n.data to cstr, "count" to cstr) == 0 or strcmp(prop_n.data to cstr, "capacity" to cstr) == 0:
+                        ret_type = make_type(TypeKind.I64)
                     else:
                         ret_type = make_type(TypeKind.Any)
             elif obj_kind == TypeKind.Enum:

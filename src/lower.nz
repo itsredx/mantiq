@@ -17,9 +17,18 @@ extern fn fflush(f as ptr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 extern fn malloc(size as usize) as ptr
 extern fn free(p as ptr)
+extern fn strlen(s as cstr) as usize
 
-// ── String Slice Helper ──────────────────────────────────────────────────
+// ── String Intern Helper ─────────────────────────────────────────────────
 extern fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]
+
+fn intern_cstr(s as cstr) as String:
+    if s == None to cstr:
+        let d as ptr[u8] = mantiq_intern_string("" to cstr, 0 to usize)
+        return String(data = d, len = 0 to usize, capacity = 1 to usize)
+    let l as usize = strlen(s)
+    let d as ptr[u8] = mantiq_intern_string(s, l)
+    return String(data = d, len = l, capacity = l + 1 to usize)
 
 fn slice_string(s_data as ptr[u8], s_len as usize, start as usize, end as usize) as ptr:
     if end <= start or start >= s_len:
@@ -69,9 +78,9 @@ fn normalize_type_str(raw as ptr[String]) as String:
     while out_idx > 0 to usize and buf[out_idx - 1 to usize] == 32 to u8:
         out_idx = out_idx - 1 to usize
     buf[out_idx] = 0 to u8
-    let res as String = String.make(buf to cstr)
+    let d_res as ptr[u8] = mantiq_intern_string(buf to cstr, out_idx)
     free(buf to ptr)
-    return res
+    return String(data = d_res, len = out_idx, capacity = out_idx + 1 to usize)
 
 fn strip_quotes(d as ptr[u8], len as usize) as String:
     if len >= 2 to usize:
@@ -2431,13 +2440,13 @@ struct Lowerer:
                 
                 var sym_tok as cstr = strtok(None to cstr, delims)
                 while sym_tok != None to cstr:
-                    imported_symbols.append(String.make(sym_tok))
+                    imported_symbols.append(intern_cstr(sym_tok))
                     sym_tok = strtok(None to cstr, delims)
             elif strcmp(first_tok, "import" to cstr) == 0:
                 let tokens as List[String] = List[String]()
                 var tok as cstr = strtok(None to cstr, delims)
                 while tok != None to cstr:
-                    tokens.append(String.make(tok))
+                    tokens.append(intern_cstr(tok))
                     tok = strtok(None to cstr, delims)
                 
                 var start_tok_idx as i64 = 0 to i64
@@ -2481,7 +2490,7 @@ struct Lowerer:
                 let tokens as List[String] = List[String]()
                 var tok as cstr = strtok(None to cstr, delims)
                 while tok != None to cstr:
-                    tokens.append(String.make(tok))
+                    tokens.append(intern_cstr(tok))
                     tok = strtok(None to cstr, delims)
                 
                 var start_tok_idx as i64 = 0 to i64
@@ -2495,7 +2504,6 @@ struct Lowerer:
                     target = strip_quotes(t_str.data, t_str.len)
         
         free(buf to ptr)
-        text_str.deinit()
         
         let n as ptr[Node] = make_node(NodeType.ImportDecl, span)
         let data as ptr[ImportDeclData] = make_ast[ImportDeclData](1 to usize) to ptr[ImportDeclData]

@@ -396,6 +396,22 @@ struct Sema:
                 s_idx = s_idx + 1 to i64
             return
         
+        if strcmp(target.data to cstr, "std.mem" to cstr) == 0:
+            let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
+            (deref (deref self).current_scope).symbols[target] = mod_sym
+            
+            let count as i64 = node_imported_symbols(node).length()
+            var s_idx as i64 = 0 to i64
+            while s_idx < count:
+                let s_name as String = node_imported_symbols(node)[s_idx]
+                var sk as SymbolKind = SymbolKind.Function
+                if strcmp(s_name.data to cstr, "Allocator" to cstr) == 0 or strcmp(s_name.data to cstr, "PageAllocator" to cstr) == 0 or strcmp(s_name.data to cstr, "ArenaAllocator" to cstr) == 0 or strcmp(s_name.data to cstr, "FixedBufferAllocator" to cstr) == 0 or strcmp(s_name.data to cstr, "HeapAllocator" to cstr) == 0:
+                    sk = SymbolKind.Struct
+                let builtin_sym as ptr[Symbol] = make_symbol(s_name, sk, node)
+                (deref (deref self).current_scope).symbols[s_name] = builtin_sym
+                s_idx = s_idx + 1 to i64
+            return
+        
         let module_key as String = target
         if (deref self).loaded_modules.has(module_key):
             let mod_scope as ptr[Scope] = (deref self).loaded_modules[module_key]
@@ -1029,7 +1045,15 @@ struct Sema:
             (deref self_ref_id).current_scope = parent_scope
         elif nt == NodeType.StructDecl:
             let name as String = node_name(node)
+            var is_dup as bool = False
             if (deref (deref self).current_scope).symbols.has(name):
+                let existing as ptr[Symbol] = (deref (deref self).current_scope).symbols[name]
+                if existing != None to ptr[Symbol] and (deref existing).decl_node != None to ptr[Node]:
+                    let dnode as ptr[Node] = (deref existing).decl_node
+                    let dk as NodeType = node_kind(dnode)
+                    if dk == NodeType.StructDecl or dk == NodeType.ClassDecl:
+                        is_dup = True
+            if is_dup:
                 self.report_error_node("E0102" to cstr, String.make("duplicate struct declaration" to cstr), node)
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Struct, node)
