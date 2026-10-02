@@ -6813,7 +6813,6 @@ struct LLVMCodegen:
                 arg_type = String.make("{ ptr, ptr }" to cstr)
 
             if is_struct_byval(arg_type):
-            elif is_struct_byval(arg_type):
                 let t_spill as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, t_spill to cstr)
@@ -6851,8 +6850,8 @@ struct LLVMCodegen:
                     is_closure_call = True
         elif is_closure_member_field:
             is_closure_call = True
-        elif callee != None to ptr[Node] and node_kind(callee) != NodeType.MemberExpr:
-            if callee_t != None to ptr[Type] and ((deref callee_t).kind == TypeKind.Closure or (deref callee_t).kind == TypeKind.Function):
+        elif callee != None to ptr[Node] and node_kind(callee) != NodeType.MemberExpr and node_kind(callee) != NodeType.Identifier:
+            if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Closure:
                 is_closure_call = True
         if is_closure_call:
             let closure_val as ptr[u8] = self.emit_expr(callee)
