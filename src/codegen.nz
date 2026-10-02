@@ -44,6 +44,24 @@ fn append_str(sb as ptr[StringBuilder], s as String):
 fn append_cstr(sb as ptr[StringBuilder], s as cstr):
     (deref sb).append(s)
 
+fn strip_generic_base(name as String) as String:
+    if name.data == None to ptr[u8] or name.len == 0 to usize:
+        return String.make("" to cstr)
+    extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+    var br_pos as usize = 0 to usize
+    var found_br as bool = False
+    while br_pos < name.len and not found_br:
+        if (deref ((name.data to usize + br_pos) to ptr[u8])) == 91 to u8:
+            found_br = True
+        else:
+            br_pos = br_pos + 1 to usize
+    if not found_br or br_pos == 0 to usize:
+        return name
+    let alloc as ptr[u8] = make[u8](br_pos + 1 to usize) to ptr[u8]
+    let _c as ptr = memcpy(alloc to ptr, name.data to ptr, br_pos)
+    alloc[br_pos] = 0 to u8
+    return String(data = alloc, len = br_pos, capacity = br_pos + 1 to usize)
+
 fn str_eq(a as String, b as String) as bool:
     if a.data == None to ptr[u8] or b.data == None to ptr[u8]:
         return a.data == b.data and a.len == b.len
@@ -9738,10 +9756,10 @@ struct LLVMCodegen:
                     let et2_ld as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, et2_ld to cstr)
-                    append_cstr(ref (deref self).main_out, " = load ")
-                    append_str(ref (deref self).main_out, et2_ty)
-                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, " = ptrtoint ptr ")
                     append_cstr(ref (deref self).main_out, key_emit to cstr)
+                    append_cstr(ref (deref self).main_out, " to ")
+                    append_str(ref (deref self).main_out, et2_ty)
                     append_cstr(ref (deref self).main_out, "\n")
                     key_emit = et2_ld
                     key_type = et2_ty
@@ -14462,10 +14480,10 @@ struct LLVMCodegen:
                 let et_ld as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, et_ld to cstr)
-                append_cstr(ref (deref self).main_out, " = load ")
-                append_str(ref (deref self).main_out, et_key_ty)
-                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, " = ptrtoint ptr ")
                 append_cstr(ref (deref self).main_out, idx_emit to cstr)
+                append_cstr(ref (deref self).main_out, " to ")
+                append_str(ref (deref self).main_out, et_key_ty)
                 append_cstr(ref (deref self).main_out, "\n")
                 idx_emit = et_ld
                 idx_type = et_key_ty
@@ -15036,7 +15054,8 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, ":\n")
 
                 if sem_t.len > 0 to usize:
-                    let st_c as cstr = sem_t.data to cstr
+                    let base_sem_t as String = strip_generic_base(sem_t)
+                    let st_c as cstr = base_sem_t.data to cstr
                     if strcmp(st_c, "String" to cstr) == 0:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_String(ptr %")
                         append_str(ref (deref self).main_out, var_name)
@@ -15049,7 +15068,7 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_Dict(ptr %")
                         append_str(ref (deref self).main_out, var_name)
                         append_cstr(ref (deref self).main_out, ")\n")
-                    elif strcmp(st_c, "List_flat" to cstr) == 0:
+                    elif strcmp(st_c, "List_flat" to cstr) == 0 or strcmp(st_c, "List" to cstr) == 0:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List_flat(ptr %")
                         append_str(ref (deref self).main_out, var_name)
                         append_cstr(ref (deref self).main_out, ")\n")
@@ -15072,7 +15091,7 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, ")\n")
                     elif mantiq_type_needs_drop(st_c) != 0 to i32:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
-                        append_str(ref (deref self).main_out, sem_t)
+                        append_str(ref (deref self).main_out, base_sem_t)
                         append_cstr(ref (deref self).main_out, "(ptr %")
                         append_str(ref (deref self).main_out, var_name)
                         append_cstr(ref (deref self).main_out, ")\n")
@@ -15135,7 +15154,7 @@ struct LLVMCodegen:
         let struct_name as String = node_name(node)
         if struct_name.data != None to ptr[u8]:
             let sn_c as cstr = struct_name.data to cstr
-            if strcmp(sn_c, "List" to cstr) == 0 or strcmp(sn_c, "Dict" to cstr) == 0 or strcmp(sn_c, "DictBucket" to cstr) == 0 or strcmp(sn_c, "Set" to cstr) == 0 or strcmp(sn_c, "FrozenSet" to cstr) == 0 or strcmp(sn_c, "Tuple" to cstr) == 0 or strcmp(sn_c, "Tuple2" to cstr) == 0 or strcmp(sn_c, "Tuple3" to cstr) == 0 or strcmp(sn_c, "Tuple4" to cstr) == 0 or strcmp(sn_c, "DictItems" to cstr) == 0:
+            if strcmp(sn_c, "List" to cstr) == 0 or strcmp(sn_c, "Dict" to cstr) == 0 or strcmp(sn_c, "DictBucket" to cstr) == 0:
                 return
         if node_body(node) != None to ptr[Node]:
             let body as ptr[Node] = node_body(node)
@@ -15278,7 +15297,7 @@ struct LLVMCodegen:
         extern fn mantiq_type_needs_drop(type_name as cstr) as i32
 
         let n_cstr as cstr = name.data to cstr
-        if strcmp(n_cstr, "String" to cstr) == 0 or strcmp(n_cstr, "StringBuilder" to cstr) == 0 or strcmp(n_cstr, "List" to cstr) == 0 or strcmp(n_cstr, "Dict" to cstr) == 0 or strcmp(n_cstr, "Set" to cstr) == 0:
+        if strcmp(n_cstr, "String" to cstr) == 0 or strcmp(n_cstr, "StringBuilder" to cstr) == 0 or strcmp(n_cstr, "List" to cstr) == 0 or strcmp(n_cstr, "Dict" to cstr) == 0:
             return
 
         let glue_marker as StringBuilder = StringBuilder.make()
@@ -15342,7 +15361,8 @@ struct LLVMCodegen:
             if d != None to ptr[Node] and (node_kind(d) == NodeType.VarDecl or node_kind(d) == NodeType.FieldDecl):
                 let f_sem_t as String = self.compute_sem_type_name(node_inferred_type(d), d)
                 if f_sem_t.len > 0 to usize:
-                    let f_st_c as cstr = f_sem_t.data to cstr
+                    let base_f_sem_t as String = strip_generic_base(f_sem_t)
+                    let f_st_c as cstr = base_f_sem_t.data to cstr
                     let f_nm as String = node_name(d)
                     var f_idx as i32 = 0 to i32
                     let f_key as StringBuilder = StringBuilder.make()
@@ -15375,7 +15395,7 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_Dict(ptr ")
                         append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
                         append_cstr(ref (deref self).main_out, ")\n")
-                    elif strcmp(f_st_c, "List_flat" to cstr) == 0:
+                    elif strcmp(f_st_c, "List_flat" to cstr) == 0 or strcmp(f_st_c, "List" to cstr) == 0:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List_flat(ptr ")
                         append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
                         append_cstr(ref (deref self).main_out, ")\n")
@@ -15398,7 +15418,7 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, ")\n")
                     elif mantiq_type_needs_drop(f_st_c) != 0 to i32:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
-                        append_str(ref (deref self).main_out, f_sem_t)
+                        append_str(ref (deref self).main_out, base_f_sem_t)
                         append_cstr(ref (deref self).main_out, "(ptr ")
                         append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
                         append_cstr(ref (deref self).main_out, ")\n")
