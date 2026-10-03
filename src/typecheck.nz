@@ -1081,6 +1081,7 @@ struct TypeChecker:
 
     public fn clone_and_substitute_multi(self as ptr[TypeChecker], node as ptr[Node], param_names as List[String], concrete_types as List[ptr[Type]]) as ptr[Node]:
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
+        extern fn strcmp(s1 as cstr, s2 as cstr) as i32
         if node == None to ptr[Node]:
             return None to ptr[Node]
             
@@ -1094,7 +1095,19 @@ struct TypeChecker:
         set_node_is_extern(res, node_is_extern(node))
         set_node_is_variadic(res, node_is_variadic(node))
         set_node_access_modifier(res, node_access_modifier(node))
-        set_node_name(res, node_name(node))
+        var res_name as String = node_name(node)
+        if nt == NodeType.Identifier:
+            let ident_nm as String = node_name(node)
+            if ident_nm.data != None to ptr[u8]:
+                var tp_i as i64 = 0 to i64
+                while tp_i < param_names.length():
+                    let tp_nm as String = param_names[tp_i]
+                    if tp_nm.data != None to ptr[u8] and strcmp(ident_nm.data to cstr, tp_nm.data to cstr) == 0:
+                        res_name = self.type_to_source_name(concrete_types[tp_i])
+                        tp_i = param_names.length()
+                    else:
+                        tp_i = tp_i + 1 to i64
+        set_node_name(res, res_name)
         set_node_str_val(res, node_str_val(node))
         
         let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(node)
