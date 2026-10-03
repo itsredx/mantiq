@@ -2010,6 +2010,10 @@ struct Lowerer:
         return n
 
     public fn lower_fun_decl(self as ptr[Lowerer], ts_node as ptr[TSNode]) as ptr[Node]:
+        let fn_generic_wrapper as ptr[TypeAnnotListWrapper] = make_ast[TypeAnnotListWrapper](1 to usize) to ptr[TypeAnnotListWrapper]
+        (deref fn_generic_wrapper).list = List[Option[ptr[TypeAnnotation]]]()
+        let fn_generic_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref fn_generic_wrapper).list
+
         let span as Span = self.get_span(ts_node)
         var name as String = String.make("" to cstr)
         let params as List[ptr[Node]] = List[ptr[Node]]()
@@ -2219,6 +2223,25 @@ struct Lowerer:
                         j = j + 1 to u32
                 elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
                     body_ast = self.lower_node(ref child)
+                elif strcmp(c_kind, "generic_params" to cstr) == 0:
+                    let gp_count as u32 = ts_node_child_count_ptr(ref child)
+                    var gp_i as u32 = 0 to u32
+                    while gp_i < gp_count:
+                        var gp_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                        ts_node_child_ptr(ref child, gp_i, ref gp_child)
+                        if ts_node_is_named_ptr(ref gp_child):
+                            let gp_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ts_node_start_byte_ptr(ref gp_child) to usize, ts_node_end_byte_ptr(ref gp_child) to usize) to ptr[String]
+                            let gp_annot as ptr[TypeAnnotation] = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                            (deref gp_annot).name = deref gp_slice
+                            (deref gp_annot).lifetime = Empty
+                            (deref gp_annot).generics = Empty
+                            (deref gp_annot).params = Empty
+                            (deref gp_annot).return_type = None to ptr[TypeAnnotation]
+                            (deref gp_annot).is_ref = False
+                            (deref gp_annot).is_mut = False
+                            drop(gp_slice to ptr)
+                            (deref fn_generic_ptr).append(Some(gp_annot))
+                        gp_i = gp_i + 1 to u32
                 elif strcmp(c_kind, "return_annotation" to cstr) != 0 and strcmp(c_kind, "generic_params" to cstr) != 0 and strcmp(c_kind, "typed_params" to cstr) != 0 and strcmp(c_kind, "identifier" to cstr) != 0 and strcmp(c_kind, "decorator" to cstr) != 0 and strcmp(c_kind, "fun_modifier" to cstr) != 0 and strcmp(c_kind, "extern" to cstr) != 0:
                     let expr_node as ptr[Node] = self.lower_node(ref child)
                     if expr_node != None to ptr[Node]:
@@ -2270,6 +2293,8 @@ struct Lowerer:
         let data as ptr[FunDeclData] = make_ast[FunDeclData](1 to usize) to ptr[FunDeclData]
         (deref data).name = name
         (deref data).params = params
+        if (deref fn_generic_ptr).length() > 0 to i64:
+            (deref data).type_annots = fn_generic_ptr
         if is_extern_fn:
             (deref data).body = None to ptr[Node]
         else:

@@ -471,8 +471,8 @@ struct Tuple[T]:
     public fn get(self as ptr[Tuple[T]], idx as i64) as T:
         return (deref self)._items[idx]
 
-    public fn __getitem__(self as Tuple[T], idx as i64) -> T:
-        return self._items[idx]
+    public fn __getitem__(self as ptr[Tuple[T]], idx as i64) as T:
+        return (deref self)._items[idx]
 
     public fn contains(self as ptr[Tuple[T]], item as T) as bool:
         return self.index(item) >= 0 to i64
@@ -657,8 +657,8 @@ struct Bytes:
     public fn get(self as ptr[Bytes], idx as i64) as u8:
         return (deref self)._bytes[idx]
 
-    public fn __getitem__(self as Bytes, idx as i64) -> u8:
-        return self._bytes[idx]
+    public fn __getitem__(self as ptr[Bytes], idx as i64) as u8:
+        return (deref self)._bytes[idx]
 
     public fn count(self as ptr[Bytes], byte_val as u8) as i64:
         var c as i64 = 0 to i64
@@ -1373,8 +1373,8 @@ struct ByteArray:
     public fn set(self as ptr[ByteArray], idx as i64, val as u8):
         (deref self)._bytes[idx] = val
 
-    public fn __getitem__(self as ByteArray, idx as i64) -> u8:
-        return self._bytes[idx]
+    public fn __getitem__(self as ptr[ByteArray], idx as i64) as u8:
+        return (deref self)._bytes[idx]
 
     public fn count(self as ptr[ByteArray], byte_val as u8) as i64:
         var c as i64 = 0 to i64

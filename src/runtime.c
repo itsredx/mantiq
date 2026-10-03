@@ -1145,7 +1145,30 @@ void __mantiq_dict_keys(MantiqDict* d, void* list_addr, int32_t key_size) {
     for (int32_t i = 0; i < d->capacity; i++) {
         if (d->occupied[i]) {
             void* key_ptr = d->keys + (i * d->key_size);
-            __mantiq_raw_list_append(list_addr, key_ptr, key_size);
+            // Dict string keys are stored as borrowed copies of the caller's
+            // String (never freed by __mantiq_dict_destroy). The List returned
+            // by keys() is an owning value, so its elements must own a private
+            // buffer or __nizam_drop_List would free borrowed/string-literal
+            // pointers.
+            if (d->is_string_key == 2 && d->key_size >= 24) {
+                struct MantiqHeapStr { char* ptr; size_t len; size_t cap; };
+                struct MantiqHeapStr* src = (struct MantiqHeapStr*)key_ptr;
+                struct MantiqHeapStr owned;
+                if (src->ptr && src->len) {
+                    owned.cap = src->len + 1;
+                    owned.len = src->len;
+                    owned.ptr = (char*)mantiq_malloc((int64_t)owned.cap);
+                    memcpy(owned.ptr, src->ptr, src->len);
+                    ((char*)owned.ptr)[src->len] = 0;
+                } else {
+                    owned.ptr = NULL;
+                    owned.len = 0;
+                    owned.cap = 0;
+                }
+                __mantiq_raw_list_append(list_addr, &owned, (int64_t)sizeof(struct MantiqHeapStr));
+            } else {
+                __mantiq_raw_list_append(list_addr, key_ptr, key_size);
+            }
         }
     }
 }

@@ -251,12 +251,15 @@ struct Sema:
     public var link_targets as List[String]
     public var loaded_module_paths as List[String]
     public var active_closure_depth as i32
+    public var loaded_module_scopes as List[ptr[Scope]]
+    public var current_struct_name as String
 
     public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
         (deref self).current_file = String.make(file_path)
         (deref self).errors = List[String]()
         (deref self).loaded_modules = Dict[String, ptr[Scope]]()
+        (deref self).loaded_module_scopes = List[ptr[Scope]]()
         (deref self).module_asts = Dict[String, ptr[Node]]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
         (deref self).root_ast = None to ptr[Node]
@@ -264,6 +267,7 @@ struct Sema:
         (deref self).link_targets = List[String]()
         (deref self).loaded_module_paths = List[String]()
         (deref self).active_closure_depth = 0 to i32
+        (deref self).current_struct_name = String.make("" to cstr)
         
         let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
@@ -272,6 +276,13 @@ struct Sema:
         (deref gs).symbols[String.make("printf")] = make_symbol(String.make("printf"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("String")] = make_symbol(String.make("String"), SymbolKind.Struct, None to ptr[Node])
         (deref gs).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Dict")] = make_symbol(String.make("Dict"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Set")] = make_symbol(String.make("Set"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("FrozenSet")] = make_symbol(String.make("FrozenSet"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Tuple")] = make_symbol(String.make("Tuple"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Tuple2")] = make_symbol(String.make("Tuple2"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Tuple3")] = make_symbol(String.make("Tuple3"), SymbolKind.Struct, None to ptr[Node])
+        (deref gs).symbols[String.make("Tuple4")] = make_symbol(String.make("Tuple4"), SymbolKind.Struct, None to ptr[Node])
         (deref gs).symbols[String.make("None")] = make_symbol(String.make("None"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Some")] = make_symbol(String.make("Some"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("Empty")] = make_symbol(String.make("Empty"), SymbolKind.Function, None to ptr[Node])
@@ -328,7 +339,19 @@ struct Sema:
         if name.len == 0 to usize or name.data == None to ptr[u8]:
             return None to ptr[Symbol]
         extern fn __mantiq_scope_lookup(curr as ptr[u8], global_scope as ptr[u8], name_ptr as cstr, name_len as usize) as ptr[Symbol]
-        return __mantiq_scope_lookup((deref self).current_scope to ptr[u8], (deref self).global_scope to ptr[u8], name.data to cstr, name.len)
+        let sym as ptr[Symbol] = __mantiq_scope_lookup((deref self).current_scope to ptr[u8], (deref self).global_scope to ptr[u8], name.data to cstr, name.len)
+        if sym != None to ptr[Symbol]:
+            return sym
+        let mod_count as i64 = (deref self).loaded_module_scopes.length()
+        var mki as i64 = 0 to i64
+        while mki < mod_count:
+            let mod_sc as ptr[Scope] = (deref self).loaded_module_scopes[mki]
+            if mod_sc != None to ptr[Scope]:
+                let mod_sym as ptr[Symbol] = __mantiq_scope_lookup(mod_sc to ptr[u8], None to ptr[u8], name.data to cstr, name.len)
+                if mod_sym != None to ptr[Symbol]:
+                    return mod_sym
+            mki = mki + 1 to i64
+        return None to ptr[Symbol]
 
     public fn check_closure_capture(self as ptr[Sema], name as String, sym as ptr[Symbol]):
         if (deref self).active_closure_depth == 0 to i32:
@@ -828,6 +851,7 @@ struct Sema:
         
         self.declare_pass(root_ast to ptr[Node])
         (deref self).loaded_modules[module_key] = mod_scope
+        (deref self).loaded_module_scopes.append(mod_scope)
         (deref self).module_asts[module_key] = root_ast
         (deref self).loaded_module_paths.append(resolved_path)
         
@@ -1384,9 +1408,17 @@ struct Sema:
             let n_len as usize = name.len
             if (n_len == 5 to usize and strncmp(n_cstr, "super" to cstr, 5 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "break" to cstr, 5 to usize) == 0) or (n_len == 8 to usize and strncmp(n_cstr, "continue" to cstr, 8 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "None" to cstr, 4 to usize) == 0) or (n_len == 4 to usize and strncmp(n_cstr, "True" to cstr, 4 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "False" to cstr, 5 to usize) == 0) or (n_len == 5 to usize and strncmp(n_cstr, "Empty" to cstr, 5 to usize) == 0):
                 return
-            // Allow primitive types used in type intrinsics/casts
+            // Allow primitive types used in type intrinsics/casts and generic type parameters (T, K, V, A, B, etc.)
+            if (n_len == 1 to usize and (deref (n_cstr to ptr[u8])) >= 65 to u8 and (deref (n_cstr to ptr[u8])) <= 90 to u8) or (n_len == 2 to usize and (deref (n_cstr to ptr[u8])) >= 65 to u8 and (deref (n_cstr to ptr[u8])) <= 90 to u8 and (deref ((n_cstr to usize + 1 to usize) to ptr[u8])) >= 48 to u8 and (deref ((n_cstr to usize + 1 to usize) to ptr[u8])) <= 57 to u8):
+                return
             if (n_len == 3 to usize and (strncmp(n_cstr, "i32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f32" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "f64" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "ptr" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "u16" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "Any" to cstr, 3 to usize) == 0 or strncmp(n_cstr, "i128" to cstr, 4 to usize) == 0)) or (n_len == 2 to usize and (strncmp(n_cstr, "i8" to cstr, 2 to usize) == 0 or strncmp(n_cstr, "u8" to cstr, 2 to usize) == 0)) or (n_len == 4 to usize and (strncmp(n_cstr, "bool" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "cstr" to cstr, 4 to usize) == 0 or strncmp(n_cstr, "void" to cstr, 4 to usize) == 0)) or (n_len == 5 to usize and (strncmp(n_cstr, "usize" to cstr, 5 to usize) == 0 or strncmp(n_cstr, "isize" to cstr, 5 to usize) == 0)):
                 return
+            let curr_s as String = (deref self).current_struct_name
+            if curr_s.len > 0 to usize and curr_s.data != None to ptr[u8]:
+                if curr_s.len == n_len and strncmp(curr_s.data to cstr, n_cstr, n_len) == 0:
+                    return
+                if curr_s.len > n_len and strncmp(curr_s.data to cstr, n_cstr, n_len) == 0 and deref ((curr_s.data to usize + n_len) to ptr[u8]) == 95 to u8:
+                    return
             let resolved as ptr[Symbol] = self.lookup_symbol(name)
             if resolved == None to ptr[Symbol]:
                 self.report_error_node("E0101" to cstr, String.make("undeclared variable" to cstr), node)
@@ -1527,6 +1559,9 @@ struct Sema:
                 self.resolve_pass(node_left(node))
         elif nt == NodeType.ClassDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
+            let saved_cls_name as String = (deref self).current_struct_name
+            let self_ref_cn as ptr[Sema] = self
+            (deref self_ref_cn).current_struct_name = node_name(node)
             if (deref self).fn_scopes.has(node to usize):
                 let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
                 (deref self).current_scope = child_scope
@@ -1534,6 +1569,8 @@ struct Sema:
                     self.resolve_pass(node_body(node))
                 let self_ref_cd2 as ptr[Sema] = self
                 (deref self_ref_cd2).current_scope = parent_scope
+            let self_ref_cd3 as ptr[Sema] = self
+            (deref self_ref_cd3).current_struct_name = saved_cls_name
         elif nt == NodeType.InterfaceDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             if (deref self).fn_scopes.has(node to usize):
@@ -1545,6 +1582,9 @@ struct Sema:
                 (deref self_ref_id2).current_scope = parent_scope
         elif nt == NodeType.StructDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
+            let saved_struct_name as String = (deref self).current_struct_name
+            let self_ref_sn as ptr[Sema] = self
+            (deref self_ref_sn).current_struct_name = node_name(node)
             if (deref self).fn_scopes.has(node to usize):
                 let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
                 (deref self).current_scope = child_scope
@@ -1552,6 +1592,8 @@ struct Sema:
                     self.resolve_pass(node_body(node))
                 let self_ref_sd2 as ptr[Sema] = self
                 (deref self_ref_sd2).current_scope = parent_scope
+            let self_ref_sd3 as ptr[Sema] = self
+            (deref self_ref_sd3).current_struct_name = saved_struct_name
             self.check_and_register_struct_drop(node)
         elif nt == NodeType.EnumDecl:
             let parent_scope as ptr[Scope] = (deref self).current_scope
