@@ -5241,6 +5241,53 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, p_ex to cstr)
             append_cstr(ref (deref self).main_out, ")\n")
 
+    public fn coerce_arg_llvm(self as ptr[LLVMCodegen], from_ll as String, to_ll as String, val as ptr[u8]) as ptr[u8]:
+        if from_ll.data == None to ptr[u8] or to_ll.data == None to ptr[u8]:
+            return val
+        if from_ll.len == 0 to usize or to_ll.len == 0 to usize:
+            return val
+        if strcmp(from_ll.data to cstr, to_ll.data to cstr) == 0:
+            return val
+        let f_bits as i32 = llvm_int_bits(from_ll)
+        let t_bits as i32 = llvm_int_bits(to_ll)
+        let f_rank as i32 = llvm_float_rank(from_ll)
+        let t_rank as i32 = llvm_float_rank(to_ll)
+        var cv_op as cstr = "" to cstr
+        var cv_ok as bool = False
+        if f_bits > 0 to i32 and t_bits > 0 to i32:
+            cv_ok = True
+            if f_bits < t_bits:
+                cv_op = "sext" to cstr
+            else:
+                cv_op = "trunc" to cstr
+        elif f_rank > 0 to i32 and t_rank > 0 to i32:
+            cv_ok = True
+            if f_rank < t_rank:
+                cv_op = "fpext" to cstr
+            else:
+                cv_op = "fptrunc" to cstr
+        elif t_rank > 0 to i32 and f_bits > 0 to i32:
+            cv_ok = True
+            cv_op = "sitofp" to cstr
+        elif f_rank > 0 to i32 and t_bits > 0 to i32:
+            cv_ok = True
+            cv_op = "fptosi" to cstr
+        if not cv_ok:
+            return val
+        let cv_t as ptr[u8] = self.fresh_temp()
+        append_cstr(ref (deref self).main_out, "  ")
+        append_cstr(ref (deref self).main_out, cv_t to cstr)
+        append_cstr(ref (deref self).main_out, " = ")
+        append_cstr(ref (deref self).main_out, cv_op to cstr)
+        append_cstr(ref (deref self).main_out, " ")
+        append_cstr(ref (deref self).main_out, from_ll.data to cstr)
+        append_cstr(ref (deref self).main_out, " ")
+        append_cstr(ref (deref self).main_out, val to cstr)
+        append_cstr(ref (deref self).main_out, " to ")
+        append_cstr(ref (deref self).main_out, to_ll.data to cstr)
+        append_cstr(ref (deref self).main_out, "\n")
+        return cv_t
+
     public fn emit_call_expr(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         if node == None to ptr[Node]:
             return "null" to ptr[u8]
@@ -6440,6 +6487,11 @@ struct LLVMCodegen:
                         let params_raw as List[ptr[Node]] = node_params(node)
                         let params as ptr[List[ptr[Node]]] = ref params_raw
                         let count as i64 = (deref params).length()
+                        let cparams_len as i64 = 0 to i64
+                        if callee != None to ptr[Node]:
+                            let cparams_raw as List[ptr[Node]] = node_params(callee)
+                            let cparams_ref as ptr[List[ptr[Node]]] = ref cparams_raw
+                            cparams_len = (deref cparams_ref).length()
                         var p_i as i64 = 0 to i64
                         while p_i < count:
                             let arg_node as ptr[Node] = get_node_decl(params, p_i)
@@ -6447,6 +6499,14 @@ struct LLVMCodegen:
                             var a_type as String = type_to_llvm(node_inferred_type(arg_node))
                             if a_type.len == 0 to usize or strcmp(a_type.data to cstr, "void" to cstr) == 0:
                                 a_type = String.make("i32" to cstr)
+                            if p_i < cparams_len:
+                                let cparams_raw2 as List[ptr[Node]] = node_params(callee)
+                                let cparams_ref2 as ptr[List[ptr[Node]]] = ref cparams_raw2
+                                let cp_node as ptr[Node] = get_node_decl(cparams_ref2, p_i)
+                                let want_ll as String = self.llvm_type(node_inferred_type(cp_node))
+                                if want_ll.len > 0 to usize and strcmp(want_ll.data to cstr, "void" to cstr) != 0:
+                                    a_val = self.coerce_arg_llvm(a_type, want_ll, a_val)
+                                    a_type = want_ll
                             append_cstr(ref arg_buf, ", ")
                             append_str(ref arg_buf, a_type)
                             append_cstr(ref arg_buf, " ")
