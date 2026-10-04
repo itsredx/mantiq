@@ -6550,7 +6550,7 @@ struct LLVMCodegen:
                         let params_raw as List[ptr[Node]] = node_params(node)
                         let params as ptr[List[ptr[Node]]] = ref params_raw
                         let count as i64 = (deref params).length()
-let want_list as List[String] = List[String]()
+                        let want_list as List[String] = List[String]()
                         var have_want as bool = False
                         if (deref self).fn_param_llvm_types.has(target_fn):
                             let wl as List[String] = (deref self).fn_param_llvm_types[target_fn]
@@ -7030,6 +7030,34 @@ let want_list as List[String] = List[String]()
                 p_lookup.deinit()
                 if (deref self).type_aliases.has(p_key_s):
                     expected_p_type = (deref self).type_aliases[p_key_s]
+
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.MemberExpr:
+                let mc_rcv as ptr[Node] = node_left(callee)
+                let mc_rcv_t as ptr[Type] = node_inferred_type(mc_rcv)
+                if mc_rcv_t != None to ptr[Type]:
+                    var mc_base_t as ptr[Type] = mc_rcv_t
+                    if (deref mc_rcv_t).kind == TypeKind.RawPointer and (deref mc_rcv_t).payload != None to ptr[Type]:
+                        mc_base_t = (deref mc_rcv_t).payload
+                    var mc_nm as cstr = "" to cstr
+                    if (deref mc_base_t).kind == TypeKind.Struct and (deref mc_base_t).name.data != None to ptr[u8]:
+                        mc_nm = (deref mc_base_t).name.data to cstr
+                    if mc_nm != None to cstr and strstr(mc_nm, "__" to cstr) != None to cstr:
+                        let mc_key as StringBuilder = StringBuilder.make()
+                        append_str(ref mc_key, (deref mc_base_t).name)
+                        append_cstr(ref mc_key, "_" to cstr)
+                        append_str(ref mc_key, node_name(callee))
+                        let mc_ks as String = mc_key.to_string()
+                        mc_key.deinit()
+                        if (deref self).fn_param_llvm_types.has(mc_ks):
+                            let mc_list as List[String] = (deref self).fn_param_llvm_types[mc_ks]
+                            let mc_idx as i64 = a_idx + 1
+                            if mc_idx < mc_list.length():
+                                let mc_want as String = mc_list[mc_idx]
+                                let mc_from_num as bool = llvm_int_bits(arg_type) > 0 to i32
+                                let mc_to_num as bool = llvm_int_bits(mc_want) > 0 to i32
+                                if mc_from_num and mc_to_num and strcmp(mc_want.data to cstr, arg_type.data to cstr) != 0:
+                                    arg_val = self.coerce_arg_llvm(arg_type, mc_want, arg_val)
+                                    arg_type = mc_want
 
             if strcmp(expected_p_type.data to cstr, "{ ptr, ptr }" to cstr) == 0 and strcmp(arg_type.data to cstr, "{ ptr, ptr }" to cstr) != 0:
                 arg_val = self.emit_box_to_any(arg_val, arg_type, arg_node)
