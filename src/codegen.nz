@@ -3343,7 +3343,11 @@ struct LLVMCodegen:
                                 inner_b[inner_l] = 0 to u8
                                 struct_name = String.make(inner_b to cstr)
                     if struct_name.data != None:
-                        res_type = get_struct_field_type(struct_name.data to cstr, field_name.data to cstr)
+                        var reg_t as String = self.registered_field_type(struct_name.data to cstr, field_name.data to cstr)
+                        if reg_t.len > 0 to usize:
+                            res_type = reg_t
+                        else:
+                            res_type = get_struct_field_type(struct_name.data to cstr, field_name.data to cstr)
             if strcmp(res_type.data to cstr, "void" to cstr) == 0:
                 return field_ptr
             let reg as ptr[u8] = self.fresh_temp()
@@ -4312,7 +4316,11 @@ struct LLVMCodegen:
                 if node_kind(left) == NodeType.MemberExpr:
                     let field_name as String = node_name(left)
                     if field_name.data != None:
-                        val_type = get_struct_field_type("Node" to cstr, field_name.data to cstr)
+                        var reg_t as String = self.registered_field_type("Node" to cstr, field_name.data to cstr)
+                        if reg_t.len > 0 to usize:
+                            val_type = reg_t
+                        else:
+                            val_type = get_struct_field_type("Node" to cstr, field_name.data to cstr)
             if strcmp(val_type.data to cstr, "void" to cstr) == 0 or strcmp(val_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
                 val_type = String.make("ptr" to cstr)
             if node_kind(right) == NodeType.BooleanLiteral:
@@ -4348,7 +4356,11 @@ struct LLVMCodegen:
                 if node_kind(left) == NodeType.MemberExpr:
                     let field_name as String = node_name(left)
                     if field_name.data != None:
-                        target_type = get_struct_field_type("Node" to cstr, field_name.data to cstr)
+                        var reg_t as String = self.registered_field_type("Node" to cstr, field_name.data to cstr)
+                        if reg_t.len > 0 to usize:
+                            target_type = reg_t
+                        else:
+                            target_type = get_struct_field_type("Node" to cstr, field_name.data to cstr)
             if strcmp(target_type.data to cstr, "void" to cstr) == 0 or strcmp(target_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
                 target_type = val_type
 
@@ -4847,7 +4859,9 @@ struct LLVMCodegen:
                         let id_nm as String = node_name(obj_inner)
                         if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
                             s_name = (deref self).current_struct_name
-                let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                var f_t as String = self.registered_field_type(s_name.data to cstr, field_name.data to cstr)
+                if f_t.len == 0 to usize:
+                    f_t = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
                 if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
                     left_t_str = f_t
         elif node_kind(left) == NodeType.Identifier:
@@ -4934,7 +4948,9 @@ struct LLVMCodegen:
                         let id_nm as String = node_name(obj_inner)
                         if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
                             s_name = (deref self).current_struct_name
-                let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                var f_t as String = self.registered_field_type(s_name.data to cstr, field_name.data to cstr)
+                if f_t.len == 0 to usize:
+                    f_t = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
                 if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
                     right_t_str = f_t
         elif node_kind(right) == NodeType.Identifier:
@@ -6026,7 +6042,9 @@ struct LLVMCodegen:
                                     if strcmp(f_c, "source_code" to cstr) == 0 or strcmp(f_c, "file_path" to cstr) == 0:
                                         s_nm_c = "Lowerer" to cstr
                                 if strcmp(s_nm_c, "" to cstr) != 0:
-                                    let mem_t as String = get_struct_field_type(s_nm_c, f_nm.data to cstr)
+                                    var mem_t as String = self.registered_field_type(s_nm_c, f_nm.data to cstr)
+                                    if mem_t.len == 0 to usize:
+                                        mem_t = get_struct_field_type(s_nm_c, f_nm.data to cstr)
                                     if mem_t.len > 0 to usize:
                                         pr_type = mem_t
                         if node_kind(pr_node) == NodeType.StringLiteral or (deref pr_val) == 64 to u8:
@@ -6057,9 +6075,18 @@ struct LLVMCodegen:
                             append_cstr(ref (deref self).main_out, " to i32\n  call void @mantiq_print_bool(i32 ")
                             append_cstr(ref (deref self).main_out, ext_val to cstr)
                             append_cstr(ref (deref self).main_out, ")\n")
-                        elif strcmp(pr_type.data to cstr, "float" to cstr) == 0 or strcmp(pr_type.data to cstr, "double" to cstr) == 0:
+                        elif strcmp(pr_type.data to cstr, "float" to cstr) == 0:
                             append_cstr(ref (deref self).main_out, "  call void @mantiq_print_float(float ")
                             append_cstr(ref (deref self).main_out, pr_val to cstr)
+                            append_cstr(ref (deref self).main_out, ")\n")
+                        elif strcmp(pr_type.data to cstr, "double" to cstr) == 0:
+                            let d_tr as ptr[u8] = self.fresh_temp()
+                            append_cstr(ref (deref self).main_out, "  ")
+                            append_cstr(ref (deref self).main_out, d_tr to cstr)
+                            append_cstr(ref (deref self).main_out, " = fptrunc double ")
+                            append_cstr(ref (deref self).main_out, pr_val to cstr)
+                            append_cstr(ref (deref self).main_out, " to float\n  call void @mantiq_print_float(float ")
+                            append_cstr(ref (deref self).main_out, d_tr to cstr)
                             append_cstr(ref (deref self).main_out, ")\n")
                         elif strcmp(pr_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(pr_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0:
                             let ptr_part as ptr[u8] = self.fresh_temp()
@@ -12748,7 +12775,9 @@ struct LLVMCodegen:
                         let id_nm as String = node_name(obj_inner)
                         if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
                             s_name = (deref self).current_struct_name
-                    let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                    var f_t as String = self.registered_field_type(s_name.data to cstr, field_name.data to cstr)
+                    if f_t.len == 0 to usize:
+                        f_t = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
                     if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
                         source_type = f_t
             elif node_kind(operand) == NodeType.Identifier:
@@ -14885,7 +14914,9 @@ struct LLVMCodegen:
         if not is_agg_coll and node_kind(collection) == NodeType.MemberExpr:
             let f_nm as String = node_name(collection)
             if f_nm.data != None:
-                let f_t as String = get_struct_field_type("Node" to cstr, f_nm.data to cstr)
+                var f_t as String = self.registered_field_type("Node" to cstr, f_nm.data to cstr)
+                if f_t.len == 0 to usize:
+                    f_t = get_struct_field_type("Node" to cstr, f_nm.data to cstr)
                 if strcmp(f_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(f_t.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0:
                     is_agg_coll = True
                     agg_type = f_t
@@ -15471,6 +15502,9 @@ struct LLVMCodegen:
                 return r_llvm
         let f_nm as String = node_name(decl)
         if f_nm.data != None to ptr[u8]:
+            let reg_n as String = self.registered_field_type("Node" to cstr, f_nm.data to cstr)
+            if reg_n.len > 0 to usize:
+                return reg_n
             return get_struct_field_type("Node" to cstr, f_nm.data to cstr)
         return String.make("ptr" to cstr)
 
@@ -15483,6 +15517,46 @@ struct LLVMCodegen:
             if f_t.data != None to ptr[u8]:
                 append_cstr(fields_str, f_t.data to cstr)
             deref field_idx_ptr = deref field_idx_ptr + 1 to i64
+
+    // Resolve a struct field's LLVM type from the type recorded when the struct's
+    // own FieldDecls were emitted. Returns an empty String when the struct or
+    // field is unknown, so callers can fall back to the built-in name table.
+    public fn registered_field_type(self as ptr[LLVMCodegen], s_nm as cstr, f_nm as cstr) as String:
+        if s_nm == None to cstr or f_nm == None to cstr:
+            return String.make("" to cstr)
+        let idx_key as StringBuilder = StringBuilder.make()
+        append_cstr(ref idx_key, s_nm)
+        append_cstr(ref idx_key, "." to cstr)
+        append_cstr(ref idx_key, f_nm)
+        let ik as String = idx_key.to_string()
+        if (deref self).struct_field_indices.has(ik):
+            let fi as i32 = (deref self).struct_field_indices[ik]
+            let ll_key as StringBuilder = StringBuilder.make()
+            append_cstr(ref ll_key, s_nm)
+            append_cstr(ref ll_key, "#" to cstr)
+            append_i32(ref ll_key, fi)
+            let lk as String = ll_key.to_string()
+            if (deref self).struct_field_llvm_types.has(lk):
+                return (deref self).struct_field_llvm_types[lk]
+        extern fn strrchr(s as cstr, c as i32) as cstr
+        let last_dot as cstr = strrchr(s_nm, 46 to i32)
+        if last_dot != None to cstr:
+            let short_nm as cstr = (last_dot to usize + 1 to usize) to cstr
+            let k2 as StringBuilder = StringBuilder.make()
+            append_cstr(ref k2, short_nm)
+            append_cstr(ref k2, "." to cstr)
+            append_cstr(ref k2, f_nm)
+            let k2s as String = k2.to_string()
+            if (deref self).struct_field_indices.has(k2s):
+                let fi2 as i32 = (deref self).struct_field_indices[k2s]
+                let lk2 as StringBuilder = StringBuilder.make()
+                append_cstr(ref lk2, short_nm)
+                append_cstr(ref lk2, "#" to cstr)
+                append_i32(ref lk2, fi2)
+                let lk2s as String = lk2.to_string()
+                if (deref self).struct_field_llvm_types.has(lk2s):
+                    return (deref self).struct_field_llvm_types[lk2s]
+        return String.make("" to cstr)
 
     public fn emit_struct_fields(self as ptr[LLVMCodegen], node as ptr[Node], name as String):
         let fields_str as StringBuilder = StringBuilder.make()
