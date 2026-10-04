@@ -387,6 +387,18 @@ struct TypeChecker:
                     let elem_type as ptr[Type] = self.resolve_type_annotation(ref elem_annot)
                     let t as ptr[Type] = make_type(TypeKind.List)
                     (deref t).payload = elem_type
+                    // Monomorphize the List template as well, so methods defined on
+                    // List[T] in std get a concrete body emitted under a unique name.
+                    // The receiver type deliberately stays TypeKind.List: builtin and
+                    // C-backed list operations keep resolving exactly as before, and the
+                    // generated name is only consulted for methods codegen does not
+                    // already handle itself.
+                    let lst_sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make("List" to cstr))
+                    if lst_sym != None to ptr[Symbol] and (deref lst_sym).decl_node != None to ptr[Node]:
+                        let lst_args as List[ptr[Type]] = List[ptr[Type]]()
+                        lst_args.append(elem_type)
+                        let lst_mono as ptr[Node] = self.monomorphize_struct((deref lst_sym).decl_node, lst_args)
+                        (deref t).name = node_name(lst_mono)
                     return t
             let t as ptr[Type] = make_type(TypeKind.List)
             (deref t).payload = make_type(TypeKind.Any)

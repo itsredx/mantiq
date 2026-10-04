@@ -34,6 +34,9 @@ struct List[T]:
     public fn count(self as ptr[List[T]]) as i64:
         return (deref self)._len
 
+    public fn at(self as ptr[List[T]], idx as i64) as T:
+        return (deref self).data[idx]
+
 // ── Dict[K, V] ────────────────────────────────────────────────────────
 struct DictBucket[K, V]:
     public var key as K

@@ -7202,7 +7202,14 @@ struct LLVMCodegen:
                     elif (deref obj_t).kind == TypeKind.String:
                         s_nm = String.make("String" to cstr)
                     elif (deref obj_t).kind == TypeKind.List:
-                        s_nm = String.make("List" to cstr)
+                        // typecheck monomorphizes the List template and records the
+                        // generated name on the type, so user-defined methods on
+                        // List[T] resolve to their concrete body. Fall back to the
+                        // bare "List" when no name was recorded.
+                        if (deref obj_t).name.len > 0 to usize:
+                            s_nm = (deref obj_t).name
+                        else:
+                            s_nm = String.make("List" to cstr)
                     elif (deref obj_t).kind == TypeKind.Dict:
                         s_nm = String.make("Dict" to cstr)
                     elif (deref obj_t).kind == TypeKind.RawPointer and (deref obj_t).payload != None to ptr[Type]:
