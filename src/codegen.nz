@@ -804,6 +804,7 @@ struct LLVMCodegen:
     public var struct_field_indices as Dict[String, i32]
     public var struct_field_is_dict as Dict[String, bool]
     public var struct_field_llvm_types as Dict[String, String]
+    public var fn_param_llvm_types as Dict[String, List[String]]
     public var current_break_label as String
     public var current_continue_label as String
     public var enum_variant_tags as Dict[String, i32]
@@ -847,6 +848,7 @@ struct LLVMCodegen:
         (deref self).struct_field_indices = Dict[String, i32]()
         (deref self).struct_field_is_dict = Dict[String, bool]()
         (deref self).struct_field_llvm_types = Dict[String, String]()
+        (deref self).fn_param_llvm_types = Dict[String, List[String]]()
         (deref self).current_break_label = String.make("" to cstr)
         (deref self).current_continue_label = String.make("" to cstr)
         (deref self).enum_variant_tags = Dict[String, i32]()
@@ -2001,6 +2003,7 @@ struct LLVMCodegen:
 
     public fn emit_program(self as ptr[LLVMCodegen], node as ptr[Node]):
         let decls as List[ptr[Node]] = node_declarations(node)
+        self.pre_register_param_types(node)
         let count as i64 = decls.length()
         var i as i64 = 0 to i64
         while i < count:
@@ -2141,6 +2144,96 @@ struct LLVMCodegen:
                 self.emit_node(decl)
             i = i + 1 to i64
 
+    public fn param_llvm_type_str(self as ptr[LLVMCodegen], param as ptr[Node]) as String:
+        var param_type as String = self.llvm_type(node_inferred_type(param))
+        let p_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(param)
+        if p_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            let p_annots as List[Option[ptr[TypeAnnotation]]] = deref p_annots_ptr
+            if p_annots.length() > 0 to i64:
+                let opt as Option[ptr[TypeAnnotation]] = p_annots[0 to i64]
+                let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
+                if option_has_value(opt_ref):
+                    let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
+                    if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
+                        if (deref pa).is_ref:
+                            param_type = String.make("ptr" to cstr)
+                        else:
+                            let pa_name as cstr = (deref pa).name.data to cstr
+                            extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+                            extern fn strlen(s as cstr) as usize
+                            if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0 or strlen(pa_name) == 1 to usize:
+                                param_type = String.make("ptr" to cstr)
+                            elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
+                                param_type = String.make("i32" to cstr)
+                            elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
+                                param_type = String.make("i64" to cstr)
+                            elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0:
+                                if (deref self).target.pointer_size == 4 to usize:
+                                    param_type = String.make("i32" to cstr)
+                                else:
+                                    param_type = String.make("i64" to cstr)
+                            elif strcmp(pa_name, "Any" to cstr) == 0:
+                                param_type = String.make("{ ptr, ptr }" to cstr)
+                            elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0 or strncmp(pa_name, "Set" to cstr, 3 to usize) == 0 or strncmp(pa_name, "FrozenSet" to cstr, 9 to usize) == 0 or strcmp(pa_name, "Tuple" to cstr) == 0 or strncmp(pa_name, "Tuple[" to cstr, 6 to usize) == 0 or strncmp(pa_name, "Tuple__" to cstr, 7 to usize) == 0:
+                                if (deref self).target.pointer_size == 4 to usize:
+                                    param_type = String.make("{ ptr, i32, i32 }" to cstr)
+                                else:
+                                    param_type = String.make("{ ptr, i64, i64 }" to cstr)
+        if param_type.len == 0 to usize:
+            param_type = String.make("i64" to cstr)
+        return param_type
+
+    public fn register_fun_param_types(self as ptr[LLVMCodegen], fn_name as String, fnode as ptr[Node]):
+        if node_is_variadic(fnode):
+            return
+        let params as List[ptr[Node]] = node_params(fnode)
+        let p_count as i64 = params.length()
+        if p_count == 0 to i64:
+            return
+        let tys as List[String] = List[String]()
+        var i as i64 = 0 to i64
+        while i < p_count:
+            let param as ptr[Node] = get_node_decl(ref params, i)
+            let pt as String = self.param_llvm_type_str(param)
+            if is_struct_byval(pt):
+                tys.append(String.make("ptr" to cstr))
+            else:
+                tys.append(pt)
+            i = i + 1 to i64
+        (deref self).fn_param_llvm_types[fn_name] = tys
+
+    public fn register_param_types_rec(self as ptr[LLVMCodegen], node as ptr[Node]):
+        if node == None to ptr[Node]:
+            return
+        let nt as NodeType = node_kind(node)
+        if nt == NodeType.StructDecl or nt == NodeType.ClassDecl or nt == NodeType.InterfaceDecl:
+            let sn as String = node_name(node)
+            if node_body(node) != None to ptr[Node]:
+                let s_decls as List[ptr[Node]] = node_declarations(node_body(node))
+                let s_count as i64 = s_decls.length()
+                var s_i as i64 = 0 to i64
+                while s_i < s_count:
+                    let m as ptr[Node] = get_node_decl(ref s_decls, s_i)
+                    if node_kind(m) == NodeType.FunDecl and not node_is_extern(m):
+                        let key as StringBuilder = StringBuilder.make()
+                        append_str(ref key, sn)
+                        append_cstr(ref key, "_" to cstr)
+                        append_str(ref key, node_name(m))
+                        self.register_fun_param_types(key.to_string(), m)
+                        key.deinit()
+                    s_i = s_i + 1 to i64
+        elif nt == NodeType.FunDecl:
+            if not node_is_extern(node):
+                self.register_fun_param_types(node_name(node), node)
+
+    public fn pre_register_param_types(self as ptr[LLVMCodegen], program as ptr[Node]):
+        let decls as List[ptr[Node]] = node_declarations(program)
+        let count as i64 = decls.length()
+        var i as i64 = 0 to i64
+        while i < count:
+            self.register_param_types_rec(get_node_decl(ref decls, i))
+            i = i + 1 to i64
+
     public fn emit_fun_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)
         if strcmp(name.data to cstr, "__init__" to cstr) == 0:
@@ -2262,56 +2355,26 @@ struct LLVMCodegen:
 
         let param_buf as StringBuilder = StringBuilder.make()
         let p_count as i64 = params.length()
+        let reg_param_types as List[String] = List[String]()
         var p_idx as i64 = 0 to i64
         while p_idx < p_count:
             let param as ptr[Node] = get_node_decl(ref params, p_idx)
-            var param_type as String = self.llvm_type(node_inferred_type(param))
-            let p_annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(param)
-            if p_annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-                let p_annots as List[Option[ptr[TypeAnnotation]]] = deref p_annots_ptr
-                if p_annots.length() > 0 to i64:
-                    let opt as Option[ptr[TypeAnnotation]] = p_annots[0 to i64]
-                    let opt_ref as ptr[OptionLayout] = (ref opt) to ptr[OptionLayout]
-                    if option_has_value(opt_ref):
-                        let pa as ptr[TypeAnnotation] = option_unwrap_ptr(opt_ref) to ptr[TypeAnnotation]
-                        if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None:
-                            if (deref pa).is_ref:
-                                param_type = String.make("ptr" to cstr)
-                            else:
-                                let pa_name as cstr = (deref pa).name.data to cstr
-                                extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-                                extern fn strlen(s as cstr) as usize
-                                if strcmp(pa_name, "ptr" to cstr) == 0 or strcmp(pa_name, "cstr" to cstr) == 0 or strncmp(pa_name, "ptr[" to cstr, 4 to usize) == 0 or strlen(pa_name) == 1 to usize:
-                                    param_type = String.make("ptr" to cstr)
-                                elif strcmp(pa_name, "i32" to cstr) == 0 or strcmp(pa_name, "u32" to cstr) == 0 or strcmp(pa_name, "color" to cstr) == 0 or strcmp(pa_name, "Color" to cstr) == 0:
-                                    param_type = String.make("i32" to cstr)
-                                elif strcmp(pa_name, "i64" to cstr) == 0 or strcmp(pa_name, "u64" to cstr) == 0:
-                                    param_type = String.make("i64" to cstr)
-                                elif strcmp(pa_name, "usize" to cstr) == 0 or strcmp(pa_name, "isize" to cstr) == 0:
-                                    if (deref self).target.pointer_size == 4 to usize:
-                                        param_type = String.make("i32" to cstr)
-                                    else:
-                                        param_type = String.make("i64" to cstr)
-                                elif strcmp(pa_name, "Any" to cstr) == 0:
-                                    param_type = String.make("{ ptr, ptr }" to cstr)
-                                elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0 or strncmp(pa_name, "Set" to cstr, 3 to usize) == 0 or strncmp(pa_name, "FrozenSet" to cstr, 9 to usize) == 0 or strcmp(pa_name, "Tuple" to cstr) == 0 or strncmp(pa_name, "Tuple[" to cstr, 6 to usize) == 0 or strncmp(pa_name, "Tuple__" to cstr, 7 to usize) == 0:
-                                    if (deref self).target.pointer_size == 4 to usize:
-                                        param_type = String.make("{ ptr, i32, i32 }" to cstr)
-                                    else:
-                                        param_type = String.make("{ ptr, i64, i64 }" to cstr)
-            if param_type.len == 0 to usize:
-                param_type = String.make("i64" to cstr)
+            let param_type as String = self.param_llvm_type_str(param)
             let is_bv as bool = is_struct_byval(param_type)
             if is_bv:
                 append_cstr(ref param_buf, "ptr %")
+                reg_param_types.append(String.make("ptr" to cstr))
             else:
                 append_str(ref param_buf, param_type)
                 append_cstr(ref param_buf, " %")
+                reg_param_types.append(param_type)
             append_str(ref param_buf, node_name(param))
             append_cstr(ref param_buf, "_param")
             if p_idx < p_count - 1 to i64:
                 append_cstr(ref param_buf, ", ")
             p_idx = p_idx + 1 to i64
+        if not node_is_variadic(node) and reg_param_types.length() > 0 to i64:
+            (deref self).fn_param_llvm_types[name] = reg_param_types
 
         append_cstr(ref (deref self).main_out, "define ")
         append_str(ref (deref self).main_out, ret_type)
@@ -6487,11 +6550,12 @@ struct LLVMCodegen:
                         let params_raw as List[ptr[Node]] = node_params(node)
                         let params as ptr[List[ptr[Node]]] = ref params_raw
                         let count as i64 = (deref params).length()
-                        let cparams_len as i64 = 0 to i64
-                        if callee != None to ptr[Node]:
-                            let cparams_raw as List[ptr[Node]] = node_params(callee)
-                            let cparams_ref as ptr[List[ptr[Node]]] = ref cparams_raw
-                            cparams_len = (deref cparams_ref).length()
+let want_list as List[String] = List[String]()
+                        var have_want as bool = False
+                        if (deref self).fn_param_llvm_types.has(target_fn):
+                            let wl as List[String] = (deref self).fn_param_llvm_types[target_fn]
+                            want_list = wl
+                            have_want = True
                         var p_i as i64 = 0 to i64
                         while p_i < count:
                             let arg_node as ptr[Node] = get_node_decl(params, p_i)
@@ -6499,11 +6563,9 @@ struct LLVMCodegen:
                             var a_type as String = type_to_llvm(node_inferred_type(arg_node))
                             if a_type.len == 0 to usize or strcmp(a_type.data to cstr, "void" to cstr) == 0:
                                 a_type = String.make("i32" to cstr)
-                            if p_i < cparams_len:
-                                let cparams_raw2 as List[ptr[Node]] = node_params(callee)
-                                let cparams_ref2 as ptr[List[ptr[Node]]] = ref cparams_raw2
-                                let cp_node as ptr[Node] = get_node_decl(cparams_ref2, p_i)
-                                let want_ll as String = self.llvm_type(node_inferred_type(cp_node))
+                            let widx as i64 = p_i + 1
+                            if have_want and widx < want_list.length():
+                                let want_ll as String = want_list[widx]
                                 if want_ll.len > 0 to usize and strcmp(want_ll.data to cstr, "void" to cstr) != 0:
                                     a_val = self.coerce_arg_llvm(a_type, want_ll, a_val)
                                     a_type = want_ll
