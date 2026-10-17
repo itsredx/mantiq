@@ -11672,30 +11672,35 @@ struct LLVMCodegen:
             if node_kind(operand) == NodeType.StringLiteral:
                 source_type = String.make("ptr" to cstr)
             elif node_kind(operand) == NodeType.MemberExpr:
-                let field_name as String = node_name(operand)
-                let obj as ptr[Node] = node_left(operand)
-                if obj != None to ptr[Node]:
-                    var s_name as String = String.make("Node" to cstr)
-                    let target_t as ptr[Type] = node_inferred_type(obj)
-                    if target_t != None to ptr[Type]:
-                        if (deref target_t).kind == TypeKind.Struct:
-                            s_name = (deref target_t).name
-                        elif (deref target_t).kind == TypeKind.RawPointer and (deref target_t).payload != None to ptr[Type]:
-                            let pl as ptr[Type] = (deref target_t).payload
-                            if (deref pl).kind == TypeKind.Struct:
-                                s_name = (deref pl).name
-                    var obj_inner as ptr[Node] = obj
-                    if node_kind(obj_inner) == NodeType.UnaryExpr:
-                        let in_node as ptr[Node] = node_left(obj_inner)
-                        if in_node != None to ptr[Node]:
-                            obj_inner = in_node
-                    if node_kind(obj_inner) == NodeType.Identifier:
-                        let id_nm as String = node_name(obj_inner)
-                        if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
-                            s_name = (deref self).current_struct_name
-                    let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
-                    if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
-                        source_type = f_t
+                let inf_ot as ptr[Type] = node_inferred_type(operand)
+                var o_type_ok as bool = False
+                if inf_ot != None to ptr[Type] and (deref inf_ot).kind != TypeKind.Any and (deref inf_ot).kind != TypeKind.Void and (deref inf_ot).kind != TypeKind.Unknown and type_to_llvm(inf_ot).len > 0 to usize:
+                    o_type_ok = True
+                if not o_type_ok:
+                    let field_name as String = node_name(operand)
+                    let obj as ptr[Node] = node_left(operand)
+                    if obj != None to ptr[Node]:
+                        var s_name as String = String.make("Node" to cstr)
+                        let target_t as ptr[Type] = node_inferred_type(obj)
+                        if target_t != None to ptr[Type]:
+                            if (deref target_t).kind == TypeKind.Struct:
+                                s_name = (deref target_t).name
+                            elif (deref target_t).kind == TypeKind.RawPointer and (deref target_t).payload != None to ptr[Type]:
+                                let pl as ptr[Type] = (deref target_t).payload
+                                if (deref pl).kind == TypeKind.Struct:
+                                    s_name = (deref pl).name
+                        var obj_inner as ptr[Node] = obj
+                        if node_kind(obj_inner) == NodeType.UnaryExpr:
+                            let in_node as ptr[Node] = node_left(obj_inner)
+                            if in_node != None to ptr[Node]:
+                                obj_inner = in_node
+                        if node_kind(obj_inner) == NodeType.Identifier:
+                            let id_nm as String = node_name(obj_inner)
+                            if id_nm.data != None and strcmp(id_nm.data to cstr, "self" to cstr) == 0 and (deref self).current_struct_name.len > 0 to usize:
+                                s_name = (deref self).current_struct_name
+                        let f_t as String = get_struct_field_type(s_name.data to cstr, field_name.data to cstr)
+                        if strcmp(f_t.data to cstr, "{ ptr, ptr }") != 0:
+                            source_type = f_t
             elif node_kind(operand) == NodeType.Identifier:
                 let id_nm_str as String = node_name(operand)
                 if id_nm_str.data != None and (deref self).var_types.has(id_nm_str):
