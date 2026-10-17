@@ -1213,7 +1213,7 @@ struct LLVMCodegen:
     public fn emit_builtin_struct_types(self as ptr[LLVMCodegen]):
         if (deref self).target.pointer_size == 4 to usize:
             self.register_builtin_struct("Target", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
-            self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
+            self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i8, %Span, i32, i8 }")
@@ -1283,7 +1283,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("VarInfo", "{ i32, ptr }")
         else:
             self.register_builtin_struct("Target", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, i32, { ptr, i64, i64 }, { ptr, i64, i64 } }")
-            self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, { ptr, i64, i64 }, { ptr, i64, i64 } }")
+            self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
@@ -1483,6 +1483,8 @@ struct LLVMCodegen:
         self.register_field_idx("Lowerer" to cstr, "next_hygiene_id" to cstr, 5 to i32)
         self.register_field_idx("Lowerer" to cstr, "struct_generics" to cstr, 6 to i32)
         self.register_field_idx("Lowerer" to cstr, "all_annotations" to cstr, 7 to i32)
+        self.register_field_idx("Lowerer" to cstr, "fun_generics" to cstr, 8 to i32)
+        self.register_field_idx("Lowerer" to cstr, "generic_calls" to cstr, 9 to i32)
 
         self.register_field_idx("Sema" to cstr, "current_scope" to cstr, 0 to i32)
         self.register_field_idx("Sema" to cstr, "global_scope" to cstr, 1 to i32)
@@ -3513,6 +3515,10 @@ struct LLVMCodegen:
                         field_idx = 6 to i32
                     elif strcmp(f_cstr, "all_annotations" to cstr) == 0:
                         field_idx = 7 to i32
+                    elif strcmp(f_cstr, "fun_generics" to cstr) == 0:
+                        field_idx = 8 to i32
+                    elif strcmp(f_cstr, "generic_calls" to cstr) == 0:
+                        field_idx = 9 to i32
                 elif strcmp(s_cstr, "Sema" to cstr) == 0:
                     if strcmp(f_cstr, "current_scope" to cstr) == 0:
                         field_idx = 0 to i32
