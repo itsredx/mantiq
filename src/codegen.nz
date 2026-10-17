@@ -1213,7 +1213,7 @@ struct LLVMCodegen:
     public fn emit_builtin_struct_types(self as ptr[LLVMCodegen]):
         if (deref self).target.pointer_size == 4 to usize:
             self.register_builtin_struct("Target", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
-            self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
+            self.register_builtin_struct("Lowerer", "{ { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, { ptr, i32, i32 }, { ptr, i32, i32 } }")
             self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i32, ptr, ptr, { ptr, i32, i32 }, { ptr, i32, i32 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i32, i32 }, { ptr, i32, i32 }, { ptr, i32, i32 }, i8, %Span, i32, i8 }")
@@ -1283,7 +1283,7 @@ struct LLVMCodegen:
             self.register_builtin_struct("VarInfo", "{ i32, ptr }")
         else:
             self.register_builtin_struct("Target", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, i32, { ptr, i64, i64 }, { ptr, i64, i64 } }")
-            self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64 }")
+            self.register_builtin_struct("Lowerer", "{ { ptr, i64, i64 }, i32, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i64, { ptr, i64, i64 }, { ptr, i64, i64 } }")
             self.register_builtin_struct("Sema", "{ ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i32, ptr, ptr, { ptr, i64, i64 }, { ptr, i64, i64 }, i32 }")
             self.register_builtin_struct("TypeChecker", "{ ptr, { i8, ptr }, ptr, ptr }")
             self.register_builtin_struct("BorrowRecord", "{ { ptr, i64, i64 }, { ptr, i64, i64 }, { ptr, i64, i64 }, i8, %Span, i32, i8 }")
@@ -1481,6 +1481,8 @@ struct LLVMCodegen:
         self.register_field_idx("Lowerer" to cstr, "macros" to cstr, 3 to i32)
         self.register_field_idx("Lowerer" to cstr, "macro_args" to cstr, 4 to i32)
         self.register_field_idx("Lowerer" to cstr, "next_hygiene_id" to cstr, 5 to i32)
+        self.register_field_idx("Lowerer" to cstr, "struct_generics" to cstr, 6 to i32)
+        self.register_field_idx("Lowerer" to cstr, "all_annotations" to cstr, 7 to i32)
 
         self.register_field_idx("Sema" to cstr, "current_scope" to cstr, 0 to i32)
         self.register_field_idx("Sema" to cstr, "global_scope" to cstr, 1 to i32)
@@ -3507,6 +3509,10 @@ struct LLVMCodegen:
                         field_idx = 4 to i32
                     elif strcmp(f_cstr, "next_hygiene_id" to cstr) == 0:
                         field_idx = 5 to i32
+                    elif strcmp(f_cstr, "struct_generics" to cstr) == 0:
+                        field_idx = 6 to i32
+                    elif strcmp(f_cstr, "all_annotations" to cstr) == 0:
+                        field_idx = 7 to i32
                 elif strcmp(s_cstr, "Sema" to cstr) == 0:
                     if strcmp(f_cstr, "current_scope" to cstr) == 0:
                         field_idx = 0 to i32
@@ -5173,6 +5179,28 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, "\n")
         return reg
 
+    public fn mono_ctor_name(self as ptr[LLVMCodegen], orig as String, gn as String) as bool:
+        if gn.data == None to ptr[u8] or orig.data == None to ptr[u8]:
+            return False
+        if orig.len == 0 to usize or gn.len <= orig.len:
+            return False
+        var i as usize = 0 to usize
+        while i < gn.len:
+            if (deref ((gn.data to usize + i) to ptr[u8])) == 91 to u8:
+                return False
+            i = i + 1 to usize
+        let c0 as u8 = deref ((gn.data to usize) to ptr[u8])
+        if c0 < 65 to u8 or c0 > 90 to u8:
+            return False
+        var j as usize = 0 to usize
+        while j < orig.len:
+            if (deref ((gn.data to usize + j) to ptr[u8])) != (deref ((orig.data to usize + j) to ptr[u8])):
+                return False
+            j = j + 1 to usize
+        if (deref ((gn.data to usize + orig.len) to ptr[u8])) != 95 to u8:
+            return False
+        return True
+
     public fn emit_call_stmt(self as ptr[LLVMCodegen], node as ptr[Node]):
         let ret_reg as ptr[u8] = self.emit_call_expr(node)
         var ret_llvm as String = self.llvm_type(node_inferred_type(node))
@@ -5196,7 +5224,18 @@ struct LLVMCodegen:
         if callee == None to ptr[Node]:
             return "null" to ptr[u8]
         let args as List[ptr[Node]] = node_params(node)
-        let callee_name_ptr as ptr[String] = node_name_ptr(callee)
+        var callee_name_ptr as ptr[String] = node_name_ptr(callee)
+        let call_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+        if call_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            if (deref call_annots).length() == 1 to i64:
+                var ca_opt as Option[ptr[TypeAnnotation]] = (deref call_annots)[0 to i64]
+                let ca_ref as ptr[OptionLayout] = (ref ca_opt) to ptr[OptionLayout]
+                if option_has_value(ca_ref):
+                    let ca_an as ptr[TypeAnnotation] = option_unwrap_ptr(ca_ref) to ptr[TypeAnnotation]
+                    if ca_an != None to ptr[TypeAnnotation]:
+                        let gn_s as String = (deref ca_an).name
+                        if self.mono_ctor_name(node_name(callee), gn_s):
+                            callee_name_ptr = ref (deref ca_an).name
         let callee_t as ptr[Type] = node_inferred_type(callee)
         var ret_type as String = self.llvm_type(node_inferred_type(node))
         if ret_type.len == 0 to usize or strcmp(ret_type.data to cstr, "void" to cstr) == 0:

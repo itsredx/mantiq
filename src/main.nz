@@ -5,7 +5,7 @@ from std.collections import List, Dict
 import symbols
 from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr
+from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr, monomorphize_program
 import sema
 from sema import Sema
 import types
@@ -407,6 +407,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     else:
         lowerer = make_lowerer_mantiq_from_cstr(source_cstr, path_cstr)
     let root as ptr[Node] = (deref lowerer).lower_source()
+    if mode == LanguageMode.Nizam to i32 and root != None to ptr:
+        monomorphize_program(lowerer, root)
     perf_end(perf, "parse", t0)
     if root == None to ptr:
         let _p1 as i32 = printf("Error: Failed to lower program AST\n" to cstr, "" to cstr)
