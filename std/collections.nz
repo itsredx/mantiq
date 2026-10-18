@@ -535,17 +535,14 @@ struct DictItems[K, V]:
             i = i + 1 to i64
         return res
 
-// ── Bytes ─────────────────────────────────────────────────────────────
-// Immutable sequence of bytes, providing full parity with Python's bytes
-// data model (Section 11).
-extern fn __mantiq_list_fromhex(out_list as ptr, hex_str as cstr)
-extern fn __mantiq_list_hex(out_str as ptr, list_addr as ptr)
-extern fn __mantiq_list_decode(out_str as ptr, list_addr as ptr)
 extern fn __mantiq_list_insert(list_addr as ptr, index as i64, elem_addr as ptr, elem_size as i64)
 extern fn __mantiq_list_remove(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i8
 extern fn __mantiq_list_pop(list_addr as ptr, out_addr as ptr, elem_size as i64) as i8
 extern fn __mantiq_list_pop_index(list_addr as ptr, index as i64, out_addr as ptr, elem_size as i64) as i8
 
+// ── Bytes ─────────────────────────────────────────────────────────────
+// Immutable sequence of bytes, providing full parity with Python's bytes
+// data model (Section 11).
 struct Bytes:
     public var _bytes as List[u8] = List[u8]()
 
@@ -586,7 +583,31 @@ struct Bytes:
 
     public fn fromhex(hex_str as cstr) as Bytes:
         var b as Bytes = Bytes()
-        __mantiq_list_fromhex((ref b._bytes) to ptr, hex_str)
+        if hex_str == None to cstr:
+            return b
+        extern fn strlen(s as cstr) as usize
+        let slen as i64 = strlen(hex_str) to i64
+        var i as i64 = 0 to i64
+        while i + 1 to i64 < slen:
+            let c0 as u8 = hex_str[i]
+            let c1 as u8 = hex_str[i + 1 to i64]
+            var h0 as u8 = 0 to u8
+            if c0 >= 48 to u8 and c0 <= 57 to u8:
+                h0 = c0 - 48 to u8
+            elif c0 >= 65 to u8 and c0 <= 70 to u8:
+                h0 = c0 - 55 to u8
+            elif c0 >= 97 to u8 and c0 <= 102 to u8:
+                h0 = c0 - 87 to u8
+            var h1 as u8 = 0 to u8
+            if c1 >= 48 to u8 and c1 <= 57 to u8:
+                h1 = c1 - 48 to u8
+            elif c1 >= 65 to u8 and c1 <= 70 to u8:
+                h1 = c1 - 55 to u8
+            elif c1 >= 97 to u8 and c1 <= 102 to u8:
+                h1 = c1 - 87 to u8
+            let byte_val as u8 = (h0 * 16 to u8) + h1
+            b._bytes.append(byte_val)
+            i = i + 2 to i64
         return b
 
     public fn length(self as ptr[Bytes]) as i64:
@@ -685,12 +706,42 @@ struct Bytes:
 
     public fn decode(self as ptr[Bytes]) as String:
         var s as String = ""
-        __mantiq_list_decode((ref s) to ptr, (ref (deref self)._bytes) to ptr)
+        let n as i64 = self.length()
+        if n == 0 to i64:
+            return s
+        extern fn mantiq_malloc(size as i64) as ptr
+        let d as ptr[u8] = mantiq_malloc(n + 1 to i64) to ptr[u8]
+        var i as i64 = 0 to i64
+        while i < n:
+            d[i] = (deref self)._bytes[i]
+            i = i + 1 to i64
+        d[n] = 0 to u8
+        s.data = d
+        s.len = n to usize
+        s.capacity = (n + 1 to i64) to usize
         return s
 
     public fn hex(self as ptr[Bytes]) as String:
         var s as String = ""
-        __mantiq_list_hex((ref s) to ptr, (ref (deref self)._bytes) to ptr)
+        let n as i64 = self.length()
+        if n == 0 to i64:
+            return s
+        let hex_len as i64 = n * 2 to i64
+        extern fn mantiq_malloc(size as i64) as ptr
+        let d as ptr[u8] = mantiq_malloc(hex_len + 1 to i64) to ptr[u8]
+        let hex_chars as cstr = "0123456789abcdef" to cstr
+        var i as i64 = 0 to i64
+        while i < n:
+            let b as u8 = (deref self)._bytes[i]
+            let hi as i64 = ((b / 16 to u8) & 15 to u8) to i64
+            let lo as i64 = (b & 15 to u8) to i64
+            d[i * 2 to i64] = hex_chars[hi]
+            d[i * 2 to i64 + 1 to i64] = hex_chars[lo]
+            i = i + 1 to i64
+        d[hex_len] = 0 to u8
+        s.data = d
+        s.len = hex_len to usize
+        s.capacity = (hex_len + 1 to i64) to usize
         return s
 
     public fn to_list(self as ptr[Bytes]) as List[u8]:
@@ -1427,12 +1478,42 @@ struct ByteArray:
 
     public fn decode(self as ptr[ByteArray]) as String:
         var s as String = ""
-        __mantiq_list_decode((ref s) to ptr, (ref (deref self)._bytes) to ptr)
+        let n as i64 = self.length()
+        if n == 0 to i64:
+            return s
+        extern fn mantiq_malloc(size as i64) as ptr
+        let d as ptr[u8] = mantiq_malloc(n + 1 to i64) to ptr[u8]
+        var i as i64 = 0 to i64
+        while i < n:
+            d[i] = (deref self)._bytes[i]
+            i = i + 1 to i64
+        d[n] = 0 to u8
+        s.data = d
+        s.len = n to usize
+        s.capacity = (n + 1 to i64) to usize
         return s
 
     public fn hex(self as ptr[ByteArray]) as String:
         var s as String = ""
-        __mantiq_list_hex((ref s) to ptr, (ref (deref self)._bytes) to ptr)
+        let n as i64 = self.length()
+        if n == 0 to i64:
+            return s
+        let hex_len as i64 = n * 2 to i64
+        extern fn mantiq_malloc(size as i64) as ptr
+        let d as ptr[u8] = mantiq_malloc(hex_len + 1 to i64) to ptr[u8]
+        let hex_chars as cstr = "0123456789abcdef" to cstr
+        var i as i64 = 0 to i64
+        while i < n:
+            let b as u8 = (deref self)._bytes[i]
+            let hi as i64 = ((b / 16 to u8) & 15 to u8) to i64
+            let lo as i64 = (b & 15 to u8) to i64
+            d[i * 2 to i64] = hex_chars[hi]
+            d[i * 2 to i64 + 1 to i64] = hex_chars[lo]
+            i = i + 1 to i64
+        d[hex_len] = 0 to u8
+        s.data = d
+        s.len = hex_len to usize
+        s.capacity = (hex_len + 1 to i64) to usize
         return s
 
     public fn append(self as ptr[ByteArray], val as u8):
