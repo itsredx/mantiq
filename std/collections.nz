@@ -522,7 +522,7 @@ struct DictItems[K, V]:
         return (deref self)._dict.values()
 
     public fn mapping(self as ptr[DictItems[K, V]]) as Dict[K, V]:
-        return (deref self)._dict
+        return (deref self)._dict.copy()
 
     public fn to_list(self as ptr[DictItems[K, V]]) as List[Tuple2[K, V]]:
         var res as List[Tuple2[K, V]] = List[Tuple2[K, V]]()
@@ -539,6 +539,97 @@ extern fn __mantiq_list_insert(list_addr as ptr, index as i64, elem_addr as ptr,
 extern fn __mantiq_list_remove(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i8
 extern fn __mantiq_list_pop(list_addr as ptr, out_addr as ptr, elem_size as i64) as i8
 extern fn __mantiq_list_pop_index(list_addr as ptr, index as i64, out_addr as ptr, elem_size as i64) as i8
+
+// ── List[T] ──────────────────────────────────────────────────────────
+from std.mem import Allocator, HeapAllocator, get_default_allocator, sizeof
+
+struct List[T]:
+    public var data as ptr[T]
+    public var length as i64
+    public var capacity as i64
+    public var allocator as ptr[Allocator]
+
+    public fn __init__(self as ptr[List[T]]):
+        (deref self).data = None to ptr[T]
+        (deref self).length = 0 to i64
+        (deref self).capacity = 0 to i64
+        var ha as HeapAllocator = HeapAllocator()
+        (deref self).allocator = ha.allocator()
+
+    public fn init(self as ptr[List[T]]):
+        (deref self).data = None to ptr[T]
+        (deref self).length = 0 to i64
+        (deref self).capacity = 0 to i64
+        var ha as HeapAllocator = HeapAllocator()
+        (deref self).allocator = ha.allocator()
+
+    public fn append(self as ptr[List[T]], item as T):
+        if (deref self).length >= (deref self).capacity:
+            self._grow()
+        let slot as ptr[T] = (deref self).data + (deref self).length
+        (deref slot) = item
+        (deref self).length = (deref self).length + 1 to i64
+
+    public fn get(self as ptr[List[T]], idx as i64) as T:
+        return (deref self).data[idx]
+
+    public fn __getitem__(self as ptr[List[T]], idx as i64) as T:
+        return (deref self).data[idx]
+
+    public fn len(self as ptr[List[T]]) as i64:
+        return (deref self).length
+
+    public fn length(self as ptr[List[T]]) as i64:
+        return (deref self).length
+
+    public fn count(self as ptr[List[T]]) as i64:
+        return (deref self).length
+
+    public fn pop(self as ptr[List[T]]) as T:
+        let n as i64 = (deref self).length
+        if n == 0 to i64:
+            panic("IndexError: pop from empty list")
+        (deref self).length = n - 1 to i64
+        return (deref self).data[n - 1 to i64]
+
+    public fn pop_index(self as ptr[List[T]], idx as i64) as T:
+        let n as i64 = (deref self).length
+        if idx < 0 to i64:
+            panic("IndexError: index out of range")
+        if idx >= n:
+            panic("IndexError: index out of range")
+        let val as T = (deref self).data[idx]
+        var i as i64 = idx
+        while i < n - 1 to i64:
+            (deref self).data[i] = (deref self).data[i + 1 to i64]
+            i = i + 1 to i64
+        (deref self).length = n - 1 to i64
+        return val
+
+    public fn insert(self as ptr[List[T]], idx as i64, item as T):
+        if (deref self).length >= (deref self).capacity:
+            self._grow()
+        let n as i64 = (deref self).length
+        var i as i64 = n
+        while i > idx:
+            (deref self).data[i] = (deref self).data[i - 1 to i64]
+            i = i - 1 to i64
+        (deref self).data[idx] = item
+        (deref self).length = n + 1 to i64
+
+    public fn clear(self as ptr[List[T]]):
+        (deref self).length = 0 to i64
+
+    fn _grow(self as ptr[List[T]]):
+        let new_cap as i64 = if (deref self).capacity == 0 to i64: 8 to i64 else: (deref self).capacity * 2 to i64
+        let item_sz as usize = sizeof[T]()
+        let old_data as ptr[u8] = (deref self).data to ptr[u8]
+        let old_sz as usize = ((deref self).capacity to usize) * item_sz
+        let new_sz as usize = ((new_cap to usize) * item_sz)
+        let new_data as ptr[u8] = ((deref self).allocator).resize(old_data, old_sz, new_sz)
+        (deref self).data = new_data to ptr[T]
+        (deref self).capacity = new_cap
+
 
 // ── Bytes ─────────────────────────────────────────────────────────────
 // Immutable sequence of bytes, providing full parity with Python's bytes
