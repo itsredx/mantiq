@@ -4147,8 +4147,15 @@ struct LLVMCodegen:
             let gep_reg as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, gep_reg to cstr)
-            append_cstr(ref (deref self).main_out, " = getelementptr inbounds %")
-            append_str(ref (deref self).main_out, struct_name)
+            append_cstr(ref (deref self).main_out, " = getelementptr inbounds ")
+            if (deref self).defined_types.has(struct_name):
+                append_cstr(ref (deref self).main_out, "%" to cstr)
+                append_str(ref (deref self).main_out, struct_name)
+            elif obj_type_str.data != None to ptr[u8] and obj_type_str.len > 0 to usize and (deref obj_type_str.data) == 123 to u8:
+                append_str(ref (deref self).main_out, obj_type_str)
+            else:
+                append_cstr(ref (deref self).main_out, "%" to cstr)
+                append_str(ref (deref self).main_out, struct_name)
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, ptr_temp to cstr)
             append_cstr(ref (deref self).main_out, ", i32 0, i32 ")
