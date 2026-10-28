@@ -1719,19 +1719,23 @@ fn set_node_captured_vars(n as ptr[Node], captured_vars as List[String]):
 
 fn add_captured_var(n as ptr[Node], name as String):
     extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+    extern fn __nizam_list_str_at(l as ptr, idx as i64) as ptr[u8]
     if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
         return
     let k as NodeType = (deref n).kind
     if k == NodeType.ClosureExpr:
         let d as ptr[ClosureExprData] = (deref n).data to ptr[ClosureExprData]
-        // Check for duplicates
-        let existing as List[String] = (deref d).captured_vars
-        let count as i64 = existing.length()
+        // Check for duplicates without byval copies: a local List/String copy
+        // aliases heap buffers owned by the AST, and this function's drop
+        // glue frees them mid-call, corrupting the capture list that codegen
+        // reads later. Read element char data straight through the list via
+        // the runtime helper instead.
+        let count as i64 = (deref d).captured_vars.length()
         var i as i64 = 0 to i64
         while i < count:
-            let e as String = existing[i]
-            if e.len == name.len and e.data != None to ptr[u8] and name.data != None to ptr[u8]:
-                if strncmp(e.data to cstr, name.data to cstr, name.len) == 0:
+            let e_data as ptr[u8] = __nizam_list_str_at(ref (deref d).captured_vars, i)
+            if name.len > 0 to usize and e_data != (None to ptr[u8]) and name.data != None to ptr[u8]:
+                if strncmp(e_data to cstr, name.data to cstr, name.len) == 0:
                     return
             i = i + 1 to i64
         (deref d).captured_vars.append(name)

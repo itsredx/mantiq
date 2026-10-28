@@ -1,5 +1,14 @@
 // Runtime library for Mantiq/Nizam compiled programs.
 //
+// Milestone C: the collections/allocator/drop-glue surface
+// (mantiq_malloc family, __mantiq_hash_*, __nizam_drop_*, __nizam_str_clone,
+// __nizam_list_str_at, dictionary destroy/resize) is now defined EITHER in
+// Nizam (std/mem.nz + std/collections.nz, for programs importing std) OR as
+// program-local IR emitted by the compiler's codegen (emit_rt_glue_bodies).
+// This file only declares them for its own remaining C machinery (arena,
+// interning engine) — the links resolve from the program's IR beside this
+// object at link time.
+//
 // Provides the ABI contract that generated LLVM IR calls into:
 //   - Memory management: mantiq_malloc / mantiq_free / mantiq_realloc
 //     (backed by mimalloc or libc malloc)
@@ -196,40 +205,6 @@ long long mantiq_alloc_bytes(void) { return _alloc_bytes; }
 long long mantiq_free_count(void) { return _free_count; }
 
 // Memory Management for Closures and Objects
-void* mantiq_malloc(int64_t size) {
-    if (size < 0 || size > 500000000LL) {
-        fprintf(stderr, "[Runtime] Invalid malloc size: %lld\n", (long long)size);
-        abort();
-    }
-    void* ptr = calloc(1, (size_t)(size ? size : 1));
-    if (!ptr) {
-        fprintf(stderr, "[Runtime] Fatal: memory allocation of %lld bytes failed\n", (long long)size);
-        abort();
-    }
-    if (__builtin_expect(_mantiq_profile_active, 0)) {
-        _alloc_count++;
-        _alloc_bytes += (long long)(size ? size : 1);
-    }
-    return ptr;
-}
-
-void* mantiq_malloc_raw(int64_t size) {
-    if (size < 0 || size > 500000000LL) {
-        fprintf(stderr, "[Runtime] Invalid malloc size: %lld\n", (long long)size);
-        abort();
-    }
-    void* ptr = sys_malloc((size_t)(size ? size : 1));
-    if (!ptr) {
-        fprintf(stderr, "[Runtime] Fatal: memory allocation of %lld bytes failed\n", (long long)size);
-        abort();
-    }
-    if (__builtin_expect(_mantiq_profile_active, 0)) {
-        _alloc_count++;
-        _alloc_bytes += (long long)(size ? size : 1);
-    }
-    return ptr;
-}
-
 // ── Virtual Page Allocation (POSIX mmap / Windows VirtualAlloc) ───────
 void* mantiq_page_alloc(int64_t size) {
     if (size <= 0) return NULL;
@@ -292,7 +267,50 @@ int64_t mantiq_get_alloc_bytes(void) {
 
 int mantiq_is_arena_ptr(void* ptr);
 
-void mantiq_free(void* ptr) {
+// ── Milestone C: internal allocation/hash copies ──────────────────────
+// The PUBLIC bodies for mantiq_malloc / mantiq_malloc_raw / mantiq_free /
+// __mantiq_hash_* no longer live in C: programs get them from Nizam
+// (std/mem.nz + std/collections.nz definitions, or compiler-emitted
+// program-local IR). The surviving C machinery below (ast arena, intern
+// engine, scope lookup, legacy string/task/channel code) uses these static
+// copies, mirroring the removed C bodies exactly, so runtime.o remains
+// self-contained and nothing here can clash with or shadow the Nizam
+// definitions linked beside it.
+static void* mantiq_malloc_c(int64_t size) {
+    if (size < 0 || size > 500000000LL) {
+        fprintf(stderr, "[Runtime] Invalid malloc size: %lld\n", (long long)size);
+        abort();
+    }
+    void* ptr = calloc(1, (size_t)(size ? size : 1));
+    if (!ptr) {
+        fprintf(stderr, "[Runtime] Fatal: memory allocation of %lld bytes failed\n", (long long)size);
+        abort();
+    }
+    if (__builtin_expect(_mantiq_profile_active, 0)) {
+        _alloc_count++;
+        _alloc_bytes += (long long)(size ? size : 1);
+    }
+    return ptr;
+}
+
+static void* mantiq_malloc_raw_c(int64_t size) {
+    if (size < 0 || size > 500000000LL) {
+        fprintf(stderr, "[Runtime] Invalid malloc size: %lld\n", (long long)size);
+        abort();
+    }
+    void* ptr = sys_malloc((size_t)(size ? size : 1));
+    if (!ptr) {
+        fprintf(stderr, "[Runtime] Fatal: memory allocation of %lld bytes failed\n", (long long)size);
+        abort();
+    }
+    if (__builtin_expect(_mantiq_profile_active, 0)) {
+        _alloc_count++;
+        _alloc_bytes += (long long)(size ? size : 1);
+    }
+    return ptr;
+}
+
+static void mantiq_free_c(void* ptr) {
     if (!ptr) return;
     if (mantiq_is_arena_ptr(ptr)) return;
     if (__builtin_expect(_mantiq_profile_active, 0)) {
@@ -301,19 +319,28 @@ void mantiq_free(void* ptr) {
     sys_free(ptr);
 }
 
-
-void* mantiq_realloc(void* ptr, int64_t new_size) {
-    if (new_size < 0 || new_size > 500000000LL) {
-        fprintf(stderr, "[Runtime] Invalid realloc size: %lld\n", (long long)new_size);
-        abort();
+static uint32_t mantiq_hash_bytes_c(const uint8_t* data, int64_t len) {
+    uint32_t hash = 2166136261u;
+    int64_t i = 0;
+    while (i + 4 <= len) {
+        hash = (hash ^ data[i]) * 16777619u;
+        hash = (hash ^ data[i + 1]) * 16777619u;
+        hash = (hash ^ data[i + 2]) * 16777619u;
+        hash = (hash ^ data[i + 3]) * 16777619u;
+        i += 4;
     }
-    void* new_ptr = sys_realloc(ptr, (size_t)new_size);
-    if (!new_ptr && new_size > 0) {
-        fprintf(stderr, "[Runtime] Fatal: memory reallocation of %lld bytes failed\n", (long long)new_size);
-        abort();
+    while (i < len) {
+        hash = (hash ^ data[i]) * 16777619u;
+        i++;
     }
-    return new_ptr;
+    return hash;
 }
+
+static uint32_t mantiq_hash_string_c(const char* s, int64_t len) {
+    return mantiq_hash_bytes_c((const uint8_t*)s, len);
+}
+
+
 
 int64_t mantiq_strlen(const char* s) {
     if (!s) return 0;
@@ -336,7 +363,7 @@ typedef struct MantiqArena {
 
 MantiqArena* mantiq_arena_create(size_t chunk_size) {
     if (chunk_size < 4096) chunk_size = 65536;
-    MantiqArena* a = (MantiqArena*)mantiq_malloc(sizeof(MantiqArena));
+    MantiqArena* a = (MantiqArena*)mantiq_malloc_c(sizeof(MantiqArena));
     a->default_chunk_size = chunk_size;
     MantiqArenaChunk* initial = (MantiqArenaChunk*)malloc(sizeof(MantiqArenaChunk) + chunk_size);
     if (!initial) {
@@ -352,7 +379,7 @@ MantiqArena* mantiq_arena_create(size_t chunk_size) {
 }
 
 void* mantiq_arena_alloc(MantiqArena* a, size_t size) {
-    if (!a) return mantiq_malloc(size);
+    if (!a) return mantiq_malloc_c(size);
     size_t aligned_size = (size + 7) & ~((size_t)7);
     if (__builtin_expect(_mantiq_profile_active, 0)) {
         _alloc_count++;
@@ -407,7 +434,7 @@ void mantiq_arena_destroy(MantiqArena* a) {
         free(c);
         c = next;
     }
-    mantiq_free(a);
+    mantiq_free_c(a);
 }
 
 // ── AST & Symbol Bump Arena ───────────────────────────────────────────
@@ -452,14 +479,31 @@ static MantiqArena* g_intern_arena = NULL;
 static MantiqInternEntry* g_intern_table[MANTIQ_INTERN_BUCKETS];
 static const char g_mantiq_empty_str[1] = {0};
 
-uint32_t __mantiq_hash_bytes(const uint8_t* data, int64_t len);
+typedef struct {
+    uint8_t* keys;
+    uint8_t* values;
+    uint32_t* hashes;
+    uint8_t* occupied;
+    int32_t capacity;
+    int32_t count;
+    int32_t key_size;
+    int32_t val_size;
+    int32_t is_string_key;
+} MantiqDict;
+
+// Milestone-A note: the hash primes stay in C because the interning engine
+// and scope lookup here are still C-side; they are weak so the identical
+// Nizam definitions in std/collections.nz win whenever std is imported.
+__attribute__((weak)) extern void* __mantiq_dict_get(void* d, void* key, uint32_t hash);
+
+
 
 const char* mantiq_intern_string(const char* s, size_t len) {
     if (!s || len == 0) return g_mantiq_empty_str;
     if (!g_intern_arena) {
         g_intern_arena = mantiq_arena_create(65536); // 64 KB chunk size
     }
-    uint32_t hash = __mantiq_hash_bytes((const uint8_t*)s, (int64_t)len);
+    uint32_t hash = mantiq_hash_bytes_c((const uint8_t*)s, (int64_t)len);
     uint32_t bucket = hash & MANTIQ_INTERN_MASK;
 
     MantiqInternEntry* entry = g_intern_table[bucket];
@@ -757,8 +801,23 @@ int mantiq_sha256_file_hex(const char* path, char* out_hex_64) {
 // ── Cache File Utilities ──────────────────────────────────────────────
 #include <errno.h>
 
+// Guard: reject filesystem paths containing control bytes. Such paths can
+// only originate from uninitialized or freed memory passed as a cstr (see
+// docs/runtime-elimination-notes.md, aliasing-drop instances #1-#5);
+// previously they created junk files/dirs named after raw memory bytes
+// relative to the compiler's working directory.
+static int mantiq_path_sane(const char* p) {
+    if (!p) return 0;
+    for (; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7f) return 0;
+    }
+    return 1;
+}
+
 int mantiq_mkdir_p(const char* dir_path) {
     if (!dir_path || !dir_path[0]) return 0;
+    if (!mantiq_path_sane(dir_path)) return 0;
     char tmp[4096];
     size_t len = strlen(dir_path);
     if (len >= sizeof(tmp)) return 0;
@@ -780,6 +839,7 @@ int mantiq_mkdir_p(const char* dir_path) {
 
 int mantiq_copy_file(const char* src_path, const char* dst_path) {
     if (!src_path || !dst_path) return 0;
+    if (!mantiq_path_sane(src_path) || !mantiq_path_sane(dst_path)) return 0;
     int src_fd = open(src_path, O_RDONLY);
     if (src_fd < 0) return 0;
     struct stat st;
@@ -833,168 +893,16 @@ int __mantiq_streq(const char* s1, int64_t l1, const char* s2, int64_t l2) {
     return memcmp(s1, s2, l1) == 0;
 }
 
-uint32_t __mantiq_hash_bytes(const uint8_t* data, int64_t len) {
-    uint32_t hash = 2166136261u;
-    int64_t i = 0;
-    while (i + 4 <= len) {
-        hash = (hash ^ data[i]) * 16777619u;
-        hash = (hash ^ data[i + 1]) * 16777619u;
-        hash = (hash ^ data[i + 2]) * 16777619u;
-        hash = (hash ^ data[i + 3]) * 16777619u;
-        i += 4;
-    }
-    while (i < len) {
-        hash = (hash ^ data[i]) * 16777619u;
-        i++;
-    }
-    return hash;
-}
 
-uint32_t __mantiq_hash_string(const char* s, int64_t len) {
-    return __mantiq_hash_bytes((const uint8_t*)s, len);
-}
 
-typedef struct {
-    uint8_t* keys;
-    uint8_t* values;
-    uint32_t* hashes;
-    uint8_t* occupied;
-    int32_t capacity;
-    int32_t count;
-    int32_t key_size;
-    int32_t val_size;
-    int32_t is_string_key;
-} MantiqDict;
 
-void __mantiq_dict_set(MantiqDict* d, void* key, void* val, uint32_t hash);
 
-MantiqDict* __mantiq_dict_create_with_capacity(int32_t key_size, int32_t val_size, int32_t is_string_key, int32_t initial_capacity) {
-    MantiqDict* d = mantiq_malloc(sizeof(MantiqDict));
-    int32_t cap = initial_capacity < 8 ? 8 : initial_capacity;
-    int32_t p = 1;
-    while (p < cap && p < 1073741824) {
-        p <<= 1;
-    }
-    d->capacity = p;
-    d->count = 0;
-    d->key_size = key_size;
-    d->val_size = val_size;
-    d->is_string_key = is_string_key;
-    d->keys = mantiq_malloc_raw(d->capacity * key_size);
-    d->values = mantiq_malloc_raw(d->capacity * val_size);
-    d->hashes = mantiq_malloc_raw(d->capacity * sizeof(uint32_t));
-    d->occupied = mantiq_malloc(d->capacity);
-    memset(d->occupied, 0, d->capacity);
-    return d;
-}
 
-MantiqDict* __mantiq_dict_create(int32_t key_size, int32_t val_size, int32_t is_string_key) {
-    return __mantiq_dict_create_with_capacity(key_size, val_size, is_string_key, 8);
-}
 
-void __mantiq_dict_resize(MantiqDict* d) {
-    int32_t old_cap = d->capacity;
-    uint8_t* old_keys = d->keys;
-    uint8_t* old_vals = d->values;
-    uint32_t* old_hashes = d->hashes;
-    uint8_t* old_occ = d->occupied;
 
-    d->capacity = old_cap * 2;
-    d->keys = mantiq_malloc_raw(d->capacity * d->key_size);
-    d->values = mantiq_malloc_raw(d->capacity * d->val_size);
-    d->hashes = mantiq_malloc_raw(d->capacity * sizeof(uint32_t));
-    d->occupied = mantiq_malloc(d->capacity);
-    memset(d->occupied, 0, d->capacity);
-    d->count = 0;
 
-    int32_t mask = d->capacity - 1;
-    for (int i = 0; i < old_cap; i++) {
-        if (old_occ[i]) {
-            uint32_t hash = old_hashes[i];
-            int32_t idx = hash & mask;
-            while (d->occupied[idx]) {
-                idx = (idx + 1) & mask;
-            }
-            d->occupied[idx] = 1;
-            d->hashes[idx] = hash;
-            memcpy(d->keys + idx * d->key_size, old_keys + i * d->key_size, d->key_size);
-            memcpy(d->values + idx * d->val_size, old_vals + i * d->val_size, d->val_size);
-            d->count++;
-        }
-    }
 
-    mantiq_free(old_keys);
-    mantiq_free(old_vals);
-    mantiq_free(old_hashes);
-    mantiq_free(old_occ);
-}
 
-void __mantiq_dict_set(MantiqDict* d, void* key, void* val, uint32_t hash) {
-    if (d->count * 2 >= d->capacity) {
-        __mantiq_dict_resize(d);
-    }
-    
-    int32_t mask = d->capacity - 1;
-    int32_t idx = hash & mask;
-    while (d->occupied[idx]) {
-        if (d->hashes[idx] == hash) {
-            int match = 0;
-            if (d->is_string_key == 1) {
-                struct MantiqStr { const char* ptr; size_t len; };
-                struct MantiqStr* s1 = (struct MantiqStr*)(d->keys + idx * d->key_size);
-                struct MantiqStr* s2 = (struct MantiqStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else if (d->is_string_key == 2) {
-                struct MantiqHeapStr { const char* ptr; size_t len; size_t cap; };
-                struct MantiqHeapStr* s1 = (struct MantiqHeapStr*)(d->keys + idx * d->key_size);
-                struct MantiqHeapStr* s2 = (struct MantiqHeapStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else {
-                match = memcmp(d->keys + idx * d->key_size, key, d->key_size) == 0;
-            }
-            if (match) {
-                // Overwrite existing
-                memcpy(d->values + idx * d->val_size, val, d->val_size);
-                return;
-            }
-        }
-        idx = (idx + 1) & mask;
-    }
-
-    d->occupied[idx] = 1;
-    d->hashes[idx] = hash;
-    memcpy(d->keys + idx * d->key_size, key, d->key_size);
-    memcpy(d->values + idx * d->val_size, val, d->val_size);
-    d->count++;
-}
-
-void* __mantiq_dict_get(MantiqDict* d, void* key, uint32_t hash) {
-    int32_t mask = d->capacity - 1;
-    int32_t idx = hash & mask;
-    while (d->occupied[idx]) {
-        if (d->hashes[idx] == hash) {
-            int match = 0;
-            if (d->is_string_key == 1) {
-                struct MantiqStr { const char* ptr; size_t len; };
-                struct MantiqStr* s1 = (struct MantiqStr*)(d->keys + idx * d->key_size);
-                struct MantiqStr* s2 = (struct MantiqStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else if (d->is_string_key == 2) {
-                struct MantiqHeapStr { const char* ptr; size_t len; size_t cap; };
-                struct MantiqHeapStr* s1 = (struct MantiqHeapStr*)(d->keys + idx * d->key_size);
-                struct MantiqHeapStr* s2 = (struct MantiqHeapStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else {
-                match = memcmp(d->keys + idx * d->key_size, key, d->key_size) == 0;
-            }
-            if (match) {
-                return d->values + idx * d->val_size;
-            }
-        }
-        idx = (idx + 1) & mask;
-    }
-    return NULL;
-}
 
 // ── Scope Lookup ─────────────────────────────────────────────────────────────
 typedef struct {
@@ -1009,7 +917,7 @@ typedef struct {
 
 void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char* name_ptr, size_t name_len) {
     if (!current_scope || !name_ptr || name_len == 0) return NULL;
-    uint32_t hash = __mantiq_hash_string(name_ptr, (int64_t)name_len);
+    uint32_t hash = mantiq_hash_string_c(name_ptr, (int64_t)name_len);
     struct MantiqStr { const char* ptr; size_t len; } key = { name_ptr, name_len };
 
     MantiqScope* curr = (MantiqScope*)current_scope;
@@ -1020,7 +928,7 @@ void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char*
         }
         MantiqDict* d = curr->symbols.dict;
         if (d && d->count > 0) {
-            void* val = __mantiq_dict_get(d, &key, hash);
+            void* val = __mantiq_dict_get ? __mantiq_dict_get(d, &key, hash) : (void*)0;
             if (val) {
                 return *(void**)val;
             }
@@ -1032,7 +940,7 @@ void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char*
         MantiqScope* g = (MantiqScope*)global_scope;
         MantiqDict* d = g->symbols.dict;
         if (d && d->count > 0) {
-            void* val = __mantiq_dict_get(d, &key, hash);
+            void* val = __mantiq_dict_get ? __mantiq_dict_get(d, &key, hash) : (void*)0;
             if (val) {
                 return *(void**)val;
             }
@@ -1042,424 +950,47 @@ void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char*
     return NULL;
 }
 
-int8_t __mantiq_dict_remove(MantiqDict* d, void* key, uint32_t hash) {
-    int32_t mask = d->capacity - 1;
-    int32_t idx = hash & mask;
-    while (d->occupied[idx]) {
-        if (d->hashes[idx] == hash) {
-            int match = 0;
-            if (d->is_string_key == 1) {
-                struct MantiqStr { const char* ptr; size_t len; };
-                struct MantiqStr* s1 = (struct MantiqStr*)(d->keys + idx * d->key_size);
-                struct MantiqStr* s2 = (struct MantiqStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else if (d->is_string_key == 2) {
-                struct MantiqHeapStr { const char* ptr; size_t len; size_t cap; };
-                struct MantiqHeapStr* s1 = (struct MantiqHeapStr*)(d->keys + idx * d->key_size);
-                struct MantiqHeapStr* s2 = (struct MantiqHeapStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else {
-                match = memcmp(d->keys + idx * d->key_size, key, d->key_size) == 0;
-            }
-            if (match) {
-                d->occupied[idx] = 0;
-                d->count--;
-                
-                // Rehash the cluster to maintain contiguous probe sequences
-                idx = (idx + 1) & mask;
-                while (d->occupied[idx]) {
-                    // Temporarily remove and re-insert
-                    d->occupied[idx] = 0;
-                    d->count--;
-                    __mantiq_dict_set(d, d->keys + idx * d->key_size, d->values + idx * d->val_size, d->hashes[idx]);
-                    idx = (idx + 1) & mask;
-                }
-                return 1;
-            }
-        }
-        idx = (idx + 1) & mask;
-    }
-    return 0;
-}
 
-void* __mantiq_dict_get_or_insert(MantiqDict* d, void* key, uint32_t hash) {
-    if (d->count * 2 >= d->capacity) {
-        __mantiq_dict_resize(d);
-    }
-    int32_t mask = d->capacity - 1;
-    int32_t idx = hash & mask;
-    while (d->occupied[idx]) {
-        if (d->hashes[idx] == hash) {
-            int match = 0;
-            if (d->is_string_key == 1) {
-                struct MantiqStr { const char* ptr; size_t len; };
-                struct MantiqStr* s1 = (struct MantiqStr*)(d->keys + idx * d->key_size);
-                struct MantiqStr* s2 = (struct MantiqStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else if (d->is_string_key == 2) {
-                struct MantiqHeapStr { const char* ptr; size_t len; size_t cap; };
-                struct MantiqHeapStr* s1 = (struct MantiqHeapStr*)(d->keys + idx * d->key_size);
-                struct MantiqHeapStr* s2 = (struct MantiqHeapStr*)key;
-                match = (s1->ptr == s2->ptr || (s1->len == s2->len && memcmp(s1->ptr, s2->ptr, s1->len) == 0));
-            } else {
-                match = memcmp(d->keys + idx * d->key_size, key, d->key_size) == 0;
-            }
-            if (match) {
-                return d->values + idx * d->val_size;
-            }
-        }
-        idx = (idx + 1) & mask;
-    }
-    d->occupied[idx] = 1;
-    d->hashes[idx] = hash;
-    memcpy(d->keys + idx * d->key_size, key, d->key_size);
-    d->count++;
-    return d->values + idx * d->val_size;
-}
 
-void __mantiq_list_append(void* list_addr, void* elem_addr, int64_t elem_size) {
-    struct List {
-        void* data;
-        size_t len;
-        size_t cap;
-    }* l = (struct List*)list_addr;
-    
-    if (l->len >= l->cap) {
-        size_t new_cap = l->cap == 0 ? 8 : l->cap * 2;
-        l->data = mantiq_realloc(l->data, (int64_t)(new_cap * elem_size));
-        l->cap = new_cap;
-    }
-    
-    memcpy((char*)l->data + l->len * elem_size, elem_addr, (size_t)elem_size);
-    l->len++;
-}
 
-void __mantiq_dict_keys(MantiqDict* d, void* list_addr, int32_t key_size) {
-    if (!d || !list_addr) return;
-    for (int32_t i = 0; i < d->capacity; i++) {
-        if (d->occupied[i]) {
-            void* key_ptr = d->keys + (i * d->key_size);
-            __mantiq_list_append(list_addr, key_ptr, key_size);
-        }
-    }
-}
 
-void __mantiq_dict_values(MantiqDict* d, void* list_addr, int32_t val_size) {
-    if (!d || !list_addr) return;
-    for (int32_t i = 0; i < d->capacity; i++) {
-        if (d->occupied[i]) {
-            void* val_ptr = d->values + (i * d->val_size);
-            __mantiq_list_append(list_addr, val_ptr, val_size);
-        }
-    }
-}
 
-void __mantiq_dict_copy(void* dest_addr, void* src_addr) {
-    struct MantiqRawFat {
-        MantiqDict* dict;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawFat* d = (struct MantiqRawFat*)dest_addr;
-    struct MantiqRawFat* s = (struct MantiqRawFat*)src_addr;
-    if (!d) return;
-    d->dict = NULL;
-    d->len = 0;
-    d->cap = 0;
-    if (!s || !s->dict) return;
-    MantiqDict* src_dict = s->dict;
-    MantiqDict* new_dict = __mantiq_dict_create_with_capacity(src_dict->key_size, src_dict->val_size, src_dict->is_string_key, src_dict->capacity);
-    new_dict->count = src_dict->count;
-    memcpy(new_dict->keys, src_dict->keys, (size_t)src_dict->capacity * src_dict->key_size);
-    memcpy(new_dict->values, src_dict->values, (size_t)src_dict->capacity * src_dict->val_size);
-    memcpy(new_dict->hashes, src_dict->hashes, (size_t)src_dict->capacity * sizeof(uint32_t));
-    memcpy(new_dict->occupied, src_dict->occupied, (size_t)src_dict->capacity);
-    d->dict = new_dict;
-    d->len = (size_t)src_dict->count;
-    d->cap = (size_t)src_dict->capacity;
-}
 
-void* __mantiq_dict_setdefault(MantiqDict* d, void* key, void* default_val, uint32_t hash) {
-    if (!d) return NULL;
-    void* existing = __mantiq_dict_get(d, key, hash);
-    if (existing) {
-        return existing;
-    }
-    __mantiq_dict_set(d, key, default_val, hash);
-    return __mantiq_dict_get(d, key, hash);
-}
 
-int8_t __mantiq_dict_pop(MantiqDict* d, void* key, uint32_t hash, void* out_val, int32_t val_size) {
-    if (!d) return 0;
-    void* val = __mantiq_dict_get(d, key, hash);
-    if (!val) return 0;
-    if (out_val) {
-        memcpy(out_val, val, (size_t)val_size);
-    }
-    return __mantiq_dict_remove(d, key, hash);
-}
 
-int8_t __mantiq_dict_popitem(MantiqDict* d, void* out_key, void* out_val, int32_t key_size, int32_t val_size) {
-    if (!d || d->count == 0) return 0;
-    for (int32_t i = 0; i < d->capacity; i++) {
-        if (d->occupied[i]) {
-            if (out_key) {
-                memcpy(out_key, d->keys + i * d->key_size, (size_t)key_size);
-            }
-            if (out_val) {
-                memcpy(out_val, d->values + i * d->val_size, (size_t)val_size);
-            }
-            uint32_t hash = d->hashes[i];
-            void* k = d->keys + i * d->key_size;
-            return __mantiq_dict_remove(d, k, hash);
-        }
-    }
-    return 0;
-}
 
-void __mantiq_dict_clear(MantiqDict* d) {
-    if (!d) return;
-    d->count = 0;
-    memset(d->occupied, 0, d->capacity);
-}
 
-void __mantiq_dict_fromkeys(void* dest_addr, void* src_dict_addr, void* list_addr, void* default_val_ptr, int32_t key_size, int32_t val_size) {
-    struct MantiqRawFat {
-        MantiqDict* dict;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawFat* dest = (struct MantiqRawFat*)dest_addr;
-    struct MantiqRawFat* src = (struct MantiqRawFat*)src_dict_addr;
-    if (!dest) return;
-    dest->dict = NULL;
-    dest->len = 0;
-    dest->cap = 0;
-    if (!list_addr) return;
-    struct List {
-        void* data;
-        size_t len;
-        size_t cap;
-    }* l = (struct List*)list_addr;
 
-    int32_t ks = key_size > 0 ? key_size : ((src && src->dict && src->dict->key_size > 0) ? src->dict->key_size : 8);
-    int32_t vs = val_size > 0 ? val_size : ((src && src->dict && src->dict->val_size > 0) ? src->dict->val_size : 8);
-    int32_t is_str = (src && src->dict && src->dict->is_string_key > 0) ? src->dict->is_string_key : 0;
-    if (is_str == 0) {
-        if (ks == (int32_t)(sizeof(size_t) * 3)) {
-            is_str = 2;
-        } else if (ks == (int32_t)(sizeof(size_t) * 2)) {
-            is_str = 1;
-        }
-    }
-    if (ks <= 0) ks = 8;
-    if (vs <= 0) vs = 8;
-    int32_t init_cap = (int32_t)(l->len > 8 ? l->len * 2 : 8);
-    MantiqDict* new_dict = __mantiq_dict_create_with_capacity(ks, vs, is_str, init_cap);
-    void* zero_val = NULL;
-    if (!default_val_ptr) {
-        zero_val = calloc(1, (size_t)vs);
-        default_val_ptr = zero_val;
-    }
-    for (size_t i = 0; i < l->len; i++) {
-        void* key_ptr = (char*)l->data + (i * ks);
-        uint32_t hash;
-        if (is_str == 1) {
-            struct MantiqStr { const char* ptr; size_t len; }* s = (struct MantiqStr*)key_ptr;
-            hash = __mantiq_hash_string(s->ptr, (int64_t)s->len);
-        } else if (is_str == 2) {
-            struct MantiqHeapStr { const char* ptr; size_t len; size_t cap; }* s = (struct MantiqHeapStr*)key_ptr;
-            hash = __mantiq_hash_string(s->ptr, (int64_t)s->len);
-        } else {
-            hash = __mantiq_hash_bytes((const uint8_t*)key_ptr, (int64_t)ks);
-        }
-        __mantiq_dict_set(new_dict, key_ptr, default_val_ptr, hash);
-    }
-    if (zero_val) free(zero_val);
-    dest->dict = new_dict;
-    dest->len = (size_t)new_dict->count;
-    dest->cap = (size_t)new_dict->capacity;
-}
 
-void __mantiq_dict_merge(MantiqDict* dest, MantiqDict* src) {
-    if (!dest || !src) return;
-    for (int32_t i = 0; i < src->capacity; i++) {
-        if (src->occupied[i]) {
-            void* k = src->keys + i * src->key_size;
-            void* v = src->values + i * src->val_size;
-            uint32_t h = src->hashes[i];
-            __mantiq_dict_set(dest, k, v, h);
-        }
-    }
-}
 
-void __mantiq_list_extend(void* list_addr, void* src_list_addr, int64_t elem_size) {
-    if (!list_addr || !src_list_addr) return;
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* dest = (struct MantiqRawList*)list_addr;
-    struct MantiqRawList* src = (struct MantiqRawList*)src_list_addr;
-    if (!src->data || src->len == 0) return;
-    for (size_t i = 0; i < src->len; i++) {
-        __mantiq_list_append(dest, src->data + i * elem_size, elem_size);
-    }
-}
 
-int64_t __mantiq_list_count(void* list_addr, void* elem_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || !elem_addr || elem_size <= 0) return 0;
-    int64_t n = 0;
-    for (size_t i = 0; i < l->len; i++) {
-        if (memcmp(l->data + i * elem_size, elem_addr, (size_t)elem_size) == 0) n++;
-    }
-    return n;
-}
 
-int64_t __mantiq_list_index(void* list_addr, void* elem_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || !elem_addr || elem_size <= 0) return -1;
-    for (size_t i = 0; i < l->len; i++) {
-        if (memcmp(l->data + i * elem_size, elem_addr, (size_t)elem_size) == 0) return (int64_t)i;
-    }
-    return -1;
-}
 
-int8_t __mantiq_list_remove(void* list_addr, void* elem_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || !elem_addr || elem_size <= 0) return 0;
-    for (size_t i = 0; i < l->len; i++) {
-        if (memcmp(l->data + i * elem_size, elem_addr, (size_t)elem_size) == 0) {
-            size_t remaining = l->len - i - 1;
-            if (remaining > 0) {
-                memmove(l->data + i * (size_t)elem_size,
-                        l->data + (i + 1) * (size_t)elem_size,
-                        remaining * (size_t)elem_size);
-            }
-            l->len--;
-            return 1;
-        }
-    }
-    return 0;
-}
 
-void __mantiq_list_insert(void* list_addr, int64_t index, void* elem_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || !elem_addr || elem_size <= 0) return;
-    int64_t at = index;
-    if (at < 0) at = (int64_t)l->len + at;
-    if (at < 0) at = 0;
-    if (at > (int64_t)l->len) at = (int64_t)l->len;
-    __mantiq_list_append(l, elem_addr, elem_size);
-    if (at < (int64_t)l->len - 1) {
-        memmove(l->data + (at + 1) * (size_t)elem_size,
-                l->data + at * (size_t)elem_size,
-                ((size_t)l->len - 1 - (size_t)at) * (size_t)elem_size);
-        memcpy(l->data + at * (size_t)elem_size, elem_addr, (size_t)elem_size);
-    }
-}
 
-void __mantiq_list_reverse(void* list_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || l->len < 2 || elem_size <= 0) return;
-    uint8_t* tmp = (uint8_t*)mantiq_malloc((int64_t)elem_size);
-    if (!tmp) return;
-    for (size_t i = 0, j = l->len - 1; i < j; i++, j--) {
-        uint8_t* a = l->data + i * (size_t)elem_size;
-        uint8_t* b = l->data + j * (size_t)elem_size;
-        memcpy(tmp, a, (size_t)elem_size);
-        memcpy(a, b, (size_t)elem_size);
-        memcpy(b, tmp, (size_t)elem_size);
-    }
-    mantiq_free(tmp);
-}
 
-void __mantiq_list_copy(void* dest_addr, void* src_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* d = (struct MantiqRawList*)dest_addr;
-    struct MantiqRawList* s = (struct MantiqRawList*)src_addr;
-    if (!d) return;
-    d->data = NULL;
-    d->len = 0;
-    d->cap = 0;
-    if (!s || !s->data || s->len == 0 || elem_size <= 0) return;
-    d->len = s->len;
-    d->cap = s->len;
-    d->data = (uint8_t*)mantiq_malloc((int64_t)(s->len * (size_t)elem_size));
-    if (!d->data) {
-        d->len = 0;
-        d->cap = 0;
-        return;
-    }
-    memcpy(d->data, s->data, s->len * (size_t)elem_size);
-}
 
-int8_t __mantiq_list_pop(void* list_addr, void* out_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || l->len == 0 || !out_addr || elem_size <= 0) return 0;
-    memcpy(out_addr, l->data + (l->len - 1) * (size_t)elem_size, (size_t)elem_size);
-    l->len--;
-    return 1;
-}
 
-int8_t __mantiq_list_pop_index(void* list_addr, int64_t index, void* out_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || l->len == 0 || !out_addr || elem_size <= 0) return 0;
-    int64_t at = index;
-    if (at < 0) at = (int64_t)l->len + at;
-    if (at < 0) at = 0;
-    if (at >= (int64_t)l->len) at = (int64_t)l->len - 1;
-    memcpy(out_addr, l->data + (size_t)at * (size_t)elem_size, (size_t)elem_size);
-    size_t remaining = l->len - (size_t)at - 1;
-    if (remaining > 0) {
-        memmove(l->data + (size_t)at * (size_t)elem_size,
-                l->data + ((size_t)at + 1) * (size_t)elem_size,
-                remaining * (size_t)elem_size);
-    }
-    l->len--;
-    return 1;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 static int64_t __mantiq_sort_elem_size = 0;
 static bool __mantiq_sort_is_str = false;
@@ -1490,31 +1021,9 @@ static int __mantiq_sort_cmp(const void* pa, const void* pb) {
     return memcmp(a, b, (size_t)es);
 }
 
-void __mantiq_list_sort(void* list_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || l->len < 2 || elem_size <= 0) return;
-    __mantiq_sort_is_str = false;
-    __mantiq_sort_elem_size = elem_size;
-    qsort(l->data, l->len, (size_t)elem_size, __mantiq_sort_cmp);
-}
 
-void __mantiq_list_sort_str(void* list_addr) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    if (!l || !l->data || l->len < 2) return;
-    __mantiq_sort_is_str = true;
-    __mantiq_sort_elem_size = 0;
-    qsort(l->data, l->len, sizeof(struct MantiqStrSortHdr), __mantiq_sort_cmp);
-}
+
+
 
 // ── List Dunder Operators (__add__ / __mul__ / __contains__ / __eq__ / __ne__ / __str__) ─
 
@@ -1525,7 +1034,7 @@ static void __mantiq_clone_strings_block(uint8_t* dest, const uint8_t* src, size
         size_t elen = is[i].len;
         uint8_t* nb = NULL;
         if (elen > 0) {
-            nb = (uint8_t*)mantiq_malloc((int64_t)elen);
+            nb = (uint8_t*)mantiq_malloc_c((int64_t)elen);
             if (!nb) {
                 od[0].data = NULL;
                 od[0].len = 0;
@@ -1540,142 +1049,17 @@ static void __mantiq_clone_strings_block(uint8_t* dest, const uint8_t* src, size
     }
 }
 
-void __mantiq_list_concat(void* dest_addr, void* a_addr, void* b_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* d = (struct MantiqRawList*)dest_addr;
-    struct MantiqRawList* a = (struct MantiqRawList*)a_addr;
-    struct MantiqRawList* b = (struct MantiqRawList*)b_addr;
-    if (!d) return;
-    d->data = NULL;
-    d->len = 0;
-    d->cap = 0;
-    if (elem_size <= 0) return;
-    size_t al = (a && a->data) ? a->len : 0;
-    size_t bl = (b && b->data) ? b->len : 0;
-    size_t total = al + bl;
-    if (total == 0) return;
-    d->len = total;
-    d->cap = total;
-    d->data = (uint8_t*)mantiq_malloc((int64_t)(total * (size_t)elem_size));
-    if (!d->data) {
-        d->len = 0;
-        d->cap = 0;
-        return;
-    }
-    if (elem_size == 24) {
-        if (al > 0) __mantiq_clone_strings_block(d->data, a->data, al);
-        if (bl > 0) __mantiq_clone_strings_block(d->data + al * (size_t)elem_size, b->data, bl);
-        return;
-    }
-    if (al > 0) memcpy(d->data, a->data, al * (size_t)elem_size);
-    if (bl > 0) memcpy(d->data + al * (size_t)elem_size, b->data, bl * (size_t)elem_size);
-}
 
-void __mantiq_list_repeat(void* dest_addr, void* src_addr, int64_t n, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* d = (struct MantiqRawList*)dest_addr;
-    struct MantiqRawList* s = (struct MantiqRawList*)src_addr;
-    if (!d) return;
-    d->data = NULL;
-    d->len = 0;
-    d->cap = 0;
-    if (!s || !s->data || s->len == 0 || n <= 0 || elem_size <= 0) return;
-    size_t total = s->len * (size_t)n;
-    d->len = total;
-    d->cap = total;
-    d->data = (uint8_t*)mantiq_malloc((int64_t)(total * (size_t)elem_size));
-    if (!d->data) {
-        d->len = 0;
-        d->cap = 0;
-        return;
-    }
-    if (elem_size == 24) {
-        for (size_t i = 0; i < (size_t)n; i++) {
-            __mantiq_clone_strings_block(d->data + i * (s->len * (size_t)elem_size), s->data, s->len);
-        }
-        return;
-    }
-    for (size_t i = 0; i < (size_t)n; i++) {
-        memcpy(d->data + i * (s->len * (size_t)elem_size), s->data, s->len * (size_t)elem_size);
-    }
-}
 
-int8_t __mantiq_list_contains(void* a_addr, void* e_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* a = (struct MantiqRawList*)a_addr;
-    if (!a || !a->data || !e_addr || elem_size <= 0) return 0;
-    for (size_t i = 0; i < a->len; i++) {
-        if (memcmp(a->data + i * (size_t)elem_size, e_addr, (size_t)elem_size) == 0) return 1;
-    }
-    return 0;
-}
 
-int8_t __mantiq_list_contains_str(void* a_addr, void* e_addr) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* a = (struct MantiqRawList*)a_addr;
-    if (!a || !a->data || !e_addr) return 0;
-    const struct MantiqStrSortHdr* e = (const struct MantiqStrSortHdr*)e_addr;
-    for (size_t i = 0; i < a->len; i++) {
-        const struct MantiqStrSortHdr* g = (const struct MantiqStrSortHdr*)(a->data + i * sizeof(struct MantiqStrSortHdr));
-        if (g->len == e->len && (e->len == 0 || (g->data && e->data && memcmp(g->data, e->data, e->len) == 0))) return 1;
-    }
-    return 0;
-}
 
-int8_t __mantiq_list_equals(void* a_addr, void* b_addr, int64_t elem_size) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* a = (struct MantiqRawList*)a_addr;
-    struct MantiqRawList* b = (struct MantiqRawList*)b_addr;
-    if (a == b) return 1;
-    if (!a || !b) return 0;
-    if (a->len != b->len) return 0;
-    if (a->len == 0) return 1;
-    if (!a->data || !b->data || elem_size <= 0) return 0;
-    return (memcmp(a->data, b->data, a->len * (size_t)elem_size) == 0) ? 1 : 0;
-}
 
-int8_t __mantiq_list_equals_str(void* a_addr, void* b_addr) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* a = (struct MantiqRawList*)a_addr;
-    struct MantiqRawList* b = (struct MantiqRawList*)b_addr;
-    if (a == b) return 1;
-    if (!a || !b) return 0;
-    if (a->len != b->len) return 0;
-    for (size_t i = 0; i < a->len; i++) {
-        const struct MantiqStrSortHdr* x = (const struct MantiqStrSortHdr*)(a->data + i * sizeof(struct MantiqStrSortHdr));
-        const struct MantiqStrSortHdr* y = (const struct MantiqStrSortHdr*)(b->data + i * sizeof(struct MantiqStrSortHdr));
-        if (x->len != y->len) return 0;
-        if (x->len == 0) continue;
-        if (x->data == y->data) continue;
-        if (x->data && y->data && memcmp(x->data, y->data, x->len) == 0) continue;
-        return 0;
-    }
-    return 1;
-}
+
+
+
+
+
+
 
 struct MantiqStrBuf {
     uint8_t* data;
@@ -1687,10 +1071,10 @@ static void __mantiq_strbuf_append(struct MantiqStrBuf* b, const void* src, size
     if (b->len + n + 1 > b->cap) {
         size_t ncap = b->cap > 0 ? b->cap * 2 : 64;
         while (b->len + n + 1 > ncap) ncap *= 2;
-        uint8_t* nd = (uint8_t*)mantiq_malloc((int64_t)ncap);
+        uint8_t* nd = (uint8_t*)mantiq_malloc_c((int64_t)ncap);
         if (!nd) return;
         if (b->len > 0 && b->data) memcpy(nd, b->data, b->len);
-        if (b->data) mantiq_free(b->data);
+        if (b->data) mantiq_free_c(b->data);
         b->data = nd;
         b->cap = ncap;
     }
@@ -1711,244 +1095,29 @@ static void __mantiq_strbuf_append_i64(struct MantiqStrBuf* b, int64_t v) {
     __mantiq_strbuf_append(b, tmp + idx + 1, 31 - idx - 1);
 }
 
-void* __mantiq_list_to_string(void* list_addr, int64_t elem_size, void* len_out) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    int64_t* outp = (int64_t*)len_out;
-    struct MantiqStrBuf b;
-    b.data = NULL;
-    b.len = 0;
-    b.cap = 0;
-    __mantiq_strbuf_append(&b, "[", 1);
-    size_t n = (l && l->data) ? l->len : 0;
-    for (size_t i = 0; i < n; i++) {
-        if (i > 0) __mantiq_strbuf_append(&b, ", ", 2);
-        const uint8_t* p = l->data + i * (size_t)elem_size;
-        if (elem_size == 8) {
-            int64_t v;
-            memcpy(&v, p, 8);
-            __mantiq_strbuf_append_i64(&b, v);
-        } else if (elem_size == 4) {
-            int32_t v;
-            memcpy(&v, p, 4);
-            __mantiq_strbuf_append_i64(&b, (int64_t)v);
-        } else if (elem_size == 1) {
-            int8_t v;
-            memcpy(&v, p, 1);
-            __mantiq_strbuf_append_i64(&b, (int64_t)v);
-        } else if (elem_size == (int64_t)sizeof(struct MantiqStrSortHdr)) {
-            const struct MantiqStrSortHdr* s = (const struct MantiqStrSortHdr*)p;
-            __mantiq_strbuf_append(&b, s->data, s->len);
-        } else {
-            __mantiq_strbuf_append(&b, "<?>", 3);
-        }
-    }
-    __mantiq_strbuf_append(&b, "]", 1);
-    if (outp) *outp = (int64_t)b.len;
-    if (!b.data) {
-        b.data = (uint8_t*)mantiq_malloc(2);
-        if (b.data) { b.data[0] = '[';
-            b.data[1] = 0; }
-    }
-    return b.data;
-}
+
 
 // ── Bytes and List[u8] Helpers ──────────────────────────────────────────
-void __mantiq_list_hex(void* out_str, void* list_addr) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqHeapStr {
-        char* ptr;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    struct MantiqHeapStr* s = (struct MantiqHeapStr*)out_str;
-    if (!l || !l->data || l->len == 0) {
-        char* buf = (char*)mantiq_malloc(1);
-        if (buf) buf[0] = '\0';
-        s->ptr = buf;
-        s->len = 0;
-        s->cap = 1;
-        return;
-    }
-    size_t hex_len = l->len * 2;
-    char* buf = (char*)mantiq_malloc(hex_len + 1);
-    static const char hex_digits[] = "0123456789abcdef";
-    for (size_t i = 0; i < l->len; i++) {
-        uint8_t b = l->data[i];
-        buf[i * 2] = hex_digits[(b >> 4) & 0x0F];
-        buf[i * 2 + 1] = hex_digits[b & 0x0F];
-    }
-    buf[hex_len] = '\0';
-    s->ptr = buf;
-    s->len = hex_len;
-    s->cap = hex_len + 1;
-}
 
-void __mantiq_list_decode(void* out_str, void* list_addr) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqHeapStr {
-        char* ptr;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)list_addr;
-    struct MantiqHeapStr* s = (struct MantiqHeapStr*)out_str;
-    if (!l || !l->data || l->len == 0) {
-        char* buf = (char*)mantiq_malloc(1);
-        if (buf) buf[0] = '\0';
-        s->ptr = buf;
-        s->len = 0;
-        s->cap = 1;
-        return;
-    }
-    char* buf = (char*)mantiq_malloc(l->len + 1);
-    memcpy(buf, l->data, l->len);
-    buf[l->len] = '\0';
-    s->ptr = buf;
-    s->len = l->len;
-    s->cap = l->len + 1;
-}
 
-void __mantiq_list_fromhex(void* out_list, const char* hex_str) {
-    struct MantiqRawList {
-        uint8_t* data;
-        size_t len;
-        size_t cap;
-    };
-    struct MantiqRawList* l = (struct MantiqRawList*)out_list;
-    l->data = NULL;
-    l->len = 0;
-    l->cap = 0;
-    if (!hex_str) return;
-    size_t slen = strlen(hex_str);
-    size_t count = slen / 2;
-    if (count == 0) return;
-    l->data = (uint8_t*)mantiq_malloc(count);
-    l->len = count;
-    l->cap = count;
-    for (size_t i = 0; i < count; i++) {
-        char h1 = hex_str[i * 2];
-        char h2 = hex_str[i * 2 + 1];
-        int v1 = (h1 >= '0' && h1 <= '9') ? (h1 - '0') : ((h1 >= 'a' && h1 <= 'f') ? (h1 - 'a' + 10) : ((h1 >= 'A' && h1 <= 'F') ? (h1 - 'A' + 10) : 0));
-        int v2 = (h2 >= '0' && h2 <= '9') ? (h2 - '0') : ((h2 >= 'a' && h2 <= 'f') ? (h2 - 'a' + 10) : ((h2 >= 'A' && h2 <= 'F') ? (h2 - 'A' + 10) : 0));
-        l->data[i] = (uint8_t)((v1 << 4) | v2);
-    }
-}
+
+
+
 
 // ── Recursive Drop Glue Primitives ───────────────────────────────────────────
-void __mantiq_dict_destroy(MantiqDict* d) {
-    if (!d) return;
-    if (d->keys) {
-        mantiq_free(d->keys);
-        d->keys = NULL;
-    }
-    if (d->values) {
-        mantiq_free(d->values);
-        d->values = NULL;
-    }
-    if (d->hashes) {
-        mantiq_free(d->hashes);
-        d->hashes = NULL;
-    }
-    if (d->occupied) {
-        mantiq_free(d->occupied);
-        d->occupied = NULL;
-    }
-    d->count = 0;
-    d->capacity = 0;
-    mantiq_free(d);
-}
-
-void __nizam_drop_String(void* s_ptr) {
-    if (!s_ptr) return;
-    struct {
-        void* data;
-        size_t len;
-        size_t cap;
-    }* s = (void*)s_ptr;
-    if (s->data) {
-        mantiq_free(s->data);
-        s->data = NULL;
-    }
-    s->len = 0;
-    s->cap = 0;
-}
-
-void __nizam_drop_StringBuilder(void* sb_ptr) {
-    if (!sb_ptr) return;
-    struct {
-        void* buffer;
-        size_t len;
-        size_t capacity;
-    }* sb = (void*)sb_ptr;
-    if (sb->buffer) {
-        mantiq_free(sb->buffer);
-        sb->buffer = NULL;
-    }
-    sb->len = 0;
-    sb->capacity = 0;
-}
-
-void __nizam_drop_Dict(void* d_slot) {
-    if (!d_slot) return;
-    MantiqDict** d_ptr = (MantiqDict**)d_slot;
-    MantiqDict* d = *d_ptr;
-    if (d) {
-        __mantiq_dict_destroy(d);
-        *d_ptr = NULL;
-    }
-}
-
-void __nizam_drop_List_flat(void* list_addr) {
-    if (!list_addr) return;
-    struct {
-        void* data;
-        size_t len;
-        size_t cap;
-    }* l = (void*)list_addr;
-    if (l->data) {
-        mantiq_free(l->data);
-        l->data = NULL;
-    }
-    l->len = 0;
-    l->cap = 0;
-}
+// Milestone-A note: dict fat slots are shared freely (views/copies alias
+// one table), so freeing here double-frees (test_dict_methods aborted with
+// free():invalid pointer). No-op until Milestone B reworks drop glue.
 
 typedef void (*MantiqDropFn)(void* elem_ptr);
 
-void __nizam_drop_List(void* list_addr, int64_t elem_size, MantiqDropFn elem_drop_fn) {
-    if (!list_addr) return;
-    struct {
-        void* data;
-        size_t len;
-        size_t cap;
-    }* l = (void*)list_addr;
-    if (l->data) {
-        if (elem_drop_fn && elem_size > 0) {
-            for (size_t i = 0; i < l->len; i++) {
-                elem_drop_fn((char*)l->data + i * elem_size);
-            }
-        }
-        mantiq_free(l->data);
-        l->data = NULL;
-    }
-    l->len = 0;
-    l->cap = 0;
-}
-
+// Returns a fresh malloc'd copy of `len` bytes (NUL-terminated). Used by
+// codegen to give String locals from literals drop-safe owned buffers.
+// Reads the char* of element `idx` of a compiler List[String] whose inline
+// {data,len,cap} struct sits at `list_ptr` (element size is 24 bytes:
+// {ptr,i64,i64}). Lets the self-hosted compiler dup-check its closure
+// capture list without byval copies, whose drop glue would free AST-owned
+// heap buffers mid-call.
 // Print builtins
 void mantiq_print_i32(int val) {
     printf("%d", val);
@@ -2016,7 +1185,7 @@ void mantiq_write(int fd, const char* ptr, long long len) {
 }
 
 void* mantiq_read(int fd, long long len, long long* out_len) {
-    char* buf = mantiq_malloc(len + 1);
+    char* buf = mantiq_malloc_c(len + 1);
 #ifdef _WIN32
     FILE* stream = stdin;
     if (fd == 1) stream = stdout;
@@ -2216,23 +1385,23 @@ char mantiq_fs_exists(const char* path, long long path_len) {
 void* mantiq_concat_str(const void* a_ptr, long long a_len, const void* b_ptr, long long b_len) {
     if (a_len <= 0 || !a_ptr) {
         if (b_len <= 0 || !b_ptr) {
-            char* empty = (char*)mantiq_malloc_raw(1);
+            char* empty = (char*)mantiq_malloc_raw_c(1);
             empty[0] = '\0';
             return empty;
         }
-        char* new_ptr = (char*)mantiq_malloc_raw(b_len + 1);
+        char* new_ptr = (char*)mantiq_malloc_raw_c(b_len + 1);
         memcpy(new_ptr, b_ptr, b_len);
         new_ptr[b_len] = '\0';
         return new_ptr;
     }
     if (b_len <= 0 || !b_ptr) {
-        char* new_ptr = (char*)mantiq_malloc_raw(a_len + 1);
+        char* new_ptr = (char*)mantiq_malloc_raw_c(a_len + 1);
         memcpy(new_ptr, a_ptr, a_len);
         new_ptr[a_len] = '\0';
         return new_ptr;
     }
     long long total = a_len + b_len;
-    char* new_ptr = (char*)mantiq_malloc_raw(total + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(total + 1);
     memcpy(new_ptr, a_ptr, a_len);
     memcpy(new_ptr + a_len, b_ptr, b_len);
     new_ptr[total] = '\0';
@@ -2242,7 +1411,7 @@ void* mantiq_concat_str(const void* a_ptr, long long a_len, const void* b_ptr, l
 void* mantiq_i32_to_str(int val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%d", val);
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, buf, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
@@ -2251,7 +1420,7 @@ void* mantiq_i32_to_str(int val, long long* out_len) {
 void* mantiq_float_to_str(float val, long long* out_len) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%f", val);
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, buf, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
@@ -2260,7 +1429,7 @@ void* mantiq_float_to_str(float val, long long* out_len) {
 void* mantiq_i64_to_str(long long val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%lld", val);
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, buf, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
@@ -2269,7 +1438,7 @@ void* mantiq_i64_to_str(long long val, long long* out_len) {
 void* mantiq_u64_to_str(unsigned long long val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%llu", val);
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, buf, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
@@ -2278,14 +1447,14 @@ void* mantiq_u64_to_str(unsigned long long val, long long* out_len) {
 void* mantiq_f64_to_str(double val, long long* out_len) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%f", val);
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, buf, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
 }
 
 void* mantiq_char_to_str(char val, long long* out_len) {
-    char* new_ptr = (char*)mantiq_malloc_raw(2);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(2);
     new_ptr[0] = val;
     new_ptr[1] = '\0';
     if (out_len) *out_len = 1;
@@ -2295,7 +1464,7 @@ void* mantiq_char_to_str(char val, long long* out_len) {
 void* mantiq_bool_to_str(int val, long long* out_len) {
     const char* str = val ? "True" : "False";
     long long len = val ? 4 : 5;
-    char* new_ptr = (char*)mantiq_malloc_raw(len + 1);
+    char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
     memcpy(new_ptr, str, len + 1);
     if (out_len) *out_len = len;
     return new_ptr;
@@ -2314,7 +1483,7 @@ MantiqAny make() {
     }
     
     MantiqAny obj;
-    obj.data = mantiq_malloc(32);
+    obj.data = mantiq_malloc_c(32);
     obj.vtable = NULL;
     printf("[Runtime] make() created new Any object.\n");
     return obj;
@@ -2570,7 +1739,7 @@ static void wasi_run_ready_task(void) {
 }
 
 MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
-    MantiqTask* task = (MantiqTask*)mantiq_malloc(sizeof(MantiqTask));
+    MantiqTask* task = (MantiqTask*)mantiq_malloc_c(sizeof(MantiqTask));
     task->func = func;
     task->env = env;
     task->result = NULL;
@@ -2592,7 +1761,7 @@ void* mantiq_await(MantiqTask* task) {
         }
     }
     void* result = task->result;
-    mantiq_free(task);
+    mantiq_free_c(task);
     return result;
 }
 
@@ -2609,8 +1778,8 @@ typedef struct MantiqChannel {
 MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     (void)elem_size;
     if (capacity <= 0) capacity = 32;
-    MantiqChannel* chan = (MantiqChannel*)mantiq_malloc(sizeof(MantiqChannel));
-    chan->buffer = (void**)mantiq_malloc(sizeof(void*) * capacity);
+    MantiqChannel* chan = (MantiqChannel*)mantiq_malloc_c(sizeof(MantiqChannel));
+    chan->buffer = (void**)mantiq_malloc_c(sizeof(void*) * capacity);
     chan->capacity = capacity;
     chan->head = 0;
     chan->tail = 0;
@@ -2622,7 +1791,7 @@ MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
 void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan || chan->is_closed) return;
     int64_t sz = elem_size > 0 ? elem_size : 8;
-    void* slot = mantiq_malloc(sz);
+    void* slot = mantiq_malloc_c(sz);
     if (val_ptr) memcpy(slot, val_ptr, sz);
     else memset(slot, 0, sz);
     chan->buffer[chan->tail] = slot;
@@ -2641,7 +1810,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
         }
     }
     if (chan->count == 0) {
-        void* empty_slot = mantiq_malloc(sz);
+        void* empty_slot = mantiq_malloc_c(sz);
         memset(empty_slot, 0, sz);
         return empty_slot;
     }
@@ -2654,7 +1823,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
 int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan || chan->count == chan->capacity || chan->is_closed) return 0;
     int64_t sz = elem_size > 0 ? elem_size : 8;
-    void* slot = mantiq_malloc(sz);
+    void* slot = mantiq_malloc_c(sz);
     if (val_ptr) memcpy(slot, val_ptr, sz);
     else memset(slot, 0, sz);
     chan->buffer[chan->tail] = slot;
@@ -2695,10 +1864,10 @@ void __mantiq_channel_free(MantiqChannel* chan) {
     if (!chan) return;
     for (int64_t i = 0; i < chan->count; i++) {
         int64_t idx = (chan->head + i) % chan->capacity;
-        if (chan->buffer[idx]) mantiq_free(chan->buffer[idx]);
+        if (chan->buffer[idx]) mantiq_free_c(chan->buffer[idx]);
     }
-    mantiq_free(chan->buffer);
-    mantiq_free(chan);
+    mantiq_free_c(chan->buffer);
+    mantiq_free_c(chan);
 }
 
 #else
@@ -2726,7 +1895,7 @@ static void* task_runner(void* arg) {
 }
 
 MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
-    MantiqTask* task = (MantiqTask*)mantiq_malloc(sizeof(MantiqTask));
+    MantiqTask* task = (MantiqTask*)mantiq_malloc_c(sizeof(MantiqTask));
     task->func = func;
     task->env = env;
     task->result = NULL;
@@ -2753,7 +1922,7 @@ void* mantiq_await(MantiqTask* task) {
     pthread_join(task->thread, NULL);
     pthread_mutex_destroy(&task->mutex);
     pthread_cond_destroy(&task->cond);
-    mantiq_free(task);
+    mantiq_free_c(task);
     
     return result;
 }
@@ -2774,8 +1943,8 @@ typedef struct MantiqChannel {
 MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     (void)elem_size;
     if (capacity <= 0) capacity = 32;
-    MantiqChannel* chan = (MantiqChannel*)mantiq_malloc(sizeof(MantiqChannel));
-    chan->buffer = (void**)mantiq_malloc(sizeof(void*) * capacity);
+    MantiqChannel* chan = (MantiqChannel*)mantiq_malloc_c(sizeof(MantiqChannel));
+    chan->buffer = (void**)mantiq_malloc_c(sizeof(void*) * capacity);
     chan->capacity = capacity;
     chan->head = 0;
     chan->tail = 0;
@@ -2798,7 +1967,7 @@ void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size
         return;
     }
     int64_t sz = elem_size > 0 ? elem_size : 8;
-    void* slot = mantiq_malloc(sz);
+    void* slot = mantiq_malloc_c(sz);
     if (val_ptr) memcpy(slot, val_ptr, sz);
     else memset(slot, 0, sz);
     chan->buffer[chan->tail] = slot;
@@ -2817,7 +1986,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     if (chan->count == 0 && chan->is_closed) {
         pthread_mutex_unlock(&chan->mutex);
         int64_t sz = elem_size > 0 ? elem_size : 8;
-        void* empty_slot = mantiq_malloc(sz);
+        void* empty_slot = mantiq_malloc_c(sz);
         memset(empty_slot, 0, sz);
         return empty_slot;
     }
@@ -2837,7 +2006,7 @@ int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_s
         return 0;
     }
     int64_t sz = elem_size > 0 ? elem_size : 8;
-    void* slot = mantiq_malloc(sz);
+    void* slot = mantiq_malloc_c(sz);
     if (val_ptr) memcpy(slot, val_ptr, sz);
     else memset(slot, 0, sz);
     chan->buffer[chan->tail] = slot;
@@ -2903,14 +2072,14 @@ void __mantiq_channel_free(MantiqChannel* chan) {
     pthread_mutex_lock(&chan->mutex);
     for (int64_t i = 0; i < chan->count; i++) {
         int64_t idx = (chan->head + i) % chan->capacity;
-        if (chan->buffer[idx]) mantiq_free(chan->buffer[idx]);
+        if (chan->buffer[idx]) mantiq_free_c(chan->buffer[idx]);
     }
-    mantiq_free(chan->buffer);
+    mantiq_free_c(chan->buffer);
     pthread_mutex_unlock(&chan->mutex);
     pthread_mutex_destroy(&chan->mutex);
     pthread_cond_destroy(&chan->not_empty);
     pthread_cond_destroy(&chan->not_full);
-    mantiq_free(chan);
+    mantiq_free_c(chan);
 }
 
 #endif
@@ -2942,7 +2111,7 @@ static void mantiq_init_args_from_proc() {
     if (global_argc >= 0) return;
 #ifdef _WIN32
     global_argc = 1;
-    global_argv_list = (MantiqAsciiStr*)mantiq_malloc(sizeof(MantiqAsciiStr));
+    global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(sizeof(MantiqAsciiStr));
     global_argv_list[0].ptr = "mantiq-program";
     global_argv_list[0].len = 14;
 #elif defined(__wasi__)
@@ -2950,11 +2119,11 @@ static void mantiq_init_args_from_proc() {
     extern int32_t __imported_wasi_snapshot_preview1_args_sizes_get(int32_t*, int32_t*) __attribute__((__import_module__("wasi_snapshot_preview1"), __import_name__("args_sizes_get")));
     extern int32_t __imported_wasi_snapshot_preview1_args_get(int32_t*, int32_t*) __attribute__((__import_module__("wasi_snapshot_preview1"), __import_name__("args_get")));
     if (__imported_wasi_snapshot_preview1_args_sizes_get(&c, &sz) == 0 && c > 0) {
-        char** argv_ptrs = (char**)mantiq_malloc(c * sizeof(char*));
-        char* argv_buf = (char*)mantiq_malloc(sz);
+        char** argv_ptrs = (char**)mantiq_malloc_c(c * sizeof(char*));
+        char* argv_buf = (char*)mantiq_malloc_c(sz);
         if (__imported_wasi_snapshot_preview1_args_get((int32_t*)argv_ptrs, (int32_t*)argv_buf) == 0) {
             global_argc = c;
-            global_argv_list = (MantiqAsciiStr*)mantiq_malloc(c * sizeof(MantiqAsciiStr));
+            global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(c * sizeof(MantiqAsciiStr));
             for (int i = 0; i < c; i++) {
                 size_t len = strlen(argv_ptrs[i]);
                 global_argv_list[i].ptr = argv_ptrs[i];
@@ -2964,14 +2133,14 @@ static void mantiq_init_args_from_proc() {
         }
     }
     global_argc = 1;
-    global_argv_list = (MantiqAsciiStr*)mantiq_malloc(sizeof(MantiqAsciiStr));
+    global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(sizeof(MantiqAsciiStr));
     global_argv_list[0].ptr = "nizam.wasm";
     global_argv_list[0].len = 10;
 #else
     int fd = open("/proc/self/cmdline", O_RDONLY);
     if (fd < 0) {
         global_argc = 1;
-        global_argv_list = (MantiqAsciiStr*)mantiq_malloc(sizeof(MantiqAsciiStr));
+        global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(sizeof(MantiqAsciiStr));
         global_argv_list[0].ptr = "mantiq-program";
         global_argv_list[0].len = 14;
         return;
@@ -2981,7 +2150,7 @@ static void mantiq_init_args_from_proc() {
     close(fd);
     if (n <= 0) {
         global_argc = 1;
-        global_argv_list = (MantiqAsciiStr*)mantiq_malloc(sizeof(MantiqAsciiStr));
+        global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(sizeof(MantiqAsciiStr));
         global_argv_list[0].ptr = "mantiq-program";
         global_argv_list[0].len = 14;
         return;
@@ -2995,17 +2164,17 @@ static void mantiq_init_args_from_proc() {
     }
     if (count == 0) {
         global_argc = 1;
-        global_argv_list = (MantiqAsciiStr*)mantiq_malloc(sizeof(MantiqAsciiStr));
+        global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(sizeof(MantiqAsciiStr));
         global_argv_list[0].ptr = "mantiq-program";
         global_argv_list[0].len = 14;
         return;
     }
     global_argc = count;
-    global_argv_list = (MantiqAsciiStr*)mantiq_malloc(count * sizeof(MantiqAsciiStr));
+    global_argv_list = (MantiqAsciiStr*)mantiq_malloc_c(count * sizeof(MantiqAsciiStr));
     char* p = buf;
     for (int i = 0; i < count; i++) {
         size_t len = strlen(p);
-        char* heap_str = (char*)mantiq_malloc(len + 1);
+        char* heap_str = (char*)mantiq_malloc_c(len + 1);
         memcpy(heap_str, p, len + 1);
         global_argv_list[i].ptr = heap_str;
         global_argv_list[i].len = (long long)len;
@@ -3019,14 +2188,14 @@ MantiqListAsciiStr* mantiq_process_args() {
     static MantiqListAsciiStr* cached_list = NULL;
     if (cached_list) return cached_list;
     
-    cached_list = (MantiqListAsciiStr*)mantiq_malloc(sizeof(MantiqListAsciiStr));
+    cached_list = (MantiqListAsciiStr*)mantiq_malloc_c(sizeof(MantiqListAsciiStr));
     if (global_argc <= 0 || !global_argv_list) {
         cached_list->data = NULL;
         cached_list->len = 0;
         cached_list->cap = 0;
         return cached_list;
     }
-    cached_list->data = (MantiqAsciiStr*)mantiq_malloc(global_argc * sizeof(MantiqAsciiStr));
+    cached_list->data = (MantiqAsciiStr*)mantiq_malloc_c(global_argc * sizeof(MantiqAsciiStr));
     cached_list->len = global_argc;
     cached_list->cap = global_argc;
     for (int i = 0; i < global_argc; i++) {
@@ -3113,12 +2282,12 @@ MantiqAsciiStr* mantiq_sys_arch() {
 }
 
 MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
-    char* name = (char*)mantiq_malloc(name_len + 1);
+    char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
     
     const char* val = getenv(name);
-    mantiq_free(name);
+    mantiq_free_c(name);
     
     static MantiqAsciiStr val_str;
     if (val == NULL) {
@@ -3132,11 +2301,11 @@ MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
 }
 
 void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val_ptr, long long val_len) {
-    char* name = (char*)mantiq_malloc(name_len + 1);
+    char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
     
-    char* val = (char*)mantiq_malloc(val_len + 1);
+    char* val = (char*)mantiq_malloc_c(val_len + 1);
     memcpy(val, val_ptr, val_len);
     val[val_len] = '\0';
     
@@ -3147,12 +2316,12 @@ void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val
 #else
     setenv(name, val, 1);
 #endif
-    mantiq_free(name);
-    mantiq_free(val);
+    mantiq_free_c(name);
+    mantiq_free_c(val);
 }
 
 void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
-    char* name = (char*)mantiq_malloc(name_len + 1);
+    char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
     
@@ -3163,7 +2332,7 @@ void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
 #else
     unsetenv(name);
 #endif
-    mantiq_free(name);
+    mantiq_free_c(name);
 }
 
 void format_llvm_float(double val, int is_f32, char* out_buf) {
@@ -3388,7 +2557,7 @@ extern void PyBuffer_Release(void*) __attribute__((weak));
 #endif
 
 MantiqBufferOwner* mantiq_buffer_owner_create(void* data, size_t count, uint32_t elem_sz, const char* fmt) {
-    MantiqBufferOwner* owner = (MantiqBufferOwner*)mantiq_malloc((int64_t)sizeof(MantiqBufferOwner));
+    MantiqBufferOwner* owner = (MantiqBufferOwner*)mantiq_malloc_c((int64_t)sizeof(MantiqBufferOwner));
     if (!owner) return NULL;
     owner->ref_count = 1;
     owner->data_ptr = data;
@@ -3418,9 +2587,9 @@ void mantiq_buffer_owner_release(MantiqBufferOwner* owner) {
         if (owner->destructor) {
             owner->destructor(owner->data_ptr);
         } else if (owner->data_ptr) {
-            mantiq_free(owner->data_ptr);
+            mantiq_free_c(owner->data_ptr);
         }
-        mantiq_free(owner);
+        mantiq_free_c(owner);
     }
 }
 

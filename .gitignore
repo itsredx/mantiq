@@ -5,6 +5,8 @@
 *.ll
 /mantiq
 /nizam
+/nizam-bin*
+src/tests/*_tmp.*
 
 # JIT / AOT temporary compilation files
 *_jit.ll

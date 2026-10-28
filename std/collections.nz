@@ -522,7 +522,7 @@ struct DictItems[K, V]:
         return (deref self)._dict.values()
 
     public fn mapping(self as ptr[DictItems[K, V]]) as Dict[K, V]:
-        return (deref self)._dict.copy()
+        return (deref self)._dict
 
     public fn to_list(self as ptr[DictItems[K, V]]) as List[Tuple2[K, V]]:
         var res as List[Tuple2[K, V]] = List[Tuple2[K, V]]()
@@ -535,100 +535,1302 @@ struct DictItems[K, V]:
             i = i + 1 to i64
         return res
 
-extern fn __mantiq_list_insert(list_addr as ptr, index as i64, elem_addr as ptr, elem_size as i64)
-extern fn __mantiq_list_remove(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i8
-extern fn __mantiq_list_pop(list_addr as ptr, out_addr as ptr, elem_size as i64) as i8
-extern fn __mantiq_list_pop_index(list_addr as ptr, index as i64, out_addr as ptr, elem_size as i64) as i8
+// NOTE: __mantiq_list_insert/remove/pop/pop_index now have real Nizam
+// definitions in this module below (Milestone A port of runtime.c);
+// the former extern stubs were removed to avoid duplicate declarations.
 
-// ── List[T] ──────────────────────────────────────────────────────────
-from std.mem import Allocator, HeapAllocator, get_default_allocator, sizeof
+// ============================================================================
+// ── Collections runtime, in Nizam (Milestone A) ─────────────────────────────
+//
+// One-for-one port of the `__mantiq_dict_*` / `__mantiq_list_*` backing
+// functions of runtime.c into pure Nizam, keeping the same symbol names,
+// raw-pointer signatures and observable semantics. Once this module is
+// linked into a program, the generated declares for those symbols are
+// satisfied by these definitions instead of libmantiq.so, which removes the
+// C-runtime dependency for collections. The C definitions in runtime.c stay
+// in place until Milestone B retires the allocator entry points too, so
+// both worlds coexist during the transition (these definitions win at link
+// time because libmantiq.so is a shared library).
+//
+// All allocations still route through the runtime's mantiq_malloc /
+// mantiq_malloc_raw / mantiq_free / mantiq_realloc externs so that objects
+// created by Nizam code and objects created by the remaining C shims share
+// one malloc pool.
+//
+// Raw layouts are mirrored with tiny structs (MListRaw, MStrRaw, MOutRaw,
+// MI32Raw, MI8Raw, MDictRaw, MDictFatRaw, MStrBufRaw) so that every field
+// access stays typechecked.
+// ============================================================================
 
-struct List[T]:
-    public var data as ptr[T]
-    public var length as i64
-    public var capacity as i64
-    public var allocator as ptr[Allocator]
+// mirror of runtime.c's MantiqRawList { u8* data; size_t len; size_t cap; }
+struct MListRaw:
+    public var mdata as ptr[u8]
+    public var mlen as i64
+    public var mcap as i64
 
-    public fn __init__(self as ptr[List[T]]):
-        (deref self).data = None to ptr[T]
-        (deref self).length = 0 to i64
-        (deref self).capacity = 0 to i64
-        var ha as HeapAllocator = HeapAllocator()
-        (deref self).allocator = ha.allocator()
+// mirror of a String-owned slot { u8* data; size_t len; size_t cap; }
+struct MStrRaw:
+    public var sdata as ptr[u8]
+    public var slen as i64
+    public var scap as i64
 
-    public fn init(self as ptr[List[T]]):
-        (deref self).data = None to ptr[T]
-        (deref self).length = 0 to i64
-        (deref self).capacity = 0 to i64
-        var ha as HeapAllocator = HeapAllocator()
-        (deref self).allocator = ha.allocator()
+// single i64 out-slot (e.g. String.len_of and List to_string's len_out)
+struct MOutRaw:
+    public var outv as i64
 
-    public fn append(self as ptr[List[T]], item as T):
-        if (deref self).length >= (deref self).capacity:
-            self._grow()
-        let slot as ptr[T] = (deref self).data + (deref self).length
-        (deref slot) = item
-        (deref self).length = (deref self).length + 1 to i64
+// single i32 out-slot
+struct MI32Raw:
+    public var v32 as i32
 
-    public fn get(self as ptr[List[T]], idx as i64) as T:
-        return (deref self).data[idx]
+// single i8 out-slot
+struct MI8Raw:
+    public var v8 as i8
 
-    public fn __getitem__(self as ptr[List[T]], idx as i64) as T:
-        return (deref self).data[idx]
+// mirror of runtime.c's MantiqDict { 4 ptrs, then 5 x i32; 56 bytes }
+struct MDictRaw:
+    public var keys as ptr[u8]
+    public var values as ptr[u8]
+    public var hashes as ptr[i32]
+    public var occupied as ptr[u8]
+    public var capacity as i32
+    public var count as i32
+    public var key_size as i32
+    public var val_size as i32
+    public var is_string_key as i32
 
-    public fn len(self as ptr[List[T]]) as i64:
-        return (deref self).length
+// mirror of the fat Dict slot { MantiqDict* dict; size_t len; size_t cap; }
+struct MDictFatRaw:
+    public var dict as ptr
+    public var fdictlen as i64
+    public var fdictcap as i64
 
-    public fn length(self as ptr[List[T]]) as i64:
-        return (deref self).length
+// string builder state (mirror of runtime.c's MantiqStrBuf)
+struct MStrBufRaw:
+    public var sdata as ptr[u8]
+    public var slen as i64
+    public var scap as i64
 
-    public fn count(self as ptr[List[T]]) as i64:
-        return (deref self).length
+// match a stored key slot against an incoming key (shared probe-compare of
+// runtime.c's dict_set / dict_get / dict_remove / dict_get_or_insert)
+fn __mantiq_nz_key_match(slot as ptr, key as ptr, ks as i64, sk as i32) as i32:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if sk == 1 to i32 or sk == 2 to i32:
+        let s1 as ptr[MStrRaw] = slot to ptr[MStrRaw]
+        let s2 as ptr[MStrRaw] = key to ptr[MStrRaw]
+        if (deref s1).sdata == (deref s2).sdata:
+            return 1 to i32
+        if (deref s1).slen != (deref s2).slen:
+            return 0 to i32
+        if memcmp((deref s1).sdata to ptr, (deref s2).sdata to ptr, (deref s1).slen) == 0 to i32:
+            return 1 to i32
+        return 0 to i32
+    if memcmp(slot, key, ks) == 0 to i32:
+        return 1 to i32
+    return 0 to i32
 
-    public fn pop(self as ptr[List[T]]) as T:
-        let n as i64 = (deref self).length
-        if n == 0 to i64:
-            panic("IndexError: pop from empty list")
-        (deref self).length = n - 1 to i64
-        return (deref self).data[n - 1 to i64]
+// FNV-1a over bytes, byte-identical to runtime.c's __mantiq_hash_bytes
+// (uint32 wraparound is emulated an i64 mask at every step)
+fn __mantiq_hash_bytes(data as ptr, len as i64) as i32:
+    let db as ptr[u8] = data to ptr[u8]
+    var hash as i64 = 2166136261
+    let m32 as i64 = 4294967295
+    var i as i64 = 0
+    while i + 4 <= len:
+        hash = (hash ^ (db[i] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        let j1 as i64 = i + 1
+        hash = (hash ^ (db[j1] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        let j2 as i64 = i + 2
+        hash = (hash ^ (db[j2] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        let j3 as i64 = i + 3
+        hash = (hash ^ (db[j3] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        i = i + 4
+    while i < len:
+        hash = (hash ^ (db[i] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        i = i + 1
+    return (hash & m32) to i32
 
-    public fn pop_index(self as ptr[List[T]], idx as i64) as T:
-        let n as i64 = (deref self).length
-        if idx < 0 to i64:
-            panic("IndexError: index out of range")
-        if idx >= n:
-            panic("IndexError: index out of range")
-        let val as T = (deref self).data[idx]
-        var i as i64 = idx
-        while i < n - 1 to i64:
-            (deref self).data[i] = (deref self).data[i + 1 to i64]
-            i = i + 1 to i64
-        (deref self).length = n - 1 to i64
-        return val
+fn __mantiq_hash_string(s as cstr, len as i64) as i32:
+    return __mantiq_hash_bytes(s to ptr, len)
 
-    public fn insert(self as ptr[List[T]], idx as i64, item as T):
-        if (deref self).length >= (deref self).capacity:
-            self._grow()
-        let n as i64 = (deref self).length
-        var i as i64 = n
-        while i > idx:
-            (deref self).data[i] = (deref self).data[i - 1 to i64]
-            i = i - 1 to i64
-        (deref self).data[idx] = item
-        (deref self).length = n + 1 to i64
+// elements comparator for sort/sort_str (port of runtime.c __mantiq_sort_cmp
+// with the static globals turned into explicit parameters)
+fn __mantiq_nz_sort_cmp(pa as ptr, pb as ptr, es as i64, is_str as i32) as i32:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if is_str == 1 to i32:
+        let aa as ptr[MStrRaw] = pa to ptr[MStrRaw]
+        let bb as ptr[MStrRaw] = pb to ptr[MStrRaw]
+        var n as i64 = (deref aa).slen
+        if (deref bb).slen < n:
+            n = (deref bb).slen
+        var r as i32 = 0 to i32
+        if n > 0 to i64:
+            r = memcmp((deref aa).sdata to ptr, (deref bb).sdata to ptr, n)
+        if r != 0 to i32:
+            return r
+        if (deref aa).slen < (deref bb).slen:
+            return -1 to i32
+        if (deref aa).slen > (deref bb).slen:
+            return 1 to i32
+        return 0 to i32
+    let ab as ptr[u8] = pa to ptr[u8]
+    let bbb as ptr[u8] = pb to ptr[u8]
+    if es == 4 to i64 or es == 8 to i64:
+        let lastoff as i64 = es - 1
+        let sa as u8 = ab[lastoff] & 128 to u8
+        let sb as u8 = bbb[lastoff] & 128 to u8
+        if sa != sb:
+            if sa != 0 to u8:
+                return -1 to i32
+            return 1 to i32
+    return memcmp(pa, pb, es)
 
-    public fn clear(self as ptr[List[T]]):
-        (deref self).length = 0 to i64
+// swap two element slots through a scratch buffer
+fn __mantiq_nz_sort_swap(ea as ptr, eb as ptr, es as i64, tmp as ptr):
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    memcpy(tmp, ea, es)
+    memcpy(ea, eb, es)
+    memcpy(eb, tmp, es)
 
-    fn _grow(self as ptr[List[T]]):
-        let new_cap as i64 = if (deref self).capacity == 0 to i64: 8 to i64 else: (deref self).capacity * 2 to i64
-        let item_sz as usize = sizeof[T]()
-        let old_data as ptr[u8] = (deref self).data to ptr[u8]
-        let old_sz as usize = ((deref self).capacity to usize) * item_sz
-        let new_sz as usize = ((new_cap to usize) * item_sz)
-        let new_data as ptr[u8] = ((deref self).allocator).resize(old_data, old_sz, new_sz)
-        (deref self).data = new_data to ptr[T]
-        (deref self).capacity = new_cap
+// in-place heapsort with sift-down; preserves runtime.c's qsort result order
+fn __mantiq_nz_sort_core(base as ptr, count as i64, es as i64, is_str as i32):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    let tmp as ptr = mantiq_malloc(es)
+    if tmp == None to ptr:
+        return
+    let a as ptr[u8] = base to ptr[u8]
+    var root as i64 = (count / 2) - 1
+    while root >= 0 to i64:
+        var cur as i64 = root
+        var again as i32 = 1 to i32
+        while again == 1 to i32:
+            again = 0 to i32
+            let lc as i64 = cur * 2 + 1
+            if lc < count:
+                let rc as i64 = lc + 1
+                var big as i64 = lc
+                if rc < count:
+                    let p1 as usize = (a to usize) + ((rc * es) to usize)
+                    let p2 as usize = (a to usize) + ((lc * es) to usize)
+                    if __mantiq_nz_sort_cmp(p1 to ptr, p2 to ptr, es, is_str) > 0 to i32:
+                        big = rc
+                let p3 as usize = (a to usize) + ((big * es) to usize)
+                let p4 as usize = (a to usize) + ((cur * es) to usize)
+                if __mantiq_nz_sort_cmp(p3 to ptr, p4 to ptr, es, is_str) > 0 to i32:
+                    __mantiq_nz_sort_swap(p4 to ptr, p3 to ptr, es, tmp)
+                    cur = big
+                    again = 1 to i32
+        root = root - 1
+    var end2 as i64 = count - 1
+    while end2 > 0 to i64:
+        let p0 as usize = (a to usize) + ((end2 * es) to usize)
+        __mantiq_nz_sort_swap((a to usize) to ptr, p0 to ptr, es, tmp)
+        var cur as i64 = 0
+        var again as i32 = 1 to i32
+        while again == 1 to i32:
+            again = 0 to i32
+            let lc as i64 = cur * 2 + 1
+            if lc < end2:
+                let rc as i64 = lc + 1
+                var big as i64 = lc
+                if rc < end2:
+                    let p1 as usize = (a to usize) + ((rc * es) to usize)
+                    let p2 as usize = (a to usize) + ((lc * es) to usize)
+                    if __mantiq_nz_sort_cmp(p1 to ptr, p2 to ptr, es, is_str) > 0 to i32:
+                        big = rc
+                let p3 as usize = (a to usize) + ((big * es) to usize)
+                let p4 as usize = (a to usize) + ((cur * es) to usize)
+                if __mantiq_nz_sort_cmp(p3 to ptr, p4 to ptr, es, is_str) > 0 to i32:
+                    __mantiq_nz_sort_swap(p4 to ptr, p3 to ptr, es, tmp)
+                    cur = big
+                    again = 1 to i32
+        end2 = end2 - 1
+    mantiq_free(tmp)
+
+// deep-copy n String slots (24-byte {data,len,cap}); clones the buffers
+fn __mantiq_nz_clone_strings_block(dst as ptr, src as ptr, n as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    var i as i64 = 0
+    while i < n:
+        let se as ptr[MStrRaw] = ((src to usize) + ((i * 24) to usize)) to ptr[MStrRaw]
+        let de as ptr[MStrRaw] = ((dst to usize) + ((i * 24) to usize)) to ptr[MStrRaw]
+        let elen as i64 = (deref se).slen
+        var nb as ptr[u8] = None to ptr[u8]
+        if elen > 0 to i64:
+            nb = mantiq_malloc(elen) to ptr[u8]
+            if nb == None to ptr[u8]:
+                // faithful to runtime.c: zero the first slot and bail
+                let first as ptr[MStrRaw] = dst to ptr[MStrRaw]
+                (deref first).sdata = None to ptr[u8]
+                (deref first).slen = 0 to i64
+                (deref first).scap = 0 to i64
+                return
+            memcpy(nb to ptr, (deref se).sdata to ptr, elen)
+        (deref de).sdata = nb
+        (deref de).slen = elen
+        (deref de).scap = elen
+        i = i + 1
+
+fn __mantiq_list_append(list_addr as ptr, elem_addr as ptr, elem_size as i64):
+    extern fn mantiq_realloc(old_ptr as ptr, new_size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    let ln as i64 = (deref l).mlen
+    let cp as i64 = (deref l).mcap
+    if ln >= cp:
+        var ncap as i64 = 8
+        if cp != 0 to i64:
+            ncap = cp * 2
+        let grown as ptr = mantiq_realloc((deref l).mdata to ptr, ncap * elem_size)
+        (deref l).mdata = grown to ptr[u8]
+        (deref l).mcap = ncap
+    let base as ptr[u8] = (deref l).mdata
+    let off as usize = ((ln * elem_size) to usize)
+    memcpy(((base to usize) + off) to ptr, elem_addr, elem_size)
+    (deref l).mlen = ln + 1
+
+fn __mantiq_list_extend(list_addr as ptr, src_list_addr as ptr, elem_size as i64):
+    if list_addr == None to ptr or src_list_addr == None to ptr:
+        return
+    let src as ptr[MListRaw] = src_list_addr to ptr[MListRaw]
+    if (deref src).mdata == None to ptr[u8] or (deref src).mlen == 0 to i64:
+        return
+    let sdata as ptr[u8] = (deref src).mdata
+    let slen as i64 = (deref src).mlen
+    var i as i64 = 0
+    while i < slen:
+        let off as usize = ((i * elem_size) to usize)
+        __mantiq_list_append(list_addr, ((sdata to usize) + off) to ptr, elem_size)
+        i = i + 1
+
+fn __mantiq_list_count(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i64:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if list_addr == None to ptr:
+        return 0 to i64
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or elem_addr == None to ptr or elem_size <= 0 to i64:
+        return 0 to i64
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    var n as i64 = 0
+    var i as i64 = 0
+    while i < llen:
+        let off as usize = ((i * elem_size) to usize)
+        if memcmp(((ldata to usize) + off) to ptr, elem_addr, elem_size) == 0 to i32:
+            n = n + 1
+        i = i + 1
+    return n
+
+fn __mantiq_list_index(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i64:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if list_addr == None to ptr:
+        return -1 to i64
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or elem_addr == None to ptr or elem_size <= 0 to i64:
+        return -1 to i64
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    var i as i64 = 0
+    while i < llen:
+        let off as usize = ((i * elem_size) to usize)
+        if memcmp(((ldata to usize) + off) to ptr, elem_addr, elem_size) == 0 to i32:
+            return i
+        i = i + 1
+    return -1 to i64
+
+fn __mantiq_list_remove(list_addr as ptr, elem_addr as ptr, elem_size as i64) as i8:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    extern fn memmove(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return 0 to i8
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or elem_addr == None to ptr or elem_size <= 0 to i64:
+        return 0 to i8
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    var i as i64 = 0
+    while i < llen:
+        let off as usize = ((i * elem_size) to usize)
+        if memcmp(((ldata to usize) + off) to ptr, elem_addr, elem_size) == 0 to i32:
+            let remaining as i64 = llen - i - 1
+            if remaining > 0 to i64:
+                memmove(((ldata to usize) + off) to ptr, ((ldata to usize) + (((i + 1) * elem_size) to usize)) to ptr, remaining * elem_size)
+            (deref l).mlen = llen - 1
+            return 1 to i8
+        i = i + 1
+    return 0 to i8
+
+fn __mantiq_list_insert(list_addr as ptr, index as i64, elem_addr as ptr, elem_size as i64):
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    extern fn memmove(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or elem_addr == None to ptr or elem_size <= 0 to i64:
+        return
+    let llen as i64 = (deref l).mlen
+    var at as i64 = index
+    if at < 0 to i64:
+        at = llen + at
+    if at < 0 to i64:
+        at = 0 to i64
+    if at > llen:
+        at = llen
+    __mantiq_list_append(list_addr, elem_addr, elem_size)
+    if at < (deref l).mlen - 1:
+        let base as ptr[u8] = (deref l).mdata
+        let atoff as usize = ((at * elem_size) to usize)
+        let oneoff as usize = (((at + 1) * elem_size) to usize)
+        memmove(((base to usize) + oneoff) to ptr, ((base to usize) + atoff) to ptr, (((deref l).mlen - 1 - at) * elem_size))
+        memcpy(((base to usize) + atoff) to ptr, elem_addr, elem_size)
+
+fn __mantiq_list_reverse(list_addr as ptr, elem_size as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen < 2 to i64 or elem_size <= 0 to i64:
+        return
+    let tmp as ptr[u8] = mantiq_malloc(elem_size) to ptr[u8]
+    if tmp == None to ptr[u8]:
+        return
+    let ldata as ptr[u8] = (deref l).mdata
+    var i as i64 = 0
+    var j as i64 = (deref l).mlen - 1
+    while i < j:
+        let offi as usize = ((i * elem_size) to usize)
+        let offj as usize = ((j * elem_size) to usize)
+        memcpy(tmp to ptr, ((ldata to usize) + offi) to ptr, elem_size)
+        memcpy(((ldata to usize) + offi) to ptr, ((ldata to usize) + offj) to ptr, elem_size)
+        memcpy(((ldata to usize) + offj) to ptr, tmp to ptr, elem_size)
+        i = i + 1
+        j = j - 1
+    mantiq_free(tmp to ptr)
+
+fn __mantiq_list_copy(dest_addr as ptr, src_addr as ptr, elem_size as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dest_addr == None to ptr:
+        return
+    let d as ptr[MListRaw] = dest_addr to ptr[MListRaw]
+    (deref d).mdata = None to ptr[u8]
+    (deref d).mlen = 0 to i64
+    (deref d).mcap = 0 to i64
+    if src_addr == None to ptr:
+        return
+    let s as ptr[MListRaw] = src_addr to ptr[MListRaw]
+    if (deref s).mdata == None to ptr[u8] or (deref s).mlen == 0 to i64 or elem_size <= 0 to i64:
+        return
+    let slen as i64 = (deref s).mlen
+    (deref d).mlen = slen
+    (deref d).mcap = slen
+    let nd as ptr[u8] = mantiq_malloc(slen * elem_size) to ptr[u8]
+    if nd == None to ptr[u8]:
+        (deref d).mlen = 0 to i64
+        (deref d).mcap = 0 to i64
+        return
+    (deref d).mdata = nd
+    memcpy(nd to ptr, (deref s).mdata to ptr, slen * elem_size)
+
+fn __mantiq_list_pop(list_addr as ptr, out_addr as ptr, elem_size as i64) as i8:
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return 0 to i8
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen == 0 to i64 or out_addr == None to ptr or elem_size <= 0 to i64:
+        return 0 to i8
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    let lastoff as usize = (((llen - 1) * elem_size) to usize)
+    memcpy(out_addr, ((ldata to usize) + lastoff) to ptr, elem_size)
+    (deref l).mlen = llen - 1
+    return 1 to i8
+
+fn __mantiq_list_pop_index(list_addr as ptr, index as i64, out_addr as ptr, elem_size as i64) as i8:
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    extern fn memmove(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return 0 to i8
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen == 0 to i64 or out_addr == None to ptr or elem_size <= 0 to i64:
+        return 0 to i8
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    var at as i64 = index
+    if at < 0 to i64:
+        at = llen + at
+    if at < 0 to i64:
+        at = 0 to i64
+    if at >= llen:
+        at = llen - 1
+    let atoff as usize = ((at * elem_size) to usize)
+    memcpy(out_addr, ((ldata to usize) + atoff) to ptr, elem_size)
+    let remaining as i64 = llen - at - 1
+    if remaining > 0 to i64:
+        memmove(((ldata to usize) + atoff) to ptr, ((ldata to usize) + (((at + 1) * elem_size) to usize)) to ptr, remaining * elem_size)
+    (deref l).mlen = llen - 1
+    return 1 to i8
+
+fn __mantiq_list_sort(list_addr as ptr, elem_size as i64):
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen < 2 to i64 or elem_size <= 0 to i64:
+        return
+    __mantiq_nz_sort_core((deref l).mdata to ptr, (deref l).mlen, elem_size, 0 to i32)
+
+fn __mantiq_list_sort_str(list_addr as ptr):
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen < 2 to i64:
+        return
+    __mantiq_nz_sort_core((deref l).mdata to ptr, (deref l).mlen, 24 to i64, 1 to i32)
+
+fn __mantiq_list_concat(dest_addr as ptr, a_addr as ptr, b_addr as ptr, elem_size as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dest_addr == None to ptr:
+        return
+    let d as ptr[MListRaw] = dest_addr to ptr[MListRaw]
+    (deref d).mdata = None to ptr[u8]
+    (deref d).mlen = 0 to i64
+    (deref d).mcap = 0 to i64
+    if elem_size <= 0 to i64:
+        return
+    var al as i64 = 0
+    var bl as i64 = 0
+    var adata as ptr[u8] = None to ptr[u8]
+    var bdata as ptr[u8] = None to ptr[u8]
+    if a_addr != None to ptr:
+        let aa as ptr[MListRaw] = a_addr to ptr[MListRaw]
+        adata = (deref aa).mdata
+        if adata != None to ptr[u8]:
+            al = (deref aa).mlen
+    if b_addr != None to ptr:
+        let ba as ptr[MListRaw] = b_addr to ptr[MListRaw]
+        bdata = (deref ba).mdata
+        if bdata != None to ptr[u8]:
+            bl = (deref ba).mlen
+    let total as i64 = al + bl
+    if total == 0 to i64:
+        return
+    (deref d).mlen = total
+    (deref d).mcap = total
+    let nd as ptr[u8] = mantiq_malloc(total * elem_size) to ptr[u8]
+    if nd == None to ptr[u8]:
+        (deref d).mlen = 0 to i64
+        (deref d).mcap = 0 to i64
+        return
+    (deref d).mdata = nd
+    if elem_size == 24 to i64:
+        if al > 0 to i64:
+            __mantiq_nz_clone_strings_block(nd to ptr, adata to ptr, al)
+        if bl > 0 to i64:
+            __mantiq_nz_clone_strings_block(((nd to usize) + ((al * 24) to usize)) to ptr, bdata to ptr, bl)
+        return
+    if al > 0 to i64:
+        memcpy(nd to ptr, adata to ptr, al * elem_size)
+    if bl > 0 to i64:
+        memcpy(((nd to usize) + ((al * elem_size) to usize)) to ptr, bdata to ptr, bl * elem_size)
+
+fn __mantiq_list_repeat(dest_addr as ptr, src_addr as ptr, n as i64, elem_size as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dest_addr == None to ptr:
+        return
+    let d as ptr[MListRaw] = dest_addr to ptr[MListRaw]
+    (deref d).mdata = None to ptr[u8]
+    (deref d).mlen = 0 to i64
+    (deref d).mcap = 0 to i64
+    if src_addr == None to ptr:
+        return
+    let s as ptr[MListRaw] = src_addr to ptr[MListRaw]
+    let sdata as ptr[u8] = (deref s).mdata
+    let slen as i64 = (deref s).mlen
+    if sdata == None to ptr[u8] or slen == 0 to i64 or n <= 0 to i64 or elem_size <= 0 to i64:
+        return
+    let total as i64 = slen * n
+    (deref d).mlen = total
+    (deref d).mcap = total
+    let nd as ptr[u8] = mantiq_malloc(total * elem_size) to ptr[u8]
+    if nd == None to ptr[u8]:
+        (deref d).mlen = 0 to i64
+        (deref d).mcap = 0 to i64
+        return
+    (deref d).mdata = nd
+    if elem_size == 24 to i64:
+        var i as i64 = 0
+        while i < n:
+            __mantiq_nz_clone_strings_block(((nd to usize) + (((i * slen) * 24) to usize)) to ptr, sdata to ptr, slen)
+            i = i + 1
+        return
+    var i as i64 = 0
+    while i < n:
+        memcpy(((nd to usize) + ((i * slen * elem_size) to usize)) to ptr, sdata to ptr, slen * elem_size)
+        i = i + 1
+
+fn __mantiq_list_contains(a_addr as ptr, e_addr as ptr, elem_size as i64) as i8:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if a_addr == None to ptr:
+        return 0 to i8
+    let a as ptr[MListRaw] = a_addr to ptr[MListRaw]
+    if (deref a).mdata == None to ptr[u8] or e_addr == None to ptr or elem_size <= 0 to i64:
+        return 0 to i8
+    let adata as ptr[u8] = (deref a).mdata
+    let alen as i64 = (deref a).mlen
+    var i as i64 = 0
+    while i < alen:
+        let off as usize = ((i * elem_size) to usize)
+        if memcmp(((adata to usize) + off) to ptr, e_addr, elem_size) == 0 to i32:
+            return 1 to i8
+        i = i + 1
+    return 0 to i8
+
+fn __mantiq_list_contains_str(a_addr as ptr, e_addr as ptr) as i8:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if a_addr == None to ptr or e_addr == None to ptr:
+        return 0 to i8
+    let a as ptr[MListRaw] = a_addr to ptr[MListRaw]
+    if (deref a).mdata == None to ptr[u8]:
+        return 0 to i8
+    let adata as ptr[u8] = (deref a).mdata
+    let alen as i64 = (deref a).mlen
+    let e as ptr[MStrRaw] = e_addr to ptr[MStrRaw]
+    var i as i64 = 0
+    while i < alen:
+        let g as ptr[MStrRaw] = ((adata to usize) + ((i * 24) to usize)) to ptr[MStrRaw]
+        if (deref g).slen == (deref e).slen:
+            if (deref e).slen == 0 to i64:
+                return 1 to i8
+            if (deref g).sdata != None to ptr[u8] and (deref e).sdata != None to ptr[u8] and memcmp((deref g).sdata to ptr, (deref e).sdata to ptr, (deref e).slen) == 0 to i32:
+                return 1 to i8
+        i = i + 1
+    return 0 to i8
+
+fn __mantiq_list_equals(a_addr as ptr, b_addr as ptr, elem_size as i64) as i8:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if a_addr == b_addr:
+        return 1 to i8
+    if a_addr == None to ptr or b_addr == None to ptr:
+        return 0 to i8
+    let a as ptr[MListRaw] = a_addr to ptr[MListRaw]
+    let b as ptr[MListRaw] = b_addr to ptr[MListRaw]
+    if (deref a).mlen != (deref b).mlen:
+        return 0 to i8
+    if (deref a).mlen == 0 to i64:
+        return 1 to i8
+    if (deref a).mdata == None to ptr[u8] or (deref b).mdata == None to ptr[u8] or elem_size <= 0 to i64:
+        return 0 to i8
+    let total as i64 = (deref a).mlen * elem_size
+    if memcmp((deref a).mdata to ptr, (deref b).mdata to ptr, total) == 0 to i32:
+        return 1 to i8
+    return 0 to i8
+
+fn __mantiq_list_equals_str(a_addr as ptr, b_addr as ptr) as i8:
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    if a_addr == b_addr:
+        return 1 to i8
+    if a_addr == None to ptr or b_addr == None to ptr:
+        return 0 to i8
+    let a as ptr[MListRaw] = a_addr to ptr[MListRaw]
+    let b as ptr[MListRaw] = b_addr to ptr[MListRaw]
+    if (deref a).mlen != (deref b).mlen:
+        return 0 to i8
+    let adata as ptr[u8] = (deref a).mdata
+    let bdata as ptr[u8] = (deref b).mdata
+    let alen as i64 = (deref a).mlen
+    var i as i64 = 0
+    while i < alen:
+        let x as ptr[MStrRaw] = ((adata to usize) + ((i * 24) to usize)) to ptr[MStrRaw]
+        let y as ptr[MStrRaw] = ((bdata to usize) + ((i * 24) to usize)) to ptr[MStrRaw]
+        var ok as i32 = 0 to i32
+        if (deref x).slen != (deref y).slen:
+            return 0 to i8
+        elif (deref x).slen == 0 to i64:
+            ok = 1 to i32
+        elif (deref x).sdata == (deref y).sdata:
+            ok = 1 to i32
+        elif (deref x).sdata != None to ptr[u8] and (deref y).sdata != None to ptr[u8] and memcmp((deref x).sdata to ptr, (deref y).sdata to ptr, (deref x).slen) == 0 to i32:
+            ok = 1 to i32
+        if ok != 1 to i32:
+            return 0 to i8
+        i = i + 1
+    return 1 to i8
+
+// string builder used by list_to_string (port of runtime.c MantiqStrBuf)
+fn __mantiq_nz_strbuf_append(baddr as ptr, src as ptr, n as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let b as ptr[MStrBufRaw] = baddr to ptr[MStrBufRaw]
+    if (deref b).slen + n + 1 > (deref b).scap:
+        var ncap as i64 = 64
+        if (deref b).scap > 0 to i64:
+            ncap = (deref b).scap * 2
+        while (deref b).slen + n + 1 > ncap:
+            ncap = ncap * 2
+        let nd as ptr[u8] = mantiq_malloc(ncap) to ptr[u8]
+        if nd == None to ptr[u8]:
+            return
+        if (deref b).slen > 0 to i64 and (deref b).sdata != None to ptr[u8]:
+            memcpy(nd to ptr, (deref b).sdata to ptr, (deref b).slen)
+        if (deref b).sdata != None to ptr[u8]:
+            mantiq_free((deref b).sdata to ptr)
+        (deref b).sdata = nd
+        (deref b).scap = ncap
+    if n > 0 to i64 and src != None to ptr:
+        memcpy((((deref b).sdata to usize) + ((deref b).slen to usize)) to ptr, src, n)
+    (deref b).slen = (deref b).slen + n
+    if (deref b).sdata != None to ptr[u8]:
+        let term_addr as ptr[u8] = (((deref b).sdata to usize) + ((deref b).slen to usize)) to ptr[u8]
+        term_addr[0] = 0 to u8
+
+fn __mantiq_nz_strbuf_append_i64(baddr as ptr, v as i64):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    let tmp as ptr[u8] = mantiq_malloc(32 to i64) to ptr[u8]
+    if tmp == None to ptr[u8]:
+        return
+    var uv as i64 = v
+    if v < 0 to i64:
+        uv = 0 - v
+    var idx as i64 = 31
+    tmp[idx] = 0 to u8
+    idx = idx - 1
+    if uv == 0 to i64:
+        tmp[idx] = 48 to u8
+        idx = idx - 1
+    while uv > 0 to i64:
+        tmp[idx] = ((uv % 10) + 48) to u8
+        uv = uv / 10
+        idx = idx - 1
+    if v < 0 to i64:
+        tmp[idx] = 45 to u8
+        idx = idx - 1
+    __mantiq_nz_strbuf_append(baddr, ((tmp to usize) + ((idx + 1) to usize)) to ptr, 30 - idx)
+    mantiq_free(tmp to ptr)
+
+// elements formatting used by generated __str__ for List (port of runtime.c
+// __mantiq_list_to_string; length is stored through the len_out i64 slot)
+fn __mantiq_list_to_string(list_addr as ptr, elem_size as i64, len_out as ptr) as ptr:
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    var b as MStrBufRaw = MStrBufRaw(sdata = None to ptr[u8], slen = 0 to i64, scap = 0 to i64)
+    let bp as ptr[MStrBufRaw] = ref b
+    let cbuf as ptr[u8] = mantiq_malloc(8 to i64) to ptr[u8]
+    if cbuf == None to ptr[u8]:
+        if len_out != None to ptr:
+            let op0 as ptr[MOutRaw] = len_out to ptr[MOutRaw]
+            (deref op0).outv = 0 to i64
+        return None to ptr
+    // cbuf[0]='[' cbuf[1..2]=', ' cbuf[3]=']' cbuf[4..6]='<?>'
+    cbuf[0] = 91 to u8
+    cbuf[1] = 44 to u8
+    cbuf[2] = 32 to u8
+    cbuf[3] = 93 to u8
+    cbuf[4] = 63 to u8
+    cbuf[5] = 63 to u8
+    cbuf[6] = 63 to u8
+    __mantiq_nz_strbuf_append(bp to ptr, cbuf, 1 to i64)
+    var n as i64 = 0
+    var ldata as ptr[u8] = None to ptr[u8]
+    if list_addr != None to ptr:
+        let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+        ldata = (deref l).mdata
+        if ldata != None to ptr[u8]:
+            n = (deref l).mlen
+    var i as i64 = 0
+    while i < n:
+        if i > 0 to i64:
+            __mantiq_nz_strbuf_append(bp to ptr, ((cbuf to usize) + 1) to ptr, 2 to i64)
+        let ea as ptr = ((ldata to usize) + ((i * elem_size) to usize)) to ptr
+        if elem_size == 8 to i64:
+            let e8 as ptr[MOutRaw] = ea to ptr[MOutRaw]
+            __mantiq_nz_strbuf_append_i64(bp to ptr, (deref e8).outv)
+        elif elem_size == 4 to i64:
+            let e4 as ptr[MI32Raw] = ea to ptr[MI32Raw]
+            __mantiq_nz_strbuf_append_i64(bp to ptr, (deref e4).v32 to i64)
+        elif elem_size == 1 to i64:
+            let e1 as ptr[MI8Raw] = ea to ptr[MI8Raw]
+            __mantiq_nz_strbuf_append_i64(bp to ptr, (deref e1).v8 to i64)
+        elif elem_size == 24 to i64:
+            let es as ptr[MStrRaw] = ea to ptr[MStrRaw]
+            __mantiq_nz_strbuf_append(bp to ptr, (deref es).sdata to ptr, (deref es).slen)
+        else:
+            __mantiq_nz_strbuf_append(bp to ptr, ((cbuf to usize) + 4) to ptr, 3 to i64)
+        i = i + 1
+    __mantiq_nz_strbuf_append(bp to ptr, ((cbuf to usize) + 3) to ptr, 1 to i64)
+    if len_out != None to ptr:
+        let op as ptr[MOutRaw] = len_out to ptr[MOutRaw]
+        (deref op).outv = (deref bp).slen
+    if (deref bp).sdata == None to ptr[u8]:
+        let fb as ptr[u8] = mantiq_malloc(2 to i64) to ptr[u8]
+        if fb != None to ptr[u8]:
+            fb[0] = 91 to u8
+            fb[1] = 0 to u8
+            (deref bp).sdata = fb
+    mantiq_free(cbuf to ptr)
+    return (deref bp).sdata to ptr
+
+// hex dump of a u8 list into an owned string slot (runtime.c __mantiq_list_hex)
+fn __mantiq_list_hex(out_str as ptr, list_addr as ptr):
+    extern fn mantiq_malloc(size as i64) as ptr
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    let s as ptr[MStrRaw] = out_str to ptr[MStrRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen == 0 to i64:
+        let buf as ptr[u8] = mantiq_malloc(1 to i64) to ptr[u8]
+        if buf != None to ptr[u8]:
+            buf[0] = 0 to u8
+        (deref s).sdata = buf
+        (deref s).slen = 0 to i64
+        (deref s).scap = 1 to i64
+        return
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    let hex_len as i64 = llen * 2
+    let buf as ptr[u8] = mantiq_malloc(hex_len + 1) to ptr[u8]
+    if buf == None to ptr[u8]:
+        (deref s).sdata = None to ptr[u8]
+        (deref s).slen = 0 to i64
+        (deref s).scap = 0 to i64
+        return
+    var i as i64 = 0
+    while i < llen:
+        let btmp as i64 = ldata[i] to i64
+        let hi as i64 = btmp / 16
+        let lo as i64 = btmp & 15
+        var chc as i64 = 48 + hi
+        if hi > 9 to i64:
+            chc = 87 + hi
+        var chd as i64 = 48 + lo
+        if lo > 9 to i64:
+            chd = 87 + lo
+        buf[i * 2] = chc to u8
+        buf[i * 2 + 1] = chd to u8
+        i = i + 1
+    buf[hex_len] = 0 to u8
+    (deref s).sdata = buf
+    (deref s).slen = hex_len
+    (deref s).scap = hex_len + 1
+
+// byte-string build from a u8 list into an owned string slot
+fn __mantiq_list_decode(out_str as ptr, list_addr as ptr):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if list_addr == None to ptr:
+        return
+    let l as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    let s as ptr[MStrRaw] = out_str to ptr[MStrRaw]
+    if (deref l).mdata == None to ptr[u8] or (deref l).mlen == 0 to i64:
+        let buf as ptr[u8] = mantiq_malloc(1 to i64) to ptr[u8]
+        if buf != None to ptr[u8]:
+            buf[0] = 0 to u8
+        (deref s).sdata = buf
+        (deref s).slen = 0 to i64
+        (deref s).scap = 1 to i64
+        return
+    let ldata as ptr[u8] = (deref l).mdata
+    let llen as i64 = (deref l).mlen
+    let buf as ptr[u8] = mantiq_malloc(llen + 1) to ptr[u8]
+    if buf == None to ptr[u8]:
+        (deref s).sdata = None to ptr[u8]
+        (deref s).slen = 0 to i64
+        (deref s).scap = 0 to i64
+        return
+    memcpy(buf to ptr, ldata to ptr, llen)
+    buf[llen] = 0 to u8
+    (deref s).sdata = buf
+    (deref s).slen = llen
+    (deref s).scap = llen + 1
+
+// byte list build from a hex string (runtime.c __mantiq_list_fromhex)
+fn __mantiq_list_fromhex(out_list as ptr, hex_str as ptr):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_strlen(s as ptr) as i64
+    let l as ptr[MListRaw] = out_list to ptr[MListRaw]
+    (deref l).mdata = None to ptr[u8]
+    (deref l).mlen = 0 to i64
+    (deref l).mcap = 0 to i64
+    if hex_str == None to ptr:
+        return
+    let hx as ptr[u8] = hex_str to ptr[u8]
+    let slen as i64 = mantiq_strlen(hex_str)
+    let count as i64 = slen / 2
+    if count == 0 to i64:
+        return
+    let data as ptr[u8] = mantiq_malloc(count) to ptr[u8]
+    if data == None to ptr[u8]:
+        return
+    (deref l).mdata = data
+    (deref l).mlen = count
+    (deref l).mcap = count
+    var i as i64 = 0
+    while i < count:
+        let h1 as i64 = hx[i * 2] to i64
+        let h2 as i64 = hx[i * 2 + 1] to i64
+        var v1 as i64 = 0
+        var v2 as i64 = 0
+        if h1 >= 48 to i64 and h1 <= 57 to i64:
+            v1 = h1 - 48
+        elif h1 >= 97 to i64 and h1 <= 102 to i64:
+            v1 = (h1 - 97) + 10
+        elif h1 >= 65 to i64 and h1 <= 70 to i64:
+            v1 = (h1 - 65) + 10
+        if h2 >= 48 to i64 and h2 <= 57 to i64:
+            v2 = h2 - 48
+        elif h2 >= 97 to i64 and h2 <= 102 to i64:
+            v2 = (h2 - 97) + 10
+        elif h2 >= 65 to i64 and h2 <= 70 to i64:
+            v2 = (h2 - 65) + 10
+        data[i] = ((v1 * 16) + v2) to u8
+        i = i + 1
+
+// grow the table x2 and move every live entry (runtime.c __mantiq_dict_resize)
+fn __mantiq_nz_dict_resize(dict_addr as ptr):
+    extern fn mantiq_malloc_raw(size as i64) as ptr
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    extern fn memset(dst as ptr, val as i32, n as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    let old_cap as i64 = (deref d).capacity to i64
+    let old_keys as ptr[u8] = (deref d).keys
+    let old_vals as ptr[u8] = (deref d).values
+    let old_hashes as ptr[i32] = (deref d).hashes
+    let old_occ as ptr[u8] = (deref d).occupied
+    let ks as i64 = (deref d).key_size to i64
+    let vs as i64 = (deref d).val_size to i64
+    let ncap as i64 = old_cap * 2
+
+    (deref d).capacity = ncap to i32
+    (deref d).keys = mantiq_malloc_raw(ncap * ks) to ptr[u8]
+    (deref d).values = mantiq_malloc_raw(ncap * vs) to ptr[u8]
+    (deref d).hashes = mantiq_malloc_raw(ncap * 4) to ptr[i32]
+    (deref d).occupied = mantiq_malloc(ncap) to ptr[u8]
+    memset((deref d).occupied to ptr, 0 to i32, ncap)
+    (deref d).count = 0 to i32
+
+    let mask as i64 = ncap - 1
+    let nkeys as ptr[u8] = (deref d).keys
+    let nvals as ptr[u8] = (deref d).values
+    let nhashes as ptr[i32] = (deref d).hashes
+    let nocc as ptr[u8] = (deref d).occupied
+    var i as i64 = 0
+    while i < old_cap:
+        if old_occ[i] != 0 to u8:
+            let hash as i32 = old_hashes[i]
+            var idx as i64 = (hash to i64) & mask
+            while nocc[idx] != 0 to u8:
+                idx = (idx + 1) & mask
+            nocc[idx] = 1 to u8
+            nhashes[idx] = hash
+            memcpy(((nkeys to usize) + ((idx * ks) to usize)) to ptr, ((old_keys to usize) + ((i * ks) to usize)) to ptr, ks)
+            memcpy(((nvals to usize) + ((idx * vs) to usize)) to ptr, ((old_vals to usize) + ((i * vs) to usize)) to ptr, vs)
+            (deref d).count = (deref d).count + 1 to i32
+        i = i + 1
+
+    mantiq_free(old_keys to ptr)
+    mantiq_free(old_vals to ptr)
+    mantiq_free(old_hashes to ptr)
+    mantiq_free(old_occ to ptr)
+
+fn __mantiq_dict_create_with_capacity(key_size as i32, val_size as i32, is_string_key as i32, initial_capacity as i32) as ptr:
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_malloc_raw(size as i64) as ptr
+    extern fn memset(dst as ptr, val as i32, n as i64) as ptr
+    var cap as i32 = initial_capacity
+    if cap < 8 to i32:
+        cap = 8 to i32
+    var p as i32 = 1 to i32
+    while p < cap and p < 1073741824 to i32:
+        p = p * 2 to i32
+    let dp as ptr[MDictRaw] = mantiq_malloc(56 to i64) to ptr[MDictRaw]
+    (deref dp).capacity = p
+    (deref dp).count = 0 to i32
+    (deref dp).key_size = key_size
+    (deref dp).val_size = val_size
+    (deref dp).is_string_key = is_string_key
+    (deref dp).keys = mantiq_malloc_raw((p to i64) * (key_size to i64)) to ptr[u8]
+    (deref dp).values = mantiq_malloc_raw((p to i64) * (val_size to i64)) to ptr[u8]
+    (deref dp).hashes = mantiq_malloc_raw((p to i64) * 4) to ptr[i32]
+    (deref dp).occupied = mantiq_malloc(p to i64) to ptr[u8]
+    memset((deref dp).occupied to ptr, 0 to i32, p to i64)
+    return dp to ptr
+
+fn __mantiq_dict_create(key_size as i32, val_size as i32, is_string_key as i32) as ptr:
+    return __mantiq_dict_create_with_capacity(key_size, val_size, is_string_key, 8 to i32)
+
+fn __mantiq_dict_set(dict_addr as ptr, key as ptr, val as ptr, hash as i32):
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    if ((deref d).count to i64 * 2) >= ((deref d).capacity to i64):
+        __mantiq_nz_dict_resize(dict_addr)
+    let cap as i64 = (deref d).capacity to i64
+    let mask as i64 = cap - 1
+    let ks as i64 = (deref d).key_size to i64
+    let vs as i64 = (deref d).val_size to i64
+    let sk as i32 = (deref d).is_string_key
+    var idx as i64 = (hash to i64) & mask
+    let occ as ptr[u8] = (deref d).occupied
+    let harr as ptr[i32] = (deref d).hashes
+    let karr as ptr[u8] = (deref d).keys
+    let varr as ptr[u8] = (deref d).values
+    while occ[idx] != 0 to u8:
+        if harr[idx] == hash:
+            let slot as ptr = ((karr to usize) + ((idx * ks) to usize)) to ptr
+            if __mantiq_nz_key_match(slot, key, ks, sk) == 1 to i32:
+                memcpy(((varr to usize) + ((idx * vs) to usize)) to ptr, val, vs)
+                return
+        idx = (idx + 1) & mask
+    occ[idx] = 1 to u8
+    harr[idx] = hash
+    memcpy(((karr to usize) + ((idx * ks) to usize)) to ptr, key, ks)
+    memcpy(((varr to usize) + ((idx * vs) to usize)) to ptr, val, vs)
+    (deref d).count = (deref d).count + 1 to i32
+
+fn __mantiq_dict_get(dict_addr as ptr, key as ptr, hash as i32) as ptr:
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    let cap as i64 = (deref d).capacity to i64
+    let mask as i64 = cap - 1
+    let ks as i64 = (deref d).key_size to i64
+    let vs as i64 = (deref d).val_size to i64
+    let sk as i32 = (deref d).is_string_key
+    var idx as i64 = (hash to i64) & mask
+    let occ as ptr[u8] = (deref d).occupied
+    let harr as ptr[i32] = (deref d).hashes
+    let karr as ptr[u8] = (deref d).keys
+    let varr as ptr[u8] = (deref d).values
+    while occ[idx] != 0 to u8:
+        if harr[idx] == hash:
+            let slot as ptr = ((karr to usize) + ((idx * ks) to usize)) to ptr
+            if __mantiq_nz_key_match(slot, key, ks, sk) == 1 to i32:
+                return ((varr to usize) + ((idx * vs) to usize)) to ptr
+        idx = (idx + 1) & mask
+    return None to ptr
+
+fn __mantiq_dict_get_or_insert(dict_addr as ptr, key as ptr, hash as i32) as ptr:
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    if ((deref d).count to i64 * 2) >= ((deref d).capacity to i64):
+        __mantiq_nz_dict_resize(dict_addr)
+    let cap as i64 = (deref d).capacity to i64
+    let mask as i64 = cap - 1
+    let ks as i64 = (deref d).key_size to i64
+    let vs as i64 = (deref d).val_size to i64
+    let sk as i32 = (deref d).is_string_key
+    var idx as i64 = (hash to i64) & mask
+    let occ as ptr[u8] = (deref d).occupied
+    let harr as ptr[i32] = (deref d).hashes
+    let karr as ptr[u8] = (deref d).keys
+    let varr as ptr[u8] = (deref d).values
+    while occ[idx] != 0 to u8:
+        if harr[idx] == hash:
+            let slot as ptr = ((karr to usize) + ((idx * ks) to usize)) to ptr
+            if __mantiq_nz_key_match(slot, key, ks, sk) == 1 to i32:
+                return ((varr to usize) + ((idx * vs) to usize)) to ptr
+        idx = (idx + 1) & mask
+    occ[idx] = 1 to u8
+    harr[idx] = hash
+    memcpy(((karr to usize) + ((idx * ks) to usize)) to ptr, key, ks)
+    (deref d).count = (deref d).count + 1 to i32
+    return ((varr to usize) + ((idx * vs) to usize)) to ptr
+
+// backwards-shift deletion with rehash of the cluster; snapshot copies of the
+// moved key/value protect the reinsert against a resize inside dict_set
+fn __mantiq_dict_remove(dict_addr as ptr, key as ptr, hash as i32) as i8:
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn mantiq_free(ptr_val as ptr)
+    extern fn memcmp(a as ptr, b as ptr, n as i64) as i32
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    let cap as i64 = (deref d).capacity to i64
+    let mask as i64 = cap - 1
+    let ks as i64 = (deref d).key_size to i64
+    let sk as i32 = (deref d).is_string_key
+    var idx as i64 = (hash to i64) & mask
+    var go as i32 = 1 to i32
+    while go == 1 to i32:
+        let occ as ptr[u8] = (deref d).occupied
+        if occ[idx] == 0 to u8:
+            return 0 to i8
+        let harr as ptr[i32] = (deref d).hashes
+        if (harr[idx]) == hash:
+            let karr as ptr[u8] = (deref d).keys
+            let slot as ptr = ((karr to usize) + ((idx * ks) to usize)) to ptr
+            if __mantiq_nz_key_match(slot, key, ks, sk) == 1 to i32:
+                go = 0 to i32
+            else:
+                idx = (idx + 1) & mask
+        else:
+            idx = (idx + 1) & mask
+    let occ as ptr[u8] = (deref d).occupied
+    occ[idx] = 0 to u8
+    (deref d).count = (deref d).count - 1 to i32
+    var nxt as i64 = (idx + 1) & mask
+    var go2 as i32 = 1 to i32
+    while go2 == 1 to i32:
+        let occ2 as ptr[u8] = (deref d).occupied
+        if occ2[nxt] == 0 to u8:
+            go2 = 0 to i32
+        else:
+            occ2[nxt] = 0 to u8
+            (deref d).count = (deref d).count - 1 to i32
+            let karr2 as ptr[u8] = (deref d).keys
+            let varr2 as ptr[u8] = (deref d).values
+            let nvs as i64 = (deref d).val_size to i64
+            let harr2 as ptr[i32] = (deref d).hashes
+            let nh as i32 = (harr2[nxt])
+            let nk as ptr = ((karr2 to usize) + ((nxt * ks) to usize)) to ptr
+            let nv as ptr = ((varr2 to usize) + ((nxt * nvs) to usize)) to ptr
+            // snapshot the entry: dict_set below may realloc the table
+            let kcopy as ptr[u8] = mantiq_malloc(ks) to ptr[u8]
+            let vcopy as ptr[u8] = mantiq_malloc(nvs) to ptr[u8]
+            if kcopy != None to ptr[u8] and vcopy != None to ptr[u8]:
+                memcpy(kcopy to ptr, nk, ks)
+                memcpy(vcopy to ptr, nv, nvs)
+                __mantiq_dict_set(dict_addr, kcopy to ptr, vcopy to ptr, nh)
+                mantiq_free(kcopy to ptr)
+                mantiq_free(vcopy to ptr)
+            nxt = (nxt + 1) & mask
+    return 1 to i8
+
+fn __mantiq_dict_clear(dict_addr as ptr):
+    extern fn memset(dst as ptr, val as i32, n as i64) as ptr
+    if dict_addr == None to ptr:
+        return
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    (deref d).count = 0 to i32
+    memset((deref d).occupied to ptr, 0 to i32, (deref d).capacity to i64)
+
+fn __mantiq_dict_keys(dict_addr as ptr, list_addr as ptr, key_size as i32):
+    extern fn mantiq_malloc(size as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dict_addr == None to ptr or list_addr == None to ptr:
+        return
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    let i32cap as i64 = (deref d).capacity to i64
+    let ks as i64 = (deref d).key_size to i64
+    let karr as ptr[u8] = (deref d).keys
+    let occ as ptr[u8] = (deref d).occupied
+    var i as i64 = 0
+    while i < i32cap:
+        if occ[i] != 0 to u8:
+            let kp as ptr = ((karr to usize) + ((i * ks) to usize)) to ptr
+            __mantiq_list_append(list_addr, kp, key_size to i64)
+            if key_size == 24 to i32:
+                // The returned list owns its elements' drop glue: clone the
+                // string buffer so the list never frees borrowed data
+                // (literals/stack views) or the same buffer twice.
+                let se as ptr[MStrRaw] = kp to ptr[MStrRaw]
+                let lst as ptr[MListRaw] = list_addr to ptr[MListRaw]
+                let de as ptr[MStrRaw] = (((deref lst).mdata to usize) + (((deref lst).mlen - 1 to i64) * 24) to usize) to ptr[MStrRaw]
+                let elen as i64 = (deref se).slen
+                if elen > 0 to i64:
+                    let nb as ptr[u8] = mantiq_malloc(elen) to ptr[u8]
+                    if nb != None to ptr[u8]:
+                        memcpy(nb to ptr, (deref se).sdata to ptr, elen)
+                        (deref de).sdata = nb
+                        (deref de).scap = elen
+        i = i + 1
+
+fn __mantiq_dict_values(dict_addr as ptr, list_addr as ptr, val_size as i32):
+    if dict_addr == None to ptr or list_addr == None to ptr:
+        return
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    let i32cap as i64 = (deref d).capacity to i64
+    let vs as i64 = (deref d).val_size to i64
+    let varr as ptr[u8] = (deref d).values
+    let occ as ptr[u8] = (deref d).occupied
+    var i as i64 = 0
+    while i < i32cap:
+        if occ[i] != 0 to u8:
+            let vp as ptr = ((varr to usize) + ((i * vs) to usize)) to ptr
+            __mantiq_list_append(list_addr, vp, val_size to i64)
+        i = i + 1
+
+fn __mantiq_dict_copy(dest_addr as ptr, src_addr as ptr):
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dest_addr == None to ptr:
+        return
+    let dd as ptr[MDictFatRaw] = dest_addr to ptr[MDictFatRaw]
+    (deref dd).dict = None to ptr
+    (deref dd).fdictlen = 0 to i64
+    (deref dd).fdictcap = 0 to i64
+    if src_addr == None to ptr:
+        return
+    let sd as ptr[MDictFatRaw] = src_addr to ptr[MDictFatRaw]
+    let src_dict as ptr[MDictRaw] = (deref sd).dict to ptr[MDictRaw]
+    if (deref sd).dict == None to ptr:
+        return
+    let new_dict_ptr as ptr = __mantiq_dict_create_with_capacity((deref src_dict).key_size, (deref src_dict).val_size, (deref src_dict).is_string_key, (deref src_dict).capacity)
+    let nd as ptr[MDictRaw] = new_dict_ptr to ptr[MDictRaw]
+    (deref nd).count = (deref src_dict).count
+    let acc as i64 = (deref src_dict).capacity to i64
+    let sks as i64 = (deref src_dict).key_size to i64
+    let svs as i64 = (deref src_dict).val_size to i64
+    memcpy((deref nd).keys to ptr, (deref src_dict).keys to ptr, acc * sks)
+    memcpy((deref nd).values to ptr, (deref src_dict).values to ptr, acc * svs)
+    memcpy((deref nd).hashes to ptr, (deref src_dict).hashes to ptr, acc * 4)
+    memcpy((deref nd).occupied to ptr, (deref src_dict).occupied to ptr, acc)
+    (deref dd).dict = new_dict_ptr
+    (deref dd).fdictlen = (deref src_dict).count to i64
+    (deref dd).fdictcap = acc
+
+fn __mantiq_dict_setdefault(dict_addr as ptr, key as ptr, default_val as ptr, hash as i32) as ptr:
+    if dict_addr == None to ptr:
+        return None to ptr
+    let existing as ptr = __mantiq_dict_get(dict_addr, key, hash)
+    if existing != None to ptr:
+        return existing
+    __mantiq_dict_set(dict_addr, key, default_val, hash)
+    return __mantiq_dict_get(dict_addr, key, hash)
+
+fn __mantiq_dict_pop(dict_addr as ptr, key as ptr, hash as i32, out_val as ptr, val_size as i32) as i8:
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dict_addr == None to ptr:
+        return 0 to i8
+    let val as ptr = __mantiq_dict_get(dict_addr, key, hash)
+    if val == None to ptr:
+        return 0 to i8
+    if out_val != None to ptr:
+        memcpy(out_val, val, val_size to i64)
+    return __mantiq_dict_remove(dict_addr, key, hash)
+
+fn __mantiq_dict_popitem(dict_addr as ptr, out_key as ptr, out_val as ptr, key_size as i32, val_size as i32) as i8:
+    extern fn memcpy(dst as ptr, src as ptr, n as i64) as ptr
+    if dict_addr == None to ptr:
+        return 0 to i8
+    let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
+    if (deref d).count == 0 to i32:
+        return 0 to i8
+    let cap as i64 = (deref d).capacity to i64
+    let ks as i64 = (deref d).key_size to i64
+    let vs as i64 = (deref d).val_size to i64
+    let karr as ptr[u8] = (deref d).keys
+    let varr as ptr[u8] = (deref d).values
+    let occ as ptr[u8] = (deref d).occupied
+    var i as i64 = 0
+    while i < cap:
+        if occ[i] != 0 to u8:
+            if out_key != None to ptr:
+                memcpy(out_key, ((karr to usize) + ((i * ks) to usize)) to ptr, key_size to i64)
+                if key_size == 24 to i32:
+                    // out_key receives drop glue ownership: clone the buffer
+                    // so dropping the popped key never frees data shared
+                    // with the dict's key array or the source container.
+                    extern fn mantiq_malloc(size as i64) as ptr
+                    let se as ptr[MStrRaw] = ((karr to usize) + ((i * ks) to usize)) to ptr[MStrRaw]
+                    let de as ptr[MStrRaw] = out_key to ptr[MStrRaw]
+                    let elen as i64 = (deref se).slen
+                    if elen > 0 to i64:
+                        let nb as ptr[u8] = mantiq_malloc(elen) to ptr[u8]
+                        if nb != None to ptr[u8]:
+                            memcpy(nb to ptr, (deref se).sdata to ptr, elen)
+                            (deref de).sdata = nb
+                            (deref de).scap = elen
+            if out_val != None to ptr:
+                memcpy(out_val, ((varr to usize) + ((i * vs) to usize)) to ptr, val_size to i64)
+            let harr as ptr[i32] = (deref d).hashes
+            let h as i32 = (harr[i])
+            let k as ptr = ((karr to usize) + ((i * ks) to usize)) to ptr
+            return __mantiq_dict_remove(dict_addr, k, h)
+        i = i + 1
+    return 0 to i8
+
+fn __mantiq_dict_merge(dest_addr as ptr, src_addr as ptr):
+    if dest_addr == None to ptr or src_addr == None to ptr:
+        return
+    let sdd as ptr[MDictRaw] = src_addr to ptr[MDictRaw]
+    let cap as i64 = (deref sdd).capacity to i64
+    let ks as i64 = (deref sdd).key_size to i64
+    let vs as i64 = (deref sdd).val_size to i64
+    let varr as ptr[u8] = (deref sdd).values
+    let shash as ptr[i32] = (deref sdd).hashes
+    let skeys as ptr[u8] = (deref sdd).keys
+    let socc as ptr[u8] = (deref sdd).occupied
+    var i as i64 = 0
+    while i < cap:
+        if socc[i] != 0 to u8:
+            let k as ptr = ((skeys to usize) + ((i * ks) to usize)) to ptr
+            let v as ptr = ((varr to usize) + ((i * vs) to usize)) to ptr
+            let h as i32 = shash[i]
+            __mantiq_dict_set(dest_addr, k, v, h)
+        i = i + 1
+
+fn __mantiq_dict_fromkeys(dest_addr as ptr, src_addr as ptr, list_addr as ptr, default_val as ptr, key_size as i32, val_size as i32):
+    extern fn calloc(n as i64, sz as i64) as ptr
+    extern fn free(p as ptr)
+    let dd as ptr[MDictFatRaw] = dest_addr to ptr[MDictFatRaw]
+    if dest_addr == None to ptr:
+        return
+    (deref dd).dict = None to ptr
+    (deref dd).fdictlen = 0 to i64
+    (deref dd).fdictcap = 0 to i64
+    if list_addr == None to ptr:
+        return
+    let ll as ptr[MListRaw] = list_addr to ptr[MListRaw]
+    let llen as i64 = (deref ll).mlen
+    var ks as i64 = key_size to i64
+    var vs as i64 = val_size to i64
+    var is_str as i32 = 0 to i32
+    if src_addr != None to ptr:
+        let sd as ptr[MDictFatRaw] = src_addr to ptr[MDictFatRaw]
+        let sdict as ptr[MDictRaw] = (deref sd).dict to ptr[MDictRaw]
+        if (deref sd).dict != None to ptr:
+            if ks <= 0 to i64:
+                ks = (deref sdict).key_size to i64
+            if vs <= 0 to i64:
+                vs = (deref sdict).val_size to i64
+            if (deref sdict).is_string_key > 0 to i32:
+                is_str = (deref sdict).is_string_key
+    if is_str == 0 to i32:
+        if ks == 24 to i64:
+            is_str = 2 to i32
+        elif ks == 16 to i64:
+            is_str = 1 to i32
+    if ks <= 0 to i64:
+        ks = 8 to i64
+    if vs <= 0 to i64:
+        vs = 8 to i64
+    var init_cap as i32 = 8 to i32
+    if llen > 8 to i64:
+        init_cap = (llen * 2 to i64) to i32
+    let new_dict_ptr as ptr = __mantiq_dict_create_with_capacity(ks to i32, vs to i32, is_str, init_cap)
+    var dval as ptr = default_val
+    var zero_val as ptr = None to ptr
+    if dval == None to ptr:
+        zero_val = calloc(1 to i64, vs)
+        dval = zero_val
+    let ldata as ptr[u8] = (deref ll).mdata
+    var i as i64 = 0
+    while i < llen:
+        let key_ptr as ptr = ((ldata to usize) + ((i * ks) to usize)) to ptr
+        var hash as i32 = 0 to i32
+        if is_str == 1 to i32 or is_str == 2 to i32:
+            let kk as ptr[MStrRaw] = key_ptr to ptr[MStrRaw]
+            hash = __mantiq_hash_string((deref kk).sdata to cstr, (deref kk).slen)
+        else:
+            hash = __mantiq_hash_bytes(key_ptr, ks)
+        __mantiq_dict_set(new_dict_ptr, key_ptr, dval, hash)
+        i = i + 1
+    if zero_val != None to ptr:
+        free(zero_val)
+    (deref dd).dict = new_dict_ptr
+    let nd as ptr[MDictRaw] = new_dict_ptr to ptr[MDictRaw]
+    (deref dd).fdictlen = (deref nd).count to i64
+    (deref dd).fdictcap = (deref nd).capacity to i64
+
 
 
 // ── Bytes ─────────────────────────────────────────────────────────────

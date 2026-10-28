@@ -1,0 +1,19 @@
+// Probe: minimal Tuple from_list + get path.
+from std.string import String
+from std.collections import Tuple, List
+
+extern fn printf(format as cstr, ...) as i32
+
+fn main():
+    var t as Tuple[i64] = Tuple[i64]()
+    (deref (ref t)).init()
+    let _p0 as i32 = printf("init ok\n" to cstr)
+    var l as List[i64] = List[i64]()
+    (ref l).append(10 to i64)
+    (ref l).append(20 to i64)
+    (ref l).append(40 to i64)
+    let _p1 as i32 = printf("list built len=%lld\n" to cstr, (ref l).length())
+    (deref (ref t)).from_list(l)
+    let _p2 as i32 = printf("from_list done tlen=%lld\n" to cstr, (deref (ref t)).length())
+    let g0 as i64 = (deref (ref t)).get(0 to i64)
+    let _p3 as i32 = printf("get0=%lld\n" to cstr, g0)

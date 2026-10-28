@@ -1,0 +1,9 @@
+fn main() as i32:
+    let l as List[i32] = List[i32]()
+    l.append(7)
+    l.append(11)
+    let s as i32 = l.pop()
+    print("pop=")
+    print(s)
+    print("\n")
+    return 0

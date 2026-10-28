@@ -1,0 +1,12 @@
+fn thunk(n as i32) as i32:
+    return n * 3
+
+fn callthrough(f as ptr, x as i32) as i32:
+    return f(x)
+
+fn main() as i32:
+    let out as i32 = callthrough(thunk, 5)
+    print("res=")
+    print(out)
+    print("\n")
+    return 0

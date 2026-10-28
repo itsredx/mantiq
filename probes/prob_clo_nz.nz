@@ -1,0 +1,10 @@
+fn main() as i32:
+    let factor as i32 = 10
+    let offset as i32 = 5
+    let scale_and_offset = (x as i32) => x * factor + offset
+    let res3 as i32 = scale_and_offset(4)
+    if res3 != 45:
+        print("  FAIL: Lexical capture expected 45")
+        return 1
+    print("  PASS: Lexical Environment Heap Capture")
+    return 0

@@ -84,7 +84,14 @@ fn strip_generic_base(name as String) as String:
         else:
             br_pos = br_pos + 1 to usize
     if not found_br or br_pos == 0 to usize:
-        return name
+        // Return a FRESH copy, never the input alias: callers (e.g.
+        // struct_method_params) auto-drop this value at every return path,
+        // and returning `name` aliased the caller's data, producing
+        // double-frees / dangling type-name Strings (ASan-confirmed).
+        let alloc_all as ptr[u8] = make[u8](name.len + 1 to usize) to ptr[u8]
+        let _call as ptr = memcpy(alloc_all to ptr, name.data to ptr, name.len)
+        alloc_all[name.len] = 0 to u8
+        return String(data = alloc_all, len = name.len, capacity = name.len + 1 to usize)
     let alloc as ptr[u8] = make[u8](br_pos + 1 to usize) to ptr[u8]
     let _c as ptr = memcpy(alloc to ptr, name.data to ptr, br_pos)
     alloc[br_pos] = 0 to u8
@@ -1143,12 +1150,19 @@ struct TypeChecker:
             
             if node_left(node) != None to ptr[Node]:
                 let init_node as ptr[Node] = node_left(node)
-                
+
                 if annotated_type != None to ptr[Type]:
                     if node_kind(init_node) == NodeType.NumberLiteral:
                         set_node_inferred_type(init_node, annotated_type)
-                    
+
                     let init_type as ptr[Type] = self.typecheck_node(init_node)
+                    // Propagate the declared Dict type to dict-literal inits:
+                    // typecheck_node(DictLiteral) stores a bare Dict (no name/payload),
+                    // which made emit_dict_literal fall back to hardcoded (4,4) sizes.
+                    if node_kind(init_node) == NodeType.DictLiteral and (deref annotated_type).kind == TypeKind.Dict and (deref annotated_type).payload != None to ptr[Type]:
+                        let lit_t as ptr[Type] = node_inferred_type(init_node)
+                        if lit_t == None to ptr[Type] or (deref lit_t).payload == None to ptr[Type]:
+                            set_node_inferred_type(init_node, annotated_type)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
                         let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make("type mismatch in variable initialization" to cstr), node)
                         if d != None to ptr[Diagnostic]:
@@ -2167,6 +2181,13 @@ struct TypeChecker:
                 if (deref operand_t).kind == TypeKind.RawPointer and (deref operand_t).payload != None to ptr[Type]:
                     ret_type = (deref operand_t).payload
                 elif (deref operand_t).kind == TypeKind.Class or (deref operand_t).kind == TypeKind.Struct:
+                    ret_type = operand_t
+                elif (deref operand_t).kind == TypeKind.Dict or (deref operand_t).kind == TypeKind.List or (deref operand_t).kind == TypeKind.String or (deref operand_t).kind == TypeKind.Set or (deref operand_t).kind == TypeKind.Tuple:
+                    // Deref of a by-value aggregate is identity. Previously this
+                    // fell to TypeKind.Any, so dict/list index dispatch
+                    // (node_index_collection_is_dict) missed these sites and the
+                    // generic array-index path emitted `{ ptr, i64, i64 }` values
+                    // used as `ptr` (invalid IR, dictsize-class failure).
                     ret_type = operand_t
                 else:
                     ret_type = make_type(TypeKind.Any)

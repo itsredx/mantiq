@@ -1,0 +1,206 @@
+from std.string import String, StringBuilder
+from std.collections import List
+from std.mem import make
+
+fn append_cstr(sb as ptr[StringBuilder], s as cstr):
+    (deref sb).append(s)
+
+fn slen(data as ptr[u8], at as i64, blen as i64) as i64:
+    var depth as i64 = 0 to i64
+    var k as i64 = 1 to i64
+    while (at + k) < blen:
+        let c as u8 = deref ((data to usize + (at + k)) to ptr[u8])
+        if c == 123 to u8 or c == 91 to u8:
+            depth = depth + 1 to i64
+        elif c == 125 to u8 or c == 93 to u8:
+            depth = depth - 1 to i64
+        elif (c == 32 to u8 or c == 44 to u8 or c == 40 to u8) and depth == 0 to i64:
+            break
+        k = k + 1 to i64
+    return k - 1 to i64
+
+fn scopy(data as ptr[u8], at as i64, blen as i64, arena as ptr[u8], cur_off as i64) as i64:
+    let nlen as i64 = slen(data, at, blen) to i64
+    if nlen <= 0 to i64 or nlen > 4096 to i64:
+        return cur_off
+    var k as i64 = 0 to i64
+    while k < nlen:
+        let srcb as u8 = (deref ((data to usize + (at + 1 to i64 + k)) to ptr[u8]))
+        arena[(cur_off + k)] = srcb
+        k = k + 1 to i64
+    arena[(cur_off + nlen)] = 0 to u8
+    return (cur_off + nlen + 1 to i64)
+
+fn n_contains(offs as List[i64], ends as List[i64], arena as ptr[u8], name_data as ptr[u8], name_len as i64) as i32:
+    let n as i64 = offs.length()
+    var i as i64 = 0 to i64
+    while i < n:
+        let sv as i64 = offs[i]
+        let ev as i64 = ends[i]
+        let seglen as i64 = (ev - sv) - 1 to i64
+        if seglen == name_len:
+            var k as i64 = 0 to i64
+            var matched as i32 = 1 to i32
+            while k < name_len:
+                let ab as u8 = deref ((arena to usize + (sv + k)) to ptr[u8])
+                let nb as u8 = deref ((name_data to usize + k) to ptr[u8])
+                if ab != nb:
+                    matched = 0 to i32
+                k = k + 1 to i64
+            if matched == 1 to i32:
+                return 1 to i32
+        i = i + 1 to i64
+    return 0 to i32
+
+fn filter_declares(text as String) as String:
+    if text.data == None to ptr[u8]:
+        return text
+    let td as ptr[u8] = text.data
+    let tleni as i64 = text.len to i64
+    let arena as ptr[u8] = make[u8](tleni + 512 to i64)
+    var cur as i64 = 0 to i64
+    var offs as List[i64] = List[i64]()
+    var ends as List[i64] = List[i64]()
+    var p as i64 = 0 to i64
+    while p < tleni:
+        let c as u8 = deref ((td to usize + p) to ptr[u8])
+        if c == 100 to u8 and (p == 0 to usize or deref ((td to usize + (p - 1 to usize)) to ptr[u8]) == 10 to u8):
+            if p + 6 <= tleni:
+                let c1 as u8 = deref ((td to usize + (p + 1 to usize)) to ptr[u8])
+                let c2 as u8 = deref ((td to usize + (p + 2 to usize)) to ptr[u8])
+                let c3 as u8 = deref ((td to usize + (p + 3 to usize)) to ptr[u8])
+                let c4 as u8 = deref ((td to usize + (p + 4 to usize)) to ptr[u8])
+                let c5 as u8 = deref ((td to usize + (p + 5 to usize)) to ptr[u8])
+                if c1 == 101 to u8 and c2 == 102 to u8 and c3 == 105 to u8 and c4 == 110 to u8 and c5 == 101 to u8:
+                    var q as i64 = p + 6 to i64
+                    var depth as i64 = 0 to i64
+                    var got_at as i32 = 0 to i32
+                    var at as i64 = 0 to i64
+                    while q < tleni and got_at == 0 to i32:
+                        let cc as u8 = deref ((td to usize + q) to ptr[u8])
+                        if cc == 40 to u8 and depth == 0 to i64:
+                            q = tleni
+                        elif cc == 64 to u8 and depth == 0 to i64:
+                            at = q
+                            got_at = 1 to i32
+                        elif (cc == 10 to u8 or cc == 59 to u8) and depth == 0 to i64:
+                            q = tleni
+                        elif cc == 123 to u8 or cc == 91 to u8:
+                            depth = depth + 1 to i64
+                            q = q + 1 to i64
+                        elif cc == 125 to u8 or cc == 93 to u8:
+                            depth = depth - 1 to i64
+                            q = q + 1 to i64
+                        else:
+                            q = q + 1 to i64
+                    if got_at == 1 to i32:
+                        let newcur as i64 = scopy(td, at, tleni, arena, cur)
+                        if newcur != cur:
+                            offs.append(cur)
+                            ends.append(newcur)
+                            cur = newcur
+                    p = p + 7 to i64
+        p = p + 1 to i64
+    let out2 as StringBuilder = StringBuilder.make()
+    let op2 as ptr[StringBuilder] = ref out2
+    var i as i64 = 0 to i64
+    var line_start as i64 = 0 to i64
+    let seen_arena as ptr[u8] = make[u8](tleni + 512 to i64)
+    var scur as i64 = 0 to i64
+    var offs2 as List[i64] = List[i64]()
+    var ends2 as List[i64] = List[i64]()
+    while i <= tleni:
+        let raw as u8 = if i == tleni:
+            10 to u8
+        else:
+            deref ((td to usize + i) to ptr[u8])
+        if raw == 10 to u8:
+            let llen as i64 = i - line_start
+            var keep as i32 = 1 to i32
+            if llen > 8 to i64:
+                let d0 as u8 = deref ((td to usize + line_start) to ptr[u8])
+                let d1 as u8 = deref ((td to usize + (line_start + 1 to i64)) to ptr[u8])
+                let d2 as u8 = deref ((td to usize + (line_start + 2 to i64)) to ptr[u8])
+                let d3 as u8 = deref ((td to usize + (line_start + 3 to i64)) to ptr[u8])
+                let d4 as u8 = deref ((td to usize + (line_start + 4 to i64)) to ptr[u8])
+                let d5 as u8 = deref ((td to usize + (line_start + 5 to i64)) to ptr[u8])
+                let d6 as u8 = deref ((td to usize + (line_start + 6 to i64)) to ptr[u8])
+                let d7 as u8 = deref ((td to usize + (line_start + 7 to i64)) to ptr[u8])
+                if d0 == 100 to u8 and d1 == 101 to u8 and d2 == 99 to u8 and d3 == 108 to u8 and d4 == 97 to u8 and d5 == 114 to u8 and d6 == 101 to u8 and d7 == 32 to u8:
+                    var q as i64 = line_start + 8 to i64
+                    var depth as i64 = 0 to i64
+                    var got_at as i32 = 0 to i32
+                    var at as i64 = i
+                    while q < i and got_at == 0 to i32:
+                        let cc as u8 = deref ((td to usize + q) to ptr[u8])
+                        if cc == 64 to u8 and depth == 0 to i64:
+                            at = q
+                            got_at = 1 to i32
+                        elif cc == 123 to u8 or cc == 91 to u8:
+                            depth = depth + 1 to i64
+                            q = q + 1 to i64
+                        elif cc == 125 to u8 or cc == 93 to u8:
+                            depth = depth - 1 to i64
+                            q = q + 1 to i64
+                        elif cc == 40 to u8:
+                            q = i
+                        else:
+                            q = q + 1 to i64
+                    if got_at == 1 to i32:
+                        let nlen as i64 = slen(td, at, i) to i64
+                        if nlen > 0 to i64 and nlen <= 4096 to i64:
+                            if n_contains(offs, ends, arena, (td to usize + (at + 1 to i64)) to ptr[u8], nlen) == 1 to i32:
+                                keep = 0 to i32
+                            elif n_contains(offs2, ends2, seen_arena, (td to usize + (at + 1 to i64)) to ptr[u8], nlen) == 1 to i32:
+                                keep = 0 to i32
+                            else:
+                                let newcur as i64 = scopy(td, at, i, seen_arena, scur)
+                                if newcur != scur:
+                                    offs2.append(scur)
+                                    ends2.append(newcur)
+                                    scur = newcur
+            if keep == 1 to i32:
+                if llen > 0 to i64:
+                    (deref op2).append_slice((td to usize + line_start) to ptr[u8], llen)
+                if i < tleni:
+                    append_cstr(op2, "\n")
+            line_start = i + 1 to i64
+        i = i + 1 to i64
+    return out2.to_string()
+
+fn count_sub(hay as ptr[u8], hlen as i64, needle as cstr) as i64:
+    extern fn strlen(s as cstr) as usize
+    let nlen as usize = strlen(needle)
+    let nlen64 as i64 = nlen to i64
+    var count as i64 = 0 to i64
+    var i as i64 = 0 to i64
+    while i <= hlen - nlen64:
+        var j as i64 = 0 to i64
+        var ok as i32 = 1 to i32
+        while j < nlen64:
+            if deref ((hay to usize + (i + j)) to ptr[u8]) != deref (((needle to usize) + j) to ptr[u8]):
+                ok = 0 to i32
+            j = j + 1 to i64
+        if ok == 1 to i32:
+            count = count + 1 to i64
+        i = i + 1 to i64
+    return count
+
+fn main() as i32:
+    let input as String = String.make("declare i64 @mantiq_strlen(ptr)\ndeclare ptr @calloc(i64, i64)\n@.str = type [8 x i8]\n\ndeclare i64 @mantiq_strlen(ptr)\ndeclare i64 @mantiq_strlen(ptr)\ndeclare ptr @calloc(i64, i64)\n")
+    print("input-lines-len=")
+    print(input.len)
+    print("\n")
+    let result as String = filter_declares(input)
+    print("output-len=")
+    print(result.len)
+    print("\n")
+    let strlen_count as i64 = count_sub(result.data to ptr[u8], result.len to i64, "declare i64 @mantiq_strlen" to cstr)
+    let calloc_count as i64 = count_sub(result.data to ptr[u8], result.len to i64, "declare ptr @calloc" to cstr)
+    print("strlen-occurrences=")
+    print(strlen_count)
+    print("\n")
+    print("calloc-occurrences=")
+    print(calloc_count)
+    print("\n")
+    return 0

@@ -677,3 +677,55 @@ diff -u /tmp/nizam_stage5.ll /tmp/nizam_stage6.ll && cp /tmp/nizam_stage6 ./niza
 timeout 90s bash src/tests/run_tests.sh
 git add src/ && git add -f research/cmd
 git commit -m "feat(compiler): implement tagged-union Result/Option unboxing, try-catch handlers, and raise codegen"
+
+git add .gitignore docs/runtime-elimination-notes.md probes/ runtime.c src/runtime.c src/borrowck.nz src/cfg.nz src/codegen.nz src/main.nz src/sema.nz src/symbols.nz src/typecheck.nz std/collections.nz std/mem.nz research/cmd
+git commit -F - << 'EOF'
+refactor(runtime): port collections & allocators to pure Nizam with weak-linkage overlay and aliasing auto-drop fixes
+
+Architectural Changes:
+1. Pure-Nizam Collections Runtime (Milestone A):
+   - Ported core backing routines (__mantiq_dict_*, __mantiq_list_*) from runtime.c into pure Nizam in std/collections.nz.
+   - Introduced zero-overhead layout mirrors (MDictRaw, MDictFatRaw, MListRaw, MStrRaw, MStrBufRaw, MOutRaw, MI32Raw, MI8Raw) for strictly typed low-level field access.
+   - Replaced duplicate C extern declarations with native Nizam implementations and FNV-1a hashing / probing routines.
+   - Converted corresponding C runtime implementations into weak symbols (__attribute__((weak))) and guarded call sites in runtime.c and src/runtime.c to allow pure Nizam std definitions to override them at link time.
+
+2. Pure-Nizam Allocator Surface (Milestone B):
+   - Implemented mantiq_malloc, mantiq_malloc_raw, mantiq_free, and mantiq_realloc in std/mem.nz.
+   - Preserved C runtime semantics: 500 MB size bound, zero-initialization via calloc, NULL safety, and arena pointer bypass (mantiq_is_arena_ptr).
+   - Weakened allocator symbols in the C runtime so std/mem.nz provides the primary allocation pool when imported.
+
+3. Scope-Based Auto-Drop Aliasing & Soundness Repairs:
+   - src/borrowck.nz: Added is_aliasing_init() to detect IndexExpr and deref initializers, preventing the borrow checker from marking shallow aggregate aliases as Owned and inserting double-freeing auto_drops at scope exit. Converted active_borrows to heap-boxed List[ptr[BorrowRecord]] to prevent struct-slice aliasing corruption.
+   - src/cfg.nz: Deep-copied String buffers in liveness utilities (list_has_string, list_add_string_unique, collect_expr_uses, live_out) and replaced full list reconstructions in list_remove_string with in-place __mantiq_list_pop_index calls.
+   - src/typecheck.nz & src/codegen.nz: Fixed strip_generic_base and drop_type_base to return fresh copied String values on no-bracket paths instead of aliasing input buffers; added null checks and literal struct type handling in drop glue.
+   - src/symbols.nz & runtime.c: Added __nizam_list_str_at to access string list elements directly by pointer, eliminating temporary local by-value copies in add_captured_var that triggered premature destruction of closure capture lists.
+   - src/main.nz: Deep-copied dependency strings and link targets in compile_source to isolate loop temporaries from compiler-owned storage.
+
+4. Infrastructure, Probes, and Documentation:
+   - docs/runtime-elimination-notes.md: Added comprehensive documentation covering runtime elimination milestones, behavior triples, and the five-instance aliasing bug taxonomy.
+   - probes/: Added targeted reproduction and regression probe scripts validating aliasing isolation, closures, and dictionary operations.
+   - .gitignore: Added ignore patterns for nizam-bin* bootstrap executables and temporary test scripts.
+
+Compliance:
+- Programs importing std.collections or std.mem automatically bind to pure Nizam runtime definitions; C shims degrade gracefully or act as fallbacks.
+- Aggregate projections and element indexing produce non-owned views; callers requiring independent ownership across scope boundaries must explicitly duplicate buffers (e.g., via String.make).
+- All memory allocations continue routing through mantiq_malloc / mantiq_free to maintain shared pool integrity across Nizam and C components.
+
+Files:
+- .gitignore
+- docs/runtime-elimination-notes.md
+- probes/
+- runtime.c
+- src/runtime.c
+- src/borrowck.nz
+- src/cfg.nz
+- src/codegen.nz
+- src/main.nz
+- src/sema.nz
+- src/symbols.nz
+- src/typecheck.nz
+- std/collections.nz
+- std/mem.nz
+- research/cmd
+EOF
+git push origin master

@@ -293,6 +293,94 @@ fn heap_free_fn(env as ptr, ctx as ptr[u8], ptr_val as ptr[u8], req_size as usiz
 fn get_heap_allocator() as Allocator:
     return Allocator(ptr_alloc = heap_alloc_fn, ptr_resize = heap_resize_fn, ptr_free = heap_free_fn, context = None to ptr[u8])
 
-fn get_default_allocator() as ptr[Allocator]:
+fn get_default_allocator() as Allocator:
     var ha as HeapAllocator = HeapAllocator()
     return ha.allocator()
+
+// ── Milestone B: Nizam-owned allocation surface ──────────────────────
+//
+// The C runtime's mantiq_malloc family is now weak-linked; whenever
+// std.mem is imported (directly or via std.string) these definitions are
+// the providers, with the exact semantics the C versions had:
+//
+//   mantiq_malloc      size-bounded, zero-initialised (calloc)
+//   mantiq_malloc_raw  size-bounded, uninitialised (malloc)
+//   mantiq_free        NULL-safe, skips arena-owned pointers
+//   mantiq_realloc     size-bounded, size==0 keeps libc free-on-0
+//                      semantics
+//
+// Size bound (500 MB) and the allocation-failure aborts mirror
+// runtime.c. Allocation profiling counters (_alloc_count etc.) remain a
+// C-runtime service; these definitions intentionally do not touch them,
+// so the C profiler counts C-side allocations while this surface serves
+// programs importing std.mem. mantiq_is_arena_ptr is provided by the C
+// runtime until the interning machinery is ported (Milestone C).
+// mirrors C malloc-size validation + zeroing allocation
+fn mantiq_malloc(sz as i64) as ptr:
+    extern fn calloc(nmemb as i64, count as i64) as ptr
+    extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
+    extern fn strlen(s as cstr) as usize
+    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn abort()
+    if sz < 0 to i64 or sz > 500000000 to i64:
+        let msg as ptr[u8] = make[u8](64 to usize)
+        sprintf(msg, "[Runtime] Invalid malloc size: %lld\n" to cstr, sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    let req_bytes as i64 = (if sz == 0 to i64: 1 to i64 else: sz)
+    let out as ptr = calloc(1 to i64, req_bytes)
+    if out == None to ptr:
+        let msg as ptr[u8] = make[u8](96 to usize)
+        sprintf(msg, "[Runtime] Fatal: memory allocation of %lld bytes failed\n" to cstr, sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    return out
+
+// mirrors C raw (uninitialised) allocation
+fn mantiq_malloc_raw(sz as i64) as ptr:
+    extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
+    extern fn strlen(s as cstr) as usize
+    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn abort()
+    if sz < 0 to i64 or sz > 500000000 to i64:
+        let msg as ptr[u8] = make[u8](64 to usize)
+        sprintf(msg, "[Runtime] Invalid malloc size: %lld\n" to cstr, sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    extern fn malloc(req_size as i64) as ptr
+    let req_bytes as i64 = (if sz == 0 to i64: 1 to i64 else: sz)
+    let out as ptr = malloc(req_bytes)
+    if out == None to ptr:
+        let msg as ptr[u8] = make[u8](96 to usize)
+        sprintf(msg, "[Runtime] Fatal: memory allocation of %lld bytes failed\n" to cstr, sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    return out
+
+// mirrors C NULL-safe, arena-aware free
+fn mantiq_free(ptr_val as ptr):
+    extern fn mantiq_is_arena_ptr(ptr_val as ptr) as i32
+    if ptr_val == None to ptr:
+        return
+    if mantiq_is_arena_ptr(ptr_val) != 0 to i32:
+        return
+    free(ptr_val to ptr)
+
+// mirrors C size-bounded realloc (libc frees-on-zero behaviour kept)
+fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
+    extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
+    extern fn strlen(s as cstr) as usize
+    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn abort()
+    if new_sz < 0 to i64 or new_sz > 500000000 to i64:
+        let msg as ptr[u8] = make[u8](64 to usize)
+        sprintf(msg, "[Runtime] Invalid realloc size: %lld\n" to cstr, new_sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    let out as ptr = realloc(old_ptr, new_sz)
+    if out == None to ptr and new_sz > 0 to i64:
+        let msg as ptr[u8] = make[u8](96 to usize)
+        sprintf(msg, "[Runtime] Fatal: memory reallocation of %lld bytes failed\n" to cstr, new_sz)
+        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        abort()
+    return out

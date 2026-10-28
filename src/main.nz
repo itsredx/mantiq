@@ -362,9 +362,12 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             free(dep_raw to ptr)
             let d_lines as List[String] = split_lines(dep_str)
             if d_lines.length() >= 4 to i64:
-                let cached_bin_name as String = d_lines[0]
-                let exp_root_sha as String = d_lines[1]
-                let exp_flags as String = d_lines[2]
+                // byval list-extraction caveat: `d_lines[i]` aliases the
+                // element's buffer (struct copy, no data clone); take our own
+                // copy so local drops and the list teardown never double-free.
+                let cached_bin_name as String = String.make(d_lines[0].data to cstr)
+                let exp_root_sha as String = String.make(d_lines[1].data to cstr)
+                let exp_flags as String = String.make(d_lines[2].data to cstr)
                 if strcmp(exp_flags.data to cstr, flags_sig.data to cstr) == 0:
                     let cur_root_sha as String = get_file_sha256(path_cstr)
                     if strcmp(cur_root_sha.data to cstr, exp_root_sha.data to cstr) == 0:
@@ -378,8 +381,8 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                             var deps_ok as bool = True
                             var d_i as i64 = 4 to i64
                             while d_i + 1 to i64 < d_lines.length():
-                                let d_path as String = d_lines[d_i]
-                                let d_sha as String = d_lines[d_i + 1 to i64]
+                                let d_path as String = String.make(d_lines[d_i].data to cstr)
+                                let d_sha as String = String.make(d_lines[d_i + 1 to i64].data to cstr)
                                 let cur_d_sha as String = get_file_sha256(d_path.data to cstr)
                                 if strcmp(cur_d_sha.data to cstr, d_sha.data to cstr) != 0:
                                     deps_ok = False
@@ -532,7 +535,10 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         var lti as i64 = 0 to i64
         var has_py_flag as bool = False
         while lti < lt_count:
-            let lt_name as String = (deref sema).link_targets[lti]
+            // Fresh copy, never the byval list element: the frozen-era
+            // borrowck auto-drops this local at scope exit, which would free
+            // the buffer the List still owns (next-iteration strcmp UAF).
+            let lt_name as String = String.make(((deref sema).link_targets[lti]).data to cstr)
             if strcmp(lt_name.data to cstr, "m" to cstr) != 0:
                 extra_flags.append(" -l" to cstr)
                 extra_flags.append(lt_name.data to cstr)

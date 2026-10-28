@@ -48,6 +48,11 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
     return (deref lay).val_ptr
 
 // ── Liveness List Utilities ───────────────────────────────────────────────
+// ── Liveness List Utilities ───────────────────────────────────────────────
+// NOTE: every helper below deep-copies Strings on entry/exit. These lists
+// alias CFG- and AST-owned buffers otherwise, and the scope-exit auto-drop
+// of the helper locals would free buffers the CFG/AST still own
+// (ASan: SEGV in list_has_string's strcmp; same aliasing-drop family).
 fn list_has_string(list as ptr[List[String]], s as String) as bool:
     if s.data == None to ptr[u8] or s.len == 0 to usize:
         return False
@@ -55,7 +60,9 @@ fn list_has_string(list as ptr[List[String]], s as String) as bool:
     var i as i64 = 0 to i64
     var item as String = String.make("" to cstr)
     while i < cnt:
-        item = (deref list)[i]
+        // Own copy: a raw byval read aliased the list entry, and the local's
+        // scope-exit drop would free the buffer the list still owns.
+        item = String.make(((deref list)[i]).data to cstr)
         if item.data != None to ptr[u8]:
             if strcmp(item.data to cstr, s.data to cstr) == 0:
                 return True
@@ -64,31 +71,36 @@ fn list_has_string(list as ptr[List[String]], s as String) as bool:
 
 fn list_add_string_unique(list as ptr[List[String]], s as String):
     if not list_has_string(list, s):
-        (deref list).append(s)
+        // Fresh copy: the appended value must not alias the caller's String
+        // (node names / element reads are dropped by their owners).
+        (deref list).append(String.make(s.data to cstr))
 
 fn list_remove_string(list as ptr[List[String]], s as String):
     if s.data == None to ptr[u8] or s.len == 0 to usize:
         return
     let cnt as i64 = (deref list).length()
-    var new_list as List[String] = List[String]()
     var i as i64 = 0 to i64
-    var found as bool = False
-    var item as String = String.make("" to cstr)
     while i < cnt:
-        item = (deref list)[i]
-        if not found and item.data != None to ptr[u8] and strcmp(item.data to cstr, s.data to cstr) == 0:
-            found = True
-        else:
-            new_list.append(item)
+        // Own copy per iteration: the raw element read aliases the list's
+        // entry, and this local's scope-exit drop would free it.
+        let item as String = String.make(((deref list)[i]).data to cstr)
+        if strcmp(item.data to cstr, s.data to cstr) == 0:
+            // In-place pop — no rebuild, no shared-storage reassignment
+            // (same fix class as BorrowChecker_update_borrows_liveness).
+            extern fn __mantiq_list_pop_index(list_addr as ptr, index as i64, out_addr as ptr, elem_size as i64) as i8
+            let _r as i8 = __mantiq_list_pop_index(list to ptr, i, ref item, 24 to i64)
+            return
         i = i + 1 to i64
-    (deref list) = new_list
 
 fn collect_expr_uses(expr as ptr[Node], out_uses as ptr[List[String]]):
     if expr == None to ptr[Node]:
         return
     let nt as NodeType = node_kind(expr)
     if nt == NodeType.Identifier:
-        let nm as String = node_name(expr)
+        // Fresh copy: node_name returns an alias of the AST-owned name
+        // buffer; binding it raw makes this local's scope-exit drop free
+        // the AST's name String (ASan-confirmed aliasing family).
+        let nm as String = String.make(node_name(expr).data to cstr)
         if nm.len > 0 to usize and nm.data != None:
             let nm_c as cstr = nm.data to cstr
             if strcmp(nm_c, "True" to cstr) != 0 and strcmp(nm_c, "False" to cstr) != 0 and strcmp(nm_c, "None" to cstr) != 0 and strcmp(nm_c, "break" to cstr) != 0 and strcmp(nm_c, "continue" to cstr) != 0:
@@ -992,10 +1004,13 @@ struct CFGAnalyzer:
         let stmt_cnt as i64 = (deref bb).statements.length()
 
         var curr_live as List[String] = List[String]()
-        let lo as List[String] = (deref cfg).live_out[pt.bb_id]
+        // No byval `lo` local: reading live_out[bb_id] into a named local
+        // made the scope-exit drop free the inner list's array + Strings the
+        // CFG still owns. Inline the access and deep-copy on append.
+        let lo_len as i64 = ((deref cfg).live_out[pt.bb_id]).length()
         var li as i64 = 0 to i64
-        while li < lo.length():
-            curr_live.append(lo[li])
+        while li < lo_len:
+            curr_live.append(String.make(((((deref cfg).live_out)[pt.bb_id])[li]).data to cstr))
             li = li + 1 to i64
 
         if pt.stmt_idx >= stmt_cnt:

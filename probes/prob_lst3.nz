@@ -1,0 +1,49 @@
+// Probe 3: mirrors BorrowChecker.active_borrows exactly —
+// ptr-to-List-of-byval-struct, deref-index reads AND in-place
+// deref-index element store, with marker fields after the handle
+// to detect handle-offset corruption (fields 8-11 class).
+from std.string import String
+
+extern fn printf(format as cstr, ...) as i32
+
+struct RecX:
+    var a as String
+    var b as String
+    var c as String
+
+struct Outer:
+    var lst as List[RecX]
+    var d1 as i64
+    var d2 as i64
+    var d3 as i64
+
+fn read_all(pl as ptr[List[RecX]], pass as i64):
+    let cnt as i64 = (deref pl).length()
+    var i as i64 = 0 to i64
+    while i < cnt:
+        let r as RecX = (deref pl)[i]
+        let _d as i32 = printf("pass=%lld i=%lld a=%s(0x%llx)\n" to cstr, pass, i, r.a.data to cstr, r.a.data to usize to i64)
+        i = i + 1 to i64
+
+fn main():
+    let o as Outer = Outer(lst = List[RecX](), d1 = 111, d2 = 222, d3 = 333)
+    let pl as ptr[List[RecX]] = ref (deref o).lst
+    let _app1 as i64 = (deref pl).append(RecX(a = String.make("aaa" to cstr), b = String.make("b1" to cstr), c = String.make("c1" to cstr)))
+    let _app2 as i64 = (deref pl).append(RecX(a = String.make("bbb" to cstr), b = String.make("b2" to cstr), c = String.make("c2" to cstr)))
+    let _app3 as i64 = (deref pl).append(RecX(a = String.make("ccc" to cstr), b = String.make("b3" to cstr), c = String.make("c3" to cstr)))
+
+    read_all(pl, 0 to i64)
+    let _p0 as i32 = printf("pre-upd markers d1=%lld d2=%lld d3=%lld\n" to cstr, (deref o).d1, (deref o).d2, (deref o).d3)
+
+    // Mirror of `(deref ab_ref)[idx] = rec` in update_borrows_liveness
+    let fresh as RecX = RecX(a = String.make("zzz" to cstr), b = String.make("bz" to cstr), c = String.make("cz" to cstr))
+    (deref pl)[1] = fresh
+
+    let _p1 as i32 = printf("post-upd markers d1=%lld d2=%lld d3=%lld\n" to cstr, (deref o).d1, (deref o).d2, (deref o).d3)
+    read_all(pl, 1 to i64)
+
+    // More appends after the in-place store, re-read everything
+    let _app4 as i64 = (deref pl).append(RecX(a = String.make("ddd" to cstr), b = String.make("b4" to cstr), c = String.make("c4" to cstr)))
+    read_all(pl, 2 to i64)
+    let _p2 as i32 = printf("post-app markers d1=%lld d2=%lld d3=%lld\n" to cstr, (deref o).d1, (deref o).d2, (deref o).d3)
+    let _d as i32 = printf("PROBE_DONE\n" to cstr)

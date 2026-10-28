@@ -1,0 +1,39 @@
+// Probe: List[byval struct with String] — append, read, in-place element
+// store, re-read, repeated passes. Mirrors BorrowChecker.active_borrows
+// usage in src/borrowck.nz (update_borrows_liveness / check_borrow_creation).
+from std.string import String
+
+extern fn printf(format as cstr, ...) as i32
+
+struct Rec:
+    var nm as String
+    var row as i32
+
+fn check(lst as ptr[List[Rec]], pass as i64):
+    let cnt as i64 = (deref lst).length()
+    var i as i64 = 0 to i64
+    while i < cnt:
+        // Same shape as `let b as BorrowRecord = (deref ab_ref)[idx]`
+        let r as Rec = (deref lst)[i]
+        let _d as i32 = printf("pass=%lld i=%lld nm=%s row=%d\n" to cstr, pass, i, r.nm.data to cstr, r.row)
+        i = i + 1 to i64
+
+fn main():
+    let lst as List[Rec] = List[Rec]()
+    (ref lst).append(Rec(nm = String.make("aaa" to cstr), row = 11))
+    (ref lst).append(Rec(nm = String.make("bbb" to cstr), row = 22))
+    (ref lst).append(Rec(nm = String.make("ccc" to cstr), row = 33))
+
+    check(ref lst, 0 to i64)
+
+    // In-place element store like `(deref ab_ref)[idx] = rec`
+    let fresh as Rec = Rec(nm = String.make("zzz" to cstr), row = 99)
+    (ref lst)[1] = fresh
+    check(ref lst, 1 to i64)
+
+    // More appends after in-place store, then re-read everything twice.
+    (ref lst).append(Rec(nm = String.make("ddd" to cstr), row = 44))
+    (ref lst).append(Rec(nm = String.make("eee" to cstr), row = 55))
+    check(ref lst, 2 to i64)
+    check(ref lst, 3 to i64)
+    let _d as i32 = printf("PROBE_DONE\n" to cstr)
