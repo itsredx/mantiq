@@ -437,8 +437,65 @@ Proven trigger: cold cache → `test_list_methods` build=0 run=0; after that
 build writes its `.dep`, the very same command aborts (rc 134).
 Minimal fix applied in `src/main.nz` tier-1 path (~365, ~381): clone the
 five `d_lines[...]` extractions with `String.make(...)` so local drops and
-the list teardown own disjoint buffers. Needs a compiler rebuild to take
-effect in the binary; until then, wipe `.mantiq_cache` before build runs.
+the list teardown own disjoint buffers. Baked into `nizam-new-next` by
+selfbuild39 (Oct 29 01:53); gate3 (warm rebuild of `test_list_methods`)
+returns rc=0 — warm-cache crash resolved.
+
+### Needle-in-string-constant false positive (found Oct 29, fixed)
+`suite_final.4` dropped to 43/50: `test_codegen`, `test_param_block`,
+`test_quantum_dce` (all import the compiler modules) failed to link with
+`undefined symbol: mantiq_malloc ... referenced 4042 more times`, zero
+line-start `define` in their `.ll`.
+
+Root cause: `codegen.nz`'s lazy-emission needles and IR bodies are string
+literals. When the compiled program IMPORTS `codegen`, those literals land
+in the assembled module as `@.str` constants (`c"define ptr
+@mantiq_malloc..."`). `rt_body_missing` substring-scanned its four output
+streams, matched the needle inside a constant, concluded the body was
+already defined, and skipped emission — leaving only declares. The
+baseline binary never hit this because `runtime.c` still carried the C
+bodies then; with the clean static (body-free) runtime the skipped
+emission became a hard link error.
+
+Fix (`src/codegen.nz`, after `__cg_stream_has`): new
+`__cg_buf_has_def` / `__cg_stream_has_def` — line-anchored matching. A
+real IR definition always starts a line; the identical text inside a
+`c"..."` constant is always preceded by other bytes. `rt_body_missing`
+now consults only the line-anchored predicates. Verified in the failed
+`.ll`: `^define ptr @mantiq_malloc` = 0 matches, 4 `c"define ptr
+@mantiq_malloc` constants.
+
+### Self-build bootstrap dependency (operational, verified twice)
+Rebuilding the compiler TU (`src/main.nz`) with a pre-emission or
+pre-line-anchor builder requires `runtime.c` = bootstrap (weak C bodies)
+on disk for THAT build; the source fixes land only in the OUTPUT binary,
+which is then validated against the clean static runtime. Chain:
+`./nizam` (frozen repo wrapper → nizam-bin, Oct 22) + bootstrap runtime →
+`nizam-new-next` (line-anchor + warm-cache fixes baked) → restore clean
+static → gates + suite. Two traps confirmed:
+- A failed `./nizam` build DELETES the `-o` target (destroyed
+  `nizam-new-next` once; rebuilt by selfbuild39).
+- An old builder's raw `.ll` may still carry the `mantiq_strlen`
+  twin-declare; that error in the first link attempt is fallback-path
+  noise — the clangshim filter handles the real path and the build
+  completes (`Successfully compiled` is the only rc=0 signal; check the
+  exit code, not the presence of error text, in build logs).
+
+### Final tallies (Milestone C complete, Oct 29 02:44)
+- `suite_final.4` (pre-line-anchor binary): 43/50 — regression that
+  exposed the needle-in-string-constant bug.
+- selfbuild39 (builder `./nizam` + bootstrap runtime): rc=0; both fixes
+  (line-anchor, warm-cache) baked into the output binary.
+- Gates on final binary vs clean static runtime: std path PASS,
+  no-import lazy emission PASS, warm-rebuild PASS (rc=0).
+- `suite_final.5` (final binary, cold cache): **46/50** — the 3
+  compiler-module-import tests are fixed; remaining 4 failures are the
+  pre-existing, out-of-scope set (`.mq` trio lowerer crashes +
+  `test_expr_body_and_generics`).
+- PROMOTED: `nizam-new-next` → `nizam-new`
+  (previous baseline saved as `nizam-new-preMilestoneC.bak`).
+- `runtime.c` clean static state confirmed: zero public bodies for the
+  collections/allocator/drop-glue surface.
 
 ### Debug internals worth keeping
 - gdb symbolization near the static C trampolines can MISLABEL frames:

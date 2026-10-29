@@ -206,6 +206,34 @@ fn __cg_stream_has(sb as ptr[StringBuilder], n as cstr) as i32:
         return 0
     return __cg_buf_has((deref sb).buffer to cstr, n)
 
+fn __cg_buf_has_def(h as cstr, n as cstr) as i32:
+    // Line-anchored needle match: a real IR definition always starts a
+    // line, whereas the identical text inside a string constant (c"...")
+    // is preceded by other bytes. Without this anchor, compiler-source
+    // string literals (e.g. this file's own emission bodies when a test
+    // imports the codegen module) fake a definition and skip lazy
+    // emission, leaving the symbols undefined at link time.
+    extern fn strstr(haystack as cstr, needle as cstr) as cstr
+    if h == (None to cstr):
+        return 0
+    var cur as cstr = h
+    while cur != (None to cstr):
+        let f as cstr = strstr(cur, n)
+        if f == (None to cstr):
+            return 0
+        if (f to usize) == (h to usize):
+            return 1
+        let prev as ptr[u8] = ((f to usize) - 1 to usize) to ptr[u8]
+        if deref prev == 10 to u8:
+            return 1
+        cur = ((f to usize) + 1 to usize) to cstr
+    return 0
+
+fn __cg_stream_has_def(sb as ptr[StringBuilder], n as cstr) as i32:
+    if (deref sb).buffer == (None to ptr[u8]):
+        return 0
+    return __cg_buf_has_def((deref sb).buffer to cstr, n)
+
 fn __cg_filter_declares(text as String) as String:
     if text.data == None to ptr[u8]:
         return text
@@ -1983,13 +2011,13 @@ struct LLVMCodegen:
         self.register_field_idx("Dict" to cstr, "capacity" to cstr, 2 to i32)
 
     public fn rt_body_missing(self as ptr[LLVMCodegen], needle as cstr) as i32:
-        if __cg_stream_has(ref (deref self).type_out, needle) != 0 to i32:
+        if __cg_stream_has_def(ref (deref self).type_out, needle) != 0 to i32:
             return 0
-        if __cg_stream_has(ref (deref self).main_out, needle) != 0 to i32:
+        if __cg_stream_has_def(ref (deref self).main_out, needle) != 0 to i32:
             return 0
-        if __cg_stream_has(ref (deref self).outlined_out, needle) != 0 to i32:
+        if __cg_stream_has_def(ref (deref self).outlined_out, needle) != 0 to i32:
             return 0
-        if __cg_stream_has(ref (deref self).metadata_out, needle) != 0 to i32:
+        if __cg_stream_has_def(ref (deref self).metadata_out, needle) != 0 to i32:
             return 0
         return 1
 
