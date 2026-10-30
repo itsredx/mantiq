@@ -213,20 +213,29 @@ fn __cg_buf_has_def(h as cstr, n as cstr) as i32:
     // string literals (e.g. this file's own emission bodies when a test
     // imports the codegen module) fake a definition and skip lazy
     // emission, leaving the symbols undefined at link time.
-    extern fn strstr(haystack as cstr, needle as cstr) as cstr
+    //
+    // Implementation walks line starts with memchr + strncmp — O(haystack)
+    // total. The previous strstr-from-every-candidate loop was O(n*m):
+    // the compiler TU carries thousands of needle-in-constant matches,
+    // making each rt_body_missing scan over multi-MB streams take minutes.
+    extern fn strlen(s as cstr) as usize
+    extern fn strncmp(a as cstr, b as cstr, k as usize) as i32
+    extern fn memchr(s as ptr, c as i32, k as usize) as ptr
     if h == (None to cstr):
         return 0
-    var cur as cstr = h
-    while cur != (None to cstr):
-        let f as cstr = strstr(cur, n)
-        if f == (None to cstr):
+    let nlen as usize = strlen(n)
+    if nlen == 0 to usize:
+        return 0
+    var line as cstr = h
+    var rem as usize = strlen(line)
+    while rem > 0 to usize:
+        let nl as ptr = memchr(line to ptr, 10 to i32, rem)
+        if strncmp(line, n, nlen) == 0 to i32:
+            return 1
+        if nl == (None to ptr):
             return 0
-        if (f to usize) == (h to usize):
-            return 1
-        let prev as ptr[u8] = ((f to usize) - 1 to usize) to ptr[u8]
-        if deref prev == 10 to u8:
-            return 1
-        cur = ((f to usize) + 1 to usize) to cstr
+        rem = rem - (((nl to usize) - (line to usize)) + 1 to usize)
+        line = ((nl to usize) + 1 to usize) to cstr
     return 0
 
 fn __cg_stream_has_def(sb as ptr[StringBuilder], n as cstr) as i32:
@@ -607,6 +616,12 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "4" to ptr[u8]
         elif strcmp(v_cstr, "Module" to cstr) == 0:
             return "5" to ptr[u8]
+        elif strcmp(v_cstr, "TypeAlias" to cstr) == 0:
+            return "6" to ptr[u8]
+        elif strcmp(v_cstr, "Class" to cstr) == 0:
+            return "7" to ptr[u8]
+        elif strcmp(v_cstr, "Interface" to cstr) == 0:
+            return "8" to ptr[u8]
     elif strcmp(e_cstr, "LabelKind" to cstr) == 0:
         if strcmp(v_cstr, "Primary" to cstr) == 0:
             return "0" to ptr[u8]
@@ -625,8 +640,6 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "4" to ptr[u8]
         elif strcmp(v_cstr, "ICE" to cstr) == 0:
             return "5" to ptr[u8]
-        elif strcmp(v_cstr, "Info" to cstr) == 0:
-            return "2" to ptr[u8]
     elif strcmp(e_cstr, "ImportKind" to cstr) == 0:
         if strcmp(v_cstr, "Normal" to cstr) == 0:
             return "0" to ptr[u8]
@@ -653,74 +666,76 @@ fn get_enum_variant_val(e_cstr as cstr, v_cstr as cstr) as ptr[u8]:
             return "4" to ptr[u8]
         elif strcmp(v_cstr, "ClassDecl" to cstr) == 0:
             return "5" to ptr[u8]
-        elif strcmp(v_cstr, "BinaryExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "InterfaceDecl" to cstr) == 0:
             return "6" to ptr[u8]
-        elif strcmp(v_cstr, "Identifier" to cstr) == 0:
+        elif strcmp(v_cstr, "BinaryExpr" to cstr) == 0:
             return "7" to ptr[u8]
-        elif strcmp(v_cstr, "NumberLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "Identifier" to cstr) == 0:
             return "8" to ptr[u8]
-        elif strcmp(v_cstr, "StringLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "NumberLiteral" to cstr) == 0:
             return "9" to ptr[u8]
-        elif strcmp(v_cstr, "MacroDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "StringLiteral" to cstr) == 0:
             return "10" to ptr[u8]
-        elif strcmp(v_cstr, "MacroInvocation" to cstr) == 0:
+        elif strcmp(v_cstr, "MacroDecl" to cstr) == 0:
             return "11" to ptr[u8]
-        elif strcmp(v_cstr, "CallExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "MacroInvocation" to cstr) == 0:
             return "12" to ptr[u8]
-        elif strcmp(v_cstr, "ReturnStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "CallExpr" to cstr) == 0:
             return "13" to ptr[u8]
-        elif strcmp(v_cstr, "WhileStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "ReturnStmt" to cstr) == 0:
             return "14" to ptr[u8]
-        elif strcmp(v_cstr, "ForStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "WhileStmt" to cstr) == 0:
             return "15" to ptr[u8]
-        elif strcmp(v_cstr, "MemberExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "ForStmt" to cstr) == 0:
             return "16" to ptr[u8]
-        elif strcmp(v_cstr, "UnaryExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "MemberExpr" to cstr) == 0:
             return "17" to ptr[u8]
-        elif strcmp(v_cstr, "CastExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "UnaryExpr" to cstr) == 0:
             return "18" to ptr[u8]
-        elif strcmp(v_cstr, "BlockStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "CastExpr" to cstr) == 0:
             return "19" to ptr[u8]
-        elif strcmp(v_cstr, "ParamBlockStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "BlockStmt" to cstr) == 0:
             return "20" to ptr[u8]
-        elif strcmp(v_cstr, "WithStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "ParamBlockStmt" to cstr) == 0:
             return "21" to ptr[u8]
-        elif strcmp(v_cstr, "MatchStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "WithStmt" to cstr) == 0:
             return "22" to ptr[u8]
-        elif strcmp(v_cstr, "TryStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "MatchStmt" to cstr) == 0:
             return "23" to ptr[u8]
-        elif strcmp(v_cstr, "ThrowStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "TryStmt" to cstr) == 0:
             return "24" to ptr[u8]
-        elif strcmp(v_cstr, "ListLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "ThrowStmt" to cstr) == 0:
             return "25" to ptr[u8]
-        elif strcmp(v_cstr, "DictLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "ListLiteral" to cstr) == 0:
             return "26" to ptr[u8]
-        elif strcmp(v_cstr, "IndexExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "DictLiteral" to cstr) == 0:
             return "27" to ptr[u8]
-        elif strcmp(v_cstr, "SpreadExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "IndexExpr" to cstr) == 0:
             return "28" to ptr[u8]
-        elif strcmp(v_cstr, "BooleanLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "SpreadExpr" to cstr) == 0:
             return "29" to ptr[u8]
-        elif strcmp(v_cstr, "AwaitExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "BooleanLiteral" to cstr) == 0:
             return "30" to ptr[u8]
-        elif strcmp(v_cstr, "ClosureExpr" to cstr) == 0:
+        elif strcmp(v_cstr, "AwaitExpr" to cstr) == 0:
             return "31" to ptr[u8]
-        elif strcmp(v_cstr, "StructDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "ClosureExpr" to cstr) == 0:
             return "32" to ptr[u8]
-        elif strcmp(v_cstr, "EnumDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "StructDecl" to cstr) == 0:
             return "33" to ptr[u8]
-        elif strcmp(v_cstr, "UnionDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "EnumDecl" to cstr) == 0:
             return "34" to ptr[u8]
-        elif strcmp(v_cstr, "FieldDecl" to cstr) == 0:
+        elif strcmp(v_cstr, "UnionDecl" to cstr) == 0:
             return "35" to ptr[u8]
-        elif strcmp(v_cstr, "ColorLiteral" to cstr) == 0:
+        elif strcmp(v_cstr, "FieldDecl" to cstr) == 0:
             return "36" to ptr[u8]
-        elif strcmp(v_cstr, "ListComprehension" to cstr) == 0:
+        elif strcmp(v_cstr, "ColorLiteral" to cstr) == 0:
             return "37" to ptr[u8]
-        elif strcmp(v_cstr, "InterpolatedString" to cstr) == 0:
+        elif strcmp(v_cstr, "ListComprehension" to cstr) == 0:
             return "38" to ptr[u8]
-        elif strcmp(v_cstr, "SpawnStmt" to cstr) == 0:
+        elif strcmp(v_cstr, "InterpolatedString" to cstr) == 0:
             return "39" to ptr[u8]
+        elif strcmp(v_cstr, "SpawnStmt" to cstr) == 0:
+            return "40" to ptr[u8]
     elif strcmp(e_cstr, "TypeKind" to cstr) == 0:
         if strcmp(v_cstr, "I8" to cstr) == 0:
             return "0" to ptr[u8]
