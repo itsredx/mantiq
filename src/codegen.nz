@@ -6856,6 +6856,13 @@ struct LLVMCodegen:
                     var is_super as bool = False
                     if node_kind(obj_node) == NodeType.Identifier and strcmp(node_name(obj_node).data to cstr, "super" to cstr) == 0:
                         is_super = True
+                    elif node_kind(obj_node) == NodeType.CallExpr:
+                        // `super().m(...)` — the obj is itself a call to super;
+                        // treat it exactly like obj identifier `super` (the
+                        // dedicated base-delegation path below handles both).
+                        let sc_all as ptr[Node] = node_left(obj_node)
+                        if sc_all != None to ptr[Node] and node_kind(sc_all) == NodeType.Identifier and node_name(sc_all).data != None and strcmp(node_name(sc_all).data to cstr, "super" to cstr) == 0:
+                            is_super = True
                     if is_super:
                         let m_name as String = node_name(callee)
                         var base_class_name as String = String.make("" to cstr)
