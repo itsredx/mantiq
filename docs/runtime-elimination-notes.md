@@ -506,3 +506,89 @@ static → gates + suite. Two traps confirmed:
   `-fsanitize=address` into every compile; product:
   `~/.local/share/nizam-tools/nizam-new-next-asan` (3.8 MB).
 - `valgrind` is not installed on this box; ASAN is the heap forensics tool.
+
+## Leak mode — the UAF endgame (Oct 30–31)
+
+### The "shallow-copy drop hazard" (root cause of the last SIGSEGVs)
+Many sema/typecheck passes take **by-value** `List` copies of node-owned
+storage (`FunDeclData.params`, `NodeData.declarations`, `node_name`, …).
+Those copies are shallow: they share the heap buffer with the AST. The
+newer borrow-checker emits an **auto-drop** for such byval copies at
+scope exit, which calls `mantiq_free` (or `free@plt`) on the shared
+buffer → the AST now references freed tcache memory → later passes read
+garbage → SIGSEGV. Confirmed with hardware watchpoints
+(`~/.local/share/nizam-tools/gdb/watch_params.x`, `watch_free.x`): the
+free originated in `check_sig_has_py_types` params handling; the freed
+chunk's first qword = own addr≫12 + random key at +8 (tcache signature).
+
+Fixed instance-by-instance where cheap (pointer accessors instead of
+byval copies):
+- `src/sema.nz` `check_sig_has_py_types` (~207) — `node_params_ptr`.
+- `src/sema.nz` `scan_node_for_gil` (~85–215) — decls/params copies.
+- `src/codegen.nz` `strip_generic_base` / `drop_type_base` (earlier
+  instances #1–#6, see sections above).
+
+~26 further byval-copy sites in `src/sema.nz` (`declare_pass`,
+`resolve_pass`, `analyze_gil_safety`, ~828–1757) are *suspects* under
+leak mode but need no conversion: `mantiq_free` is a no-op, so their
+auto-drops free nothing.
+
+### Leak mode (the actual fix)
+The working pre-aliasing binaries never emitted those drops — pure leak,
+no UAF, perfect for a short-lived compiler process. Leak mode restores
+exactly that behavior **regardless of what the borrow-checker emits**:
+- `mantiq_free` → no-op (`ret void`).
+- `mantiq_realloc` → `malloc` + memcpy bounded by
+  `malloc_usable_size(old)`; **never releases the old block**. Copy
+  semantics are mandatory: `std/collections.nz`
+  `__mantiq_list_append` (~780) relies on realloc preserving contents.
+  Verified with a 5000-append growth test (`0 2499 4999` = correct).
+- Stale shallow copies stay valid forever ⇒ no UAF possible.
+
+### Where the definitions live (the bootstrap trap, layer 2)
+Both **enum constants AND rt-glue templates are baked into the builder
+binary**. A builder may emit its own `mantiq_free`/`mantiq_realloc`
+bodies (from its baked templates) into any child program it compiles.
+Overriding:
+- ✅ **Program-local `fn mantiq_free` / `fn mantiq_realloc`** definitions
+  in the TU: lazy emission sees an existing definition
+  (`rt_body_missing`) and skips the template. Now lives in
+  `src/main.nz` (~36–73) with explanatory comment.
+- ❌ `from std.mem import mantiq_free, mantiq_realloc` — does NOT work:
+  lazy emission only fires for *called* symbols; the std.mem bodies
+  were never emitted and the template won anyway.
+- The bundled copies are neutered for consistency: `std/mem.nz`
+  (not even imported by the TU — dead code, harmless), and
+  `src/codegen.nz` rt-glue templates (~2049–2086) →
+  free=`ret void`, realloc=malloc+copy.
+
+### Builder constraints for leak-mode builds
+- `nizam-new-next` is currently the only viable builder: it has the
+  fixed `get_enum_variant_val` table (`0f59d7f` — missing
+  `NodeType.InterfaceDecl` made interface nodes `kind 0 = Program` →
+  walker crash) and its own drop-free check/scan paths. The
+  `nizam-new-fixed*` lineage (pre-table-fixes) self-crashes compiling
+  anything real.
+
+### Rebuild recipe (selfbuild45, the current method)
+```
+export PATH=~/.local/share/nizam-tools/clangshim:$PATH
+export NIZAM_NEW_BIN=~/.local/share/nizam-tools/nizam-new-next
+# ensure runtime.c = clean static (no C bodies on the surface)
+grep -q "void\* mantiq_malloc(size_t" runtime.c && \
+  cp ~/.local/share/nizam-tools/runtime_msC_static.c.bak runtime.c
+rm -rf .mantiq_cache
+~/.local/share/nizam-tools/nizam-new-wrap build src/main.nz \
+  -o ~/.local/share/nizam-tools/nizam-new-fixed4 --no-cache \
+  --lib-dir "$PWD" > ~/.local/share/nizam-tools/selfbuild45.log 2>&1
+echo "rc=$?" >> ~/.local/share/nizam-tools/selfbuild45.log
+```
+(`NIZAM_NEW_BIN` must point at the **builder** — the wrapper chain is
+*NIZAM → wrap → NIZAM_NEW_BIN*, so it must be the builder binary name.)
+~40 min with nizam-new-next (its O(n²) scanner); fixed4 ships the O(n)
+`__cg_buf_has_def` scanner, so future rebuilds are fast.
+
+Fixes the last 4 suite failures were expected to hinge on: the `.mq`
+trio + `test_expr_body_and_generics` still need their own diagnosis (a
+fresh gdb watchpoint round on the fixed4 binary) — description may be
+updated as results land.
