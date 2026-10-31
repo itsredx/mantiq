@@ -2,6 +2,7 @@
 import std.collections
 from std.string import String, StringBuilder
 from std.collections import List, Dict
+from std.mem import mantiq_free, mantiq_realloc
 import symbols
 from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower

@@ -112,11 +112,13 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
             if scan_node_for_gil(callee, calls, out_viol_node, out_viol_reason):
                 return True
 
-        let args as List[ptr[Node]] = node_params(n)
-        let a_cnt as i64 = args.length()
+        let args_p as ptr[List[ptr[Node]]] = node_params_ptr(n)
+        if args_p == None to ptr[List[ptr[Node]]]:
+            return False
+        let a_cnt as i64 = (deref args_p).length()
         var ai as i64 = 0 to i64
         while ai < a_cnt:
-            if scan_node_for_gil(args[ai], calls, out_viol_node, out_viol_reason):
+            if scan_node_for_gil((deref args_p)[ai], calls, out_viol_node, out_viol_reason):
                 return True
             ai = ai + 1 to i64
         return False
@@ -132,11 +134,13 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
         return False
 
     elif nt == NodeType.BlockStmt or nt == NodeType.Program:
-        let decls as List[ptr[Node]] = node_declarations(n)
-        let d_cnt as i64 = decls.length()
+        let decls_p as ptr[List[ptr[Node]]] = node_declarations_ptr(n)
+        if decls_p == None to ptr[List[ptr[Node]]]:
+            return False
+        let d_cnt as i64 = (deref decls_p).length()
         var di as i64 = 0 to i64
         while di < d_cnt:
-            if scan_node_for_gil(decls[di], calls, out_viol_node, out_viol_reason):
+            if scan_node_for_gil((deref decls_p)[di], calls, out_viol_node, out_viol_reason):
                 return True
             di = di + 1 to i64
         return False
@@ -193,13 +197,15 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
         return False
 
     elif nt == NodeType.InterpolatedString or nt == NodeType.ListLiteral:
-        let decls as List[ptr[Node]] = node_declarations(n)
-        let d_cnt as i64 = decls.length()
-        var di as i64 = 0 to i64
-        while di < d_cnt:
-            if scan_node_for_gil(decls[di], calls, out_viol_node, out_viol_reason):
+        let decls_p2 as ptr[List[ptr[Node]]] = node_declarations_ptr(n)
+        if decls_p2 == None to ptr[List[ptr[Node]]]:
+            return False
+        let d_cnt2 as i64 = (deref decls_p2).length()
+        var di2 as i64 = 0 to i64
+        while di2 < d_cnt2:
+            if scan_node_for_gil((deref decls_p2)[di2], calls, out_viol_node, out_viol_reason):
                 return True
-            di = di + 1 to i64
+            di2 = di2 + 1 to i64
         return False
 
     return False
