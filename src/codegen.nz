@@ -12215,7 +12215,7 @@ struct LLVMCodegen:
             let opnd_t as ptr[Type] = node_inferred_type(operand)
             if opnd_t != None to ptr[Type]:
                 let ot_k as TypeKind = (deref opnd_t).kind
-                if ot_k == TypeKind.Dict or ot_k == TypeKind.List or ot_k == TypeKind.String or ot_k == TypeKind.Set or ot_k == TypeKind.Tuple:
+                if ot_k == TypeKind.Dict or ot_k == TypeKind.List or ot_k == TypeKind.String or ot_k == TypeKind.Set or ot_k == TypeKind.Tuple or ot_k == TypeKind.Struct or ot_k == TypeKind.Class:
                     return operand_val
             var pointee_t as String = type_to_llvm(node_inferred_type(node))
             if operand != None to ptr[Node] and node_kind(operand) == NodeType.CastExpr:
