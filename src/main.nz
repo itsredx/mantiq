@@ -2,7 +2,6 @@
 import std.collections
 from std.string import String, StringBuilder
 from std.collections import List, Dict
-from std.mem import mantiq_free, mantiq_realloc
 import symbols
 from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower
@@ -25,6 +24,38 @@ import cfg
 from cfg import CFGAnalyzer
 import error
 from error import DiagnosticEngine
+
+// ── Program-local allocator surface (leak-mode) ─────────────────────────
+// Defining these in the TU is the ONLY reliable override: the compiler
+// lazily emits mantiq_free/mantiq_realloc bodies from templates baked into
+// whichever binary is building, unless the program already defines them
+// (rt_body_missing finds this definition and skips the template).
+//
+// Semantics: by-value List/String copies (node_params, node_declarations,
+// node_name, ...) share their buffers with node-owned storage; the newer
+// borrow-checker auto-drops such copies, so ANY real free corrupts the AST
+// (UAF -> SIGSEGV in later passes). The working pre-aliasing binaries never
+// emitted those drops (pure leak, no UAF). Realloc keeps the copy
+// semantics libc callers rely on (__mantiq_list_append does not re-copy)
+// but never releases the old block, so stale shallow copies stay valid.
+fn mantiq_free(ptr_val as ptr):
+    return
+
+fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
+    extern fn malloc(sz as i64) as ptr
+    extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
+    extern fn malloc_usable_size(p as ptr) as usize
+    if new_sz < 0 to i64 or new_sz > 500000000 to i64:
+        return None to ptr
+    let out as ptr = malloc(new_sz)
+    if out == None to ptr:
+        return None to ptr
+    if old_ptr != None to ptr:
+        var cp as usize = malloc_usable_size(old_ptr)
+        if new_sz to usize < cp:
+            cp = new_sz to usize
+        let _ as ptr = memcpy(out, old_ptr, cp)
+    return out
 
 // ── C FFI Declarations ───────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
