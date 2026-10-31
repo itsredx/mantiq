@@ -645,3 +645,41 @@ works when the impl class defines the method body (duck-typed). A
 true vtable-based dispatch for interface VALUES ({data, rtti} pairs
 per the `is`-pattern machinery at 10961) has NOT been built; the trio
 tests only exercise concrete-typed obj calls so far.
+
+## FINAL STATE: 50/50, self-host compiler complete (Oct 31, 16:00)
+
+### Binary lineage
+- `nizam-new` = `nizam-new-fixed6` (md5 2fa1e874c61c9a76409b42a9decfd6a0),
+  built by `nizam-new-next` from repo at `8b67d16`.
+- Backups: `nizam-new-preLeakMode3.bak` (46/50 Milestone C state),
+  `nizam-new-preFinal.bak` (fixed6 copy, byte-identical).
+- The 46→50 delta came from two build generations:
+  - fixed4 (leak-mode + TU allocator surface): 47/50 — cured
+    `test_expr_body_and_generics` (UAF class).
+  - fixed6 (closure-hijack fix + super() delegation + deref parity
+    fixes 5ec177e/8b67d16): 50/50 — cured the `.mq` OOP trio.
+
+### Final verification record
+- `suite_final.9` (fixed4, cold cache): 47/50 (records + auto-promote).
+- closure2 chain gates on fixed6: test_std + all three `.mq` OOP tests
+  PASS (build+run each).
+- `suite_final.11` (fixed6, mid-restart race): 48/50 — invalid (suite
+  run interleaved with concurrent rebuilds; ignore).
+- `suite_final.resumable` (fixed6, state-journal runner, warm cache):
+  **50/50 — Total 50 / Passed 50 / Failed 0** — journal
+  `~/.local/share/nizam-tools/suite_resume.state` (50 PASS, 0 FAIL).
+
+### OOP trio final fixes (see previous section for root cause)
+- `56f1881` closure hijack defused (key-collision method decisions).
+- `4bf2f70` super() delegation (obj CallExpr named super routed through
+  the base-mangled is_super branch; verified min-repro: `res=25`).
+- `5ec177e` deref-of-aggregate lvalue unwrap (slot-vs-copy).
+- `8b67d16` deref-identity parity for Class/Struct in emit_unary_expr
+  (verified min-repro struct Counter: build+run `3`/`4`).
+
+### Resumable suite runner (host-restart tolerant)
+`~/.local/share/nizam-tools/resume_suite.sh` — journals per-test results
+to `suite_resume.state`, skips journal-PASSed tests, promotes
+ automatically at ≥47 and reports 50/50. Use it instead of
+`src/tests/run_tests_new_tmp.sh` whenever the box's restart cadence is
+unpredictable (~10 min observed during the final hours).
