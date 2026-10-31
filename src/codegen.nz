@@ -6819,7 +6819,17 @@ struct LLVMCodegen:
                 append_str(ref f_chk, m_name)
                 let f_chk_s as String = f_chk.to_string()
                 f_chk.deinit()
-                if (deref self).struct_field_indices.has(f_chk_s):
+                // Class/Interface decls register T.method keys in the same map
+                // used for closure-member fields (vtable index reuse). If the
+                // mangled method function exists, this is a real method call:
+                // the direct dispatch below handles it, NOT the closure path.
+                let mfn_chk as StringBuilder = StringBuilder.make()
+                append_str(ref mfn_chk, s_nm)
+                append_cstr(ref mfn_chk, "_" to cstr)
+                append_str(ref mfn_chk, m_name)
+                let mfn_s as String = mfn_chk.to_string()
+                mfn_chk.deinit()
+                if (deref self).struct_field_indices.has(f_chk_s) and not (deref self).program_functions.has(mfn_s) and not (deref self).defined_functions.has(mfn_s):
                     is_closure_member_field = True
                     is_struct_static = True
             if obj_node != None to ptr[Node]:
