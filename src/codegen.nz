@@ -3917,6 +3917,19 @@ struct LLVMCodegen:
         elif nt == NodeType.UnaryExpr:
             let op as String = node_op(node)
             if strcmp(op.data to cstr, "deref" to cstr) == 0:
+                let _lvp_inner as ptr[Node] = node_left(node)
+                var _lvp_inner_t as ptr[Type] = None to ptr[Type]
+                if _lvp_inner != None to ptr[Node]:
+                    _lvp_inner_t = node_inferred_type(_lvp_inner)
+                // Aggregate-typed deref source: the deref is a value identity
+                // (e.g. `(deref self)` on a by-value struct receiver) — the
+                // address to use is the local's storage slot itself. Pointer
+                // sources keep the loaded pointer (instance deref).
+                if _lvp_inner_t != None to ptr[Type]:
+                    let _lvp_k as TypeKind = (deref _lvp_inner_t).kind
+                    if _lvp_k == TypeKind.Struct or _lvp_k == TypeKind.Class or _lvp_k == TypeKind.Interface or _lvp_k == TypeKind.Union or _lvp_k == TypeKind.Enum:
+                        if strcmp(type_to_llvm(_lvp_inner_t).data to cstr, "ptr" to cstr) != 0:
+                            return self.emit_lvalue_ptr(_lvp_inner)
                 return self.emit_expr(node_left(node))
             return self.emit_lvalue_ptr(node_left(node))
         elif nt == NodeType.CallExpr:
