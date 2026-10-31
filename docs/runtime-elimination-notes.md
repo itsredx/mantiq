@@ -592,3 +592,56 @@ Fixes the last 4 suite failures were expected to hinge on: the `.mq`
 trio + `test_expr_body_and_generics` still need their own diagnosis (a
 fresh gdb watchpoint round on the fixed4 binary) — description may be
 updated as results land.
+
+## The .mq OOP trio — one root cause, three symptoms (Oct 31)
+
+With leak-mode landed (`suite_final.9` = **47/50**, fixed4 promoted to
+`nizam-new`), only the `.mq` OOP trio remained:
+
+- `test_interfaces_and_classes.mq` / `test_oop_override_final_access.mq`:
+  broken IR — `%t.N = load ptr, ptr %super` (undefined SSA; also raw
+  `%super` as a GEP base).
+- `test_reflection_downcast.mq`: compiles, SIGSEGV at run INSIDE
+  `__rtti_Circle` — `call <reg>` where the register was the address of
+  the class RTTI global, i.e. data executed as code.
+
+### Root cause: key-collision closure hijack
+`emit_class_decl`/`emit_interface_decl` register `T.method` keys into
+`struct_field_indices` (meant as vtable indices: method_count).
+`emit_call_expr` consulted the SAME map — key `s_nm + "." + m_name`
+(obj type name + method) — to flag `is_closure_member_field`. Any
+class/interface method call therefore entered the closure emission:
+`extractvalue {ptr,ptr}` of the obj's rtti slot and an indirect call:
+`call i32 %fn_pair.0(ptr %fn_pair.1)` where the pair is (rtti ptr,
+first field bytes).
+- Struct objects were immune: struct methods are registered only as
+  `T_name` in `program_functions` (emit_program prepass), never as
+  `T.field` keys.
+
+### Fixes landed (cascade)
+1. `56f1881` codegen: the closure decision now requires the mangled
+   method function `T_method` to NOT exist in
+   program_functions/defined_functions. Real method calls route to the
+   existing direct-dispatch path (`fn_target_name = s_nm + "_" +
+   method_name`, obj prepended as first ptr arg — verified with a
+   struct min repro: `call void @Counter_bump(ptr %c)`).
+2. `5ec177e` codegen: deref-of-aggregate in emit_lvalue_ptr. Bare
+   `self` receivers (value semantics) loaded the whole `%Struct` value
+   and the member-addr GEP then used the value register as a pointer
+   (`load %Counter, ptr %t.2` type error). Aggregate-typed deref
+   sources now return `emit_lvalue_ptr(inner)` (the alloca slot);
+   pointer sources unchanged (compiler sources declare
+   `self as ptr[T]`, so main.nz untouched).
+3. `4bf2f70` codegen: `super().m()` — obj is a CallExpr naming super —
+   now recognized by the is_super base-delegation branch (mangles to
+   `base_Class_method`, direct call), instead of falling into the
+   generic unknown-function path (`declare @super`).
+
+### Interface dispatch status (open)
+`%Interface = type { ptr, ptr }` with interface method keys registered
+the same way (15683) — with the closure hijack removed, interface-typed
+obj calls should dispatch via the direct-mangle path too, which only
+works when the impl class defines the method body (duck-typed). A
+true vtable-based dispatch for interface VALUES ({data, rtti} pairs
+per the `is`-pattern machinery at 10961) has NOT been built; the trio
+tests only exercise concrete-typed obj calls so far.
