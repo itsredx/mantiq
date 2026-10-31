@@ -729,3 +729,19 @@ Files:
 - research/cmd
 EOF
 git push origin master
+ls -la
+git status && find . -maxdepth 2 -name "*cmd*"
+tail -n 40 research/cmd
+tail -n 10 research/cmd
+git log -n 5
+tail -n 5 research/cmd
+ls -la src/runtime.c runtime.c
+ls -la std/
+diff -u runtime.c src/runtime.c | head -n 40
+grep -rn "runtime\.c" src/
+wc -l runtime.c src/runtime.c
+grep -n "^// ──" runtime.c
+head -n 50 std/collections.nz
+grep -n "__mantiq" std/collections.nz | head -n 40
+git show --stat 0f59d7f4226b9564b11b141e77af3aaa074a0a51
+git status -s

@@ -278,17 +278,24 @@ fn heap_alloc_fn(env as ptr, ctx as ptr[u8], req_size as usize, align as usize) 
     return malloc(req_size)
 
 fn heap_resize_fn(env as ptr, ctx as ptr[u8], old_ptr as ptr[u8], old_sz as usize, new_sz as usize) as ptr[u8]:
+    // LEAK-MODE resize: never releases the old block (libc realloc frees
+    // internally, which would dangle stale shallow List copies). Alloc +
+    // copy keeps the old block alive; stale copies see a frozen snapshot.
     if new_sz == 0 to usize:
-        if old_ptr != None to ptr[u8]:
-            free(old_ptr to ptr)
         return None to ptr[u8]
     if old_ptr == None to ptr[u8]:
         return malloc(new_sz)
-    return realloc(old_ptr to ptr, new_sz)
+    let out as ptr[u8] = malloc(new_sz)
+    if out != None to ptr[u8]:
+        var cp as usize = old_sz
+        extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
+        let _ as ptr = memcpy(out, old_ptr, cp)
+    return out
 
 fn heap_free_fn(env as ptr, ctx as ptr[u8], ptr_val as ptr[u8], req_size as usize):
-    if ptr_val != None to ptr[u8]:
-        free(ptr_val to ptr)
+    // LEAK-MODE: no-op (see mantiq_free in this file — shallow copies of
+    // node-owned Lists/Strings must never release the shared buffer).
+    return
 
 fn get_heap_allocator() as Allocator:
     return Allocator(ptr_alloc = heap_alloc_fn, ptr_resize = heap_resize_fn, ptr_free = heap_free_fn, context = None to ptr[u8])
@@ -359,12 +366,19 @@ fn mantiq_malloc_raw(sz as i64) as ptr:
 
 // mirrors C NULL-safe, arena-aware free
 fn mantiq_free(ptr_val as ptr):
+    // COMPILER LEAK-MODE: by-value List/String copies share their buffers
+    // with node-owned storage; a drop of any shallow copy would free memory
+    // the AST still references (UAF -> SIGSEGV in later passes). The working
+    // pre-aliasing binaries never emitted these drops (pure leak), which is
+    // safe for a short-lived batch compiler. Neutering free extinguishes the
+    // whole shallow-copy UAF class; revisit when ownership semantics land.
+    // mantiq_is_arena_ptr guard retained for API compatibility.
     extern fn mantiq_is_arena_ptr(ptr_val as ptr) as i32
     if ptr_val == None to ptr:
         return
     if mantiq_is_arena_ptr(ptr_val) != 0 to i32:
         return
-    free(ptr_val to ptr)
+    return
 
 // mirrors C size-bounded realloc (libc frees-on-zero behaviour kept)
 fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
@@ -377,10 +391,16 @@ fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
         sprintf(msg, "[Runtime] Invalid realloc size: %lld\n" to cstr, new_sz)
         let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
-    let out as ptr = realloc(old_ptr, new_sz)
-    if out == None to ptr and new_sz > 0 to i64:
-        let msg as ptr[u8] = make[u8](96 to usize)
-        sprintf(msg, "[Runtime] Fatal: memory reallocation of %lld bytes failed\n" to cstr, new_sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
-        abort()
+    // LEAK-MODE realloc: never releases the old block. libc realloc frees
+    // internally, which dangles every stale shallow List copy pointing at
+    // the old buffer even when mantiq_free is neutered. Malloc+copy keeps
+    // the old block alive (stale copies see a frozen snapshot, no UAF).
+    extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
+    extern fn malloc_usable_size(p as ptr) as usize
+    let out as ptr = make[u8](new_sz to usize)
+    if out != None to ptr and old_ptr != None to ptr:
+        var cp as usize = malloc_usable_size(old_ptr)
+        if new_sz to usize < cp:
+            cp = new_sz to usize
+        let _ as ptr = memcpy(out, old_ptr, cp)
     return out

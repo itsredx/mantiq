@@ -5,7 +5,7 @@ from std.collections import List
 from std.collections import Dict
 from std.option import Option, Empty
 import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_captured_vars, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier, node_is_python_extern, node_python_module
+from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_params_ptr, node_declarations_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_captured_vars, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier, node_is_python_extern, node_python_module
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import types
@@ -211,18 +211,24 @@ fn check_sig_has_py_types(fn_node as ptr[Node]) as bool:
         if strstr(r_name, "PyObject" to cstr) != None to cstr or strstr(r_name, "Py_buffer" to cstr) != None to cstr:
             return True
 
-    let params as List[ptr[Node]] = node_params(fn_node)
-    let p_cnt as i64 = params.length()
+    // NOTE: node_params returns a by-value shallow copy of the List; a local
+    // copy would be auto-dropped at scope exit, freeing the buffer shared
+    // with FunDeclData.params and leaving it dangling for later passes
+    // (typecheck reads freed tcache memory -> SIGSEGV). Iterate through the
+    // pointer instead so no owning copy exists.
+    let params_p as ptr[List[ptr[Node]]] = node_params_ptr(fn_node)
+    if params_p == None to ptr[List[ptr[Node]]]:
+        return False
+    let p_cnt as i64 = (deref params_p).length()
     var pi as i64 = 0 to i64
     while pi < p_cnt:
-        let p_node as ptr[Node] = params[pi]
+        let p_node as ptr[Node] = (deref params_p)[pi]
         let annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p_node)
         if annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
-            let annots as List[Option[ptr[TypeAnnotation]]] = deref annots_ptr
-            let a_count as i64 = annots.length()
+            let a_count as i64 = (deref annots_ptr).length()
             var ai as i64 = 0 to i64
             while ai < a_count:
-                let opt_a as Option[ptr[TypeAnnotation]] = annots[ai]
+                let opt_a as Option[ptr[TypeAnnotation]] = (deref annots_ptr)[ai]
                 let opt_ref as ptr[u8] = (ref opt_a) to ptr[u8]
                 if option_has_value(opt_ref):
                     let val_p as ptr[u8] = option_value(opt_ref)
