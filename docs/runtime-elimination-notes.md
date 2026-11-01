@@ -683,3 +683,124 @@ to `suite_resume.state`, skips journal-PASSed tests, promotes
  automatically at ≥47 and reports 50/50. Use it instead of
 `src/tests/run_tests_new_tmp.sh` whenever the box's restart cadence is
 unpredictable (~10 min observed during the final hours).
+
+---
+
+## Milestone D — runtime.c fully unlinked (2026-11-01)
+
+Goal: the compiler TU and every native product build with ZERO
+runtime.c input; `tree_sitter_helper.c` remains the only C source on
+the link line (untouched by design).
+
+### What still referenced runtime.c (final inventory)
+TU (compiler self-build) real residual:
+- `mantiq_run_command_direct` fork/exec/waitpid driver
+- `mantiq_mkdir_p` / `mantiq_copy_file` (cache/driver paths)
+- `mantiq_sha256_hex` / `mantiq_sha256_file_hex` (cache keys)
+- `mantiq_perf_now_ns` / `mantiq_perf_rss_bytes` + counters + profile flag
+- `mantiq_ast_arena_reset` / `mantiq_intern_reset` (TU teardown no-ops)
+- `mantiq_type_needs_drop` / `mantiq_type_set_needs_drop` (C type registry)
+- `__mantiq_scope_lookup` (C scope-parent walk in Sema.lookup_symbol)
+- `mantiq_strlen` (one call: std/collections `__mantiq_list_fromhex`)
+
+Product-side surface codegen emits as real calls (the TU never calls
+these — they were invisible to TU IR sweeps):
+- print: `mantiq_print_{i32,bool,float,ptr,space,newline,str,cstr}`
+- conversions: `mantiq_{i32,i64,u64,float,f64,char,bool}_to_str`
+- strings: `mantiq_strlen`, `mantiq_concat_str` (concat path with a
+  StringLiteral part emits a real `mantiq_strlen` call)
+- async: `mantiq_spawn` / `mantiq_await` (+ internal task runner)
+- channels: `__mantiq_channel_*` (10 fns, POSIX pthread variant)
+- quantum: `mantiq_quantum_*` (7 fns, static qubit array)
+- RTTI: `mantiq_isa`
+
+### How each piece was replaced
+1. TU-local Nizam ports in `src/main.nz` (override builder-baked rt-glue
+   via `rt_body_missing` define-scan): run_command_direct (fork/execvp/
+   waitpid, `status/256 & 255`, `status & 127`), path_sane guard,
+   mkdir_p, copy_file (open/read/write/close; O_WRONLY|O_CREAT|O_TRUNC
+   = 577, mode 493), perf_now_ns (clock_gettime CLOCK_MONOTONIC),
+   perf_rss_bytes (getrusage, ru_maxrss at struct offset 32, KB->B),
+   counters as inert zeros (they only ever counted C-internal helper
+   allocs), set_profile_active / ast_arena_reset / intern_reset no-ops.
+2. FNV-1a replaces sha256 for cache keys: dual-seed 32-bit streams
+   combined into a 16-hex-char 64-bit key (`%08lx%08lx`). No shift ops
+   exist in Nizam — FNV needs only xor/mul/and. Consumers are opaque
+   strcmp-compared keys/binary names; the format change costs one
+   cold-cache pass and self-heals.
+3. Needs-drop type registry ported from runtime.c globals to a
+   name-keyed `Dict[String,bool]` owned by Sema (`needs_drop_types`),
+   bridged into LLVMCodegen by main after the sema phase (shared
+   handle, one assignment). Sema.check_and_register_struct_drop writes
+   it; codegen's `type_needs_drop` helper reads it behind an
+   `needs_drop_registry_active` gate (zero-initialized LLVMCodegen
+   instances must not touch the builtin Dict — no zeroed-dict guard
+   exists in `__mantiq_dict_get`). `is_copy_type` (types.nz) is now
+   registry-free; its 4 BorrowChecker call sites are augmented with
+   `BorrowChecker.sema_needs_drop_type` (Sema carries, BC derefs).
+   The registry is LOAD-BEARING: copy-vs-move decisions feed drop
+   emission; getting it wrong resurfaces the UAF class.
+4. `Sema.lookup_symbol` ported to a Nizam scope-parent walk with the
+   C's exact `visited_global` semantics (global scope re-checked once
+   at the end if not on the chain).
+5. `std/collections.__mantiq_list_fromhex` now calls libc `strlen`.
+6. `emit_rt_glue_bodies` (codegen.nz) gained two template families:
+   - TU-side: `mantiq_alloc_box32` (64KB calloc slabs via internal
+     globals `@__nizam_box32_slab`/`@__nizam_box32_off`; new-slab
+     threshold `off > 65504` ≡ C's `off + 32 > 65536`),
+     `mantiq_ast_alloc` (calloc, zeroed; arena reset/destroy no-ops —
+     leak-mode), `mantiq_intern_string` (fresh zero-terminated copy per
+     call, no dedup — consumers strcmp, never pointer-compare),
+     `mantiq_page_alloc/free` (mmap/munmap, 4096 round-up),
+     `mantiq_is_arena_ptr` (returns 0 — inert because mantiq_free is a
+     no-op in leak mode).
+   - Product-side (differential-tested against runtime.c before
+     embedding — see below): print family (printf/fwrite),
+     conversions (snprintf into stack buffers, malloc_raw + memcpy,
+     out_len store), strlen/concat (concat mirrors C's empty-part
+     handling exactly, malloc_raw-backed), spawn/await + internal
+     task runner (POSIX pthreads; Task layout: thread=0 func=8 env=16
+     result=24 is_done=32 mutex=40[40B] cond=80[48B] size=128),
+     channels (10 fns; Channel layout: buf=0 cap=8 head=16 tail=24
+     count=32 is_closed=40 mutex=48[40B] not_empty=88[48B]
+     not_full=136[48B] size=184), quantum (static 64-i32 qubit array),
+     isa (TypeDescriptor: type_id=0 name=8 parent=16 n=20 ids=24).
+   Shared string constants + libc/pthread declares are emitted
+   unconditionally; `__cg_filter_declares` drops repeat declares and
+   declare-vs-define collisions. Every define is gated on its own
+   `rt_body_missing` needle so std/user bodies always win.
+7. Driver unlink (main.nz): d_argv no longer appends runtime.o /
+   runtime.c / the ../mantiqz fallback; the two sprintf link-command
+   templates drop the runtime tokens; `var rt_str` removed. The
+   wasm and python-ext targets intentionally still reference
+   runtime.c (untested targets; file kept intact).
+
+### Differential validation (before embedding)
+Templates were written as a standalone `.ll` and differential-tested
+against runtime.c with an identical C driver:
+- `~/.local/share/nizam-tools/rtport/{my_rt.ll,test_main.c,tu_main.c}`.
+- Product surface: byte-identical output across print/conversions/
+  concat/strlen/spawn/await/channel send/recv/try ops/close/len/cap/
+  free/quantum/isa (one real bug caught: try_send's reject path
+  returned without unlocking the mutex -> deadlock in recv-after-
+  close; the C has the unlock).
+- TU surface: box32 slab-jump pattern, zeroed ast_alloc, intern
+  content semantics, page alignment — identical. Known intentional
+  deltas (documented inert): intern dedup gone, is_arena_ptr -> 0.
+
+### Bootstrap
+Old builder lacks the new templates, so the TU build is two-stage:
+stage 1 builds with runtime.c still linked (bootstrap; output binary
+carries all new codegen), stage 2 rebuilds the TU with the new binary
+whose emission covers everything -> links without runtime.c.
+Chain: `~/.local/share/nizam-tools/rtunlink_chain.sh`
+(log: rtunlink.log; suite journal: rt_nolink.state — FRESH journal,
+the old `suite_resume.state` is seeded 50 PASS and would skip all).
+
+### Known remaining gaps (documented, out of scope)
+- `mantiq_py_*` symbols: native products using python-embed interop
+  (`import python` + TypeKind.PyObject) still resolve py fns from
+  runtime.c. Not exercised by the 50-test suite; the python-ext
+  target keeps linking runtime.c anyway. Template family can be added
+  on demand.
+- wasm/py-ext targets: unchanged, still reference runtime.c.

@@ -1204,6 +1204,14 @@ struct LLVMCodegen:
     public var py_module_aliases as Dict[String, String]
     public var string_intern_ids as Dict[String, i32]
     public var string_intern_lens as Dict[String, i64]
+    // Needs-drop registry (name -> True), replacing the C-side registry in
+    // runtime.c. Sema populates it (check_and_register_struct_drop); main
+    // bridges the same Dict into codegen after the sema phase. Consumed by
+    // type_needs_drop/compute_sem_type_name/emit_struct_drop_glue.
+    // needs_drop_registry_active gates queries: zero-initialized LLVMCodegen
+    // instances (no init_cg / no bridge) must not touch the builtin Dict.
+    public var needs_drop_types as Dict[String, bool]
+    public var needs_drop_registry_active as bool
 
     public fn init_cg(self as ptr[LLVMCodegen]):
         (deref self).type_out = StringBuilder.make_with_capacity(262144 to usize)
@@ -1243,6 +1251,7 @@ struct LLVMCodegen:
         (deref self).py_module_aliases = Dict[String, String]()
         (deref self).string_intern_ids = Dict[String, i32]()
         (deref self).string_intern_lens = Dict[String, i64]()
+        (deref self).needs_drop_types = Dict[String, bool]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
@@ -2036,6 +2045,16 @@ struct LLVMCodegen:
             return 0
         return 1
 
+    // Registry-based needs-drop query (replaces C-side mantiq_type_needs_drop).
+    // Safe fallback when unbridged (empty dict): mirrors the C registry's
+    // unregistered-type answer (copyable / flat).
+    public fn type_needs_drop(self as ptr[LLVMCodegen], name as String) as bool:
+        if not (deref self).needs_drop_registry_active:
+            return False
+        if name.data == None to ptr[u8]:
+            return False
+        return (deref self).needs_drop_types.has(name)
+
     // ── Milestone C: program-local IR definitions for the C runtime's
     // collections/allocator/drop-glue surface. Whenever a program does not
     // already define a symbol (e.g. via imported std.mem), its C body is
@@ -2090,6 +2109,228 @@ struct LLVMCodegen:
             append_cstr(out, "define ptr @__nizam_str_clone(ptr %data, i64 %len) {\n  %t0 = icmp sgt i64 %len, 0\n  %t1 = icmp ne ptr %data, null\n  %t2 = and i1 %t0, %t1\n  br i1 %t2, label %bodyc, label %ret0c\nret0c:\n  ret ptr null\nbodyc:\n  %len1 = add i64 %len, 1\n  %buf = call ptr @mantiq_malloc(i64 %len1)\n  %bn = icmp eq ptr %buf, null\n  br i1 %bn, label %ret0c, label %copyc\ncopyc:\n  call ptr @memcpy(ptr %buf, ptr %data, i64 %len)\n  %bp = getelementptr i8, ptr %buf, i64 %len\n  store i8 0, ptr %bp\n  ret ptr %buf\n}\n\n")
         if h_lstrat == 1 to i32:
             append_cstr(out, "define ptr @__nizam_list_str_at(ptr %list, i64 %idx) {\n  %at0 = icmp eq ptr %list, null\n  %at1 = icmp slt i64 %idx, 0\n  %as2 = or i1 %at0, %at1\n  br i1 %as2, label %ret0a, label %bodya\nret0a:\n  ret ptr null\nbodya:\n  %data = load ptr, ptr %list\n  %dn = icmp eq ptr %data, null\n  br i1 %dn, label %ret0a, label %idxchk\nidxchk:\n  %len_p = getelementptr i8, ptr %list, i64 8\n  %len = load i64, ptr %len_p\n  %inr = icmp slt i64 %idx, %len\n  br i1 %inr, label %loadelem, label %ret0a\nloadelem:\n  %off = mul i64 %idx, 24\n  %ep = getelementptr i8, ptr %data, i64 %off\n  %sdata = load ptr, ptr %ep\n  ret ptr %sdata\n}\n\n")
+
+        // ── Milestone D: native Nizam IR replacements for the last
+        // runtime.c definitions. The TU build and every product get these
+        // bodies program-locally, so runtime.c is no longer linked.
+        // Semantics notes (leak-mode era):
+        //  - ast_alloc: zeroed allocation; the C bump-arena reset is a no-op
+        //    (leak-mode: stale pointers stay valid, no UAF possible).
+        //  - intern_string: fresh zero-terminated copy per call (no dedup;
+        //    interning dedup was a memory optimization, not a contract).
+        //  - alloc_box32: 64KB calloc'd slabs via internal globals (the one
+        //    genuinely stateful body; LLVM globals are legal in raw IR).
+        //  - counters: the C-side tallies only counted C-internal helper
+        //    allocations; preserved as inert zeros.
+        let h_box32 as i32 = self.rt_body_missing("define ptr @mantiq_alloc_box32(" to cstr)
+        let h_ast_alloc as i32 = self.rt_body_missing("define ptr @mantiq_ast_alloc(i64" to cstr)
+        let h_ast_reset as i32 = self.rt_body_missing("define void @mantiq_ast_arena_reset(" to cstr)
+        let h_ast_dest as i32 = self.rt_body_missing("define void @mantiq_ast_arena_destroy(" to cstr)
+        let h_intern as i32 = self.rt_body_missing("define ptr @mantiq_intern_string(ptr" to cstr)
+        let h_intern_reset as i32 = self.rt_body_missing("define void @mantiq_intern_reset(" to cstr)
+        let h_intern_dest as i32 = self.rt_body_missing("define void @mantiq_intern_destroy(" to cstr)
+        let h_page_alloc as i32 = self.rt_body_missing("define ptr @mantiq_page_alloc(i64" to cstr)
+        let h_page_free as i32 = self.rt_body_missing("define void @mantiq_page_free(ptr" to cstr)
+        let h_arena_chk as i32 = self.rt_body_missing("define i32 @mantiq_is_arena_ptr(ptr" to cstr)
+        if h_box32 == 1 to i32:
+            append_cstr(out, "declare ptr @calloc(i64, i64)\n")
+            append_cstr(out, "@__nizam_box32_slab = internal global ptr null\n")
+            append_cstr(out, "@__nizam_box32_off = internal global i64 65536\n")
+            append_cstr(out, "define ptr @mantiq_alloc_box32() {\nentry:\n  %off0 = load i64, ptr @__nizam_box32_off\n  %full = icmp ugt i64 %off0, 65504\n  br i1 %full, label %newslab, label %bump\nnewslab:\n  %sl = call ptr @calloc(i64 1, i64 65536)\n  store ptr %sl, ptr @__nizam_box32_slab\n  store i64 0, ptr @__nizam_box32_off\n  br label %bump\nbump:\n  %slab = load ptr, ptr @__nizam_box32_slab\n  %off = load i64, ptr @__nizam_box32_off\n  %p = getelementptr i8, ptr %slab, i64 %off\n  %off2 = add i64 %off, 32\n  store i64 %off2, ptr @__nizam_box32_off\n  ret ptr %p\n}\n\n")
+        if h_ast_alloc == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_ast_alloc(i64 %sz) {\nentry:\n  %neg = icmp sle i64 %sz, 0\n  %s = select i1 %neg, i64 1, i64 %sz\n  %p = call ptr @calloc(i64 1, i64 %s)\n  ret ptr %p\n}\n\n")
+        if h_ast_reset == 1 to i32:
+            append_cstr(out, "define void @mantiq_ast_arena_reset() {\n  ret void\n}\n\n")
+        if h_ast_dest == 1 to i32:
+            append_cstr(out, "define void @mantiq_ast_arena_destroy() {\n  ret void\n}\n\n")
+        if h_intern == 1 to i32:
+            append_cstr(out, "declare ptr @memcpy(ptr, ptr, i64)\n")
+            append_cstr(out, "define ptr @mantiq_intern_string(ptr %s, i64 %len) {\nentry:\n  %ln = icmp sle i64 %len, 0\n  br i1 %ln, label %zlen, label %schk\nschk:\n  %sn = icmp eq ptr %s, null\n  br i1 %sn, label %zlen, label %copy\nzlen:\n  %z = call ptr @calloc(i64 1, i64 1)\n  ret ptr %z\ncopy:\n  %sz = add i64 %len, 1\n  %buf = call ptr @calloc(i64 1, i64 %sz)\n  %mc = call ptr @memcpy(ptr %buf, ptr %s, i64 %len)\n  ret ptr %buf\n}\n\n")
+        if h_intern_reset == 1 to i32:
+            append_cstr(out, "define void @mantiq_intern_reset() {\n  ret void\n}\n\n")
+        if h_intern_dest == 1 to i32:
+            append_cstr(out, "define void @mantiq_intern_destroy() {\n  ret void\n}\n\n")
+        if h_page_alloc == 1 to i32:
+            append_cstr(out, "declare ptr @mmap(ptr, i64, i32, i32, i32, i64)\n")
+            append_cstr(out, "define ptr @mantiq_page_alloc(i64 %size) {\nentry:\n  %bad = icmp sle i64 %size, 0\n  br i1 %bad, label %fail, label %go\nfail:\n  ret ptr null\ngo:\n  %al = add i64 %size, 4095\n  %a2 = and i64 %al, -4096\n  %p = call ptr @mmap(ptr null, i64 %a2, i32 3, i32 34, i32 -1, i64 0)\n  %isf = icmp eq ptr %p, inttoptr (i64 -1 to ptr)\n  br i1 %isf, label %fail, label %okp\nokp:\n  ret ptr %p\n}\n\n")
+        if h_page_free == 1 to i32:
+            append_cstr(out, "declare i32 @munmap(ptr, i64)\n")
+            append_cstr(out, "define void @mantiq_page_free(ptr %p, i64 %size) {\nentry:\n  %nul = icmp eq ptr %p, null\n  %neg = icmp sle i64 %size, 0\n  %skip = or i1 %nul, %neg\n  br i1 %skip, label %out, label %go\ngo:\n  %al = add i64 %size, 4095\n  %a2 = and i64 %al, -4096\n  %r = call i32 @munmap(ptr %p, i64 %a2)\n  br label %out\nout:\n  ret void\n}\n\n")
+        if h_arena_chk == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_is_arena_ptr(ptr %p) {\n  ret i32 0\n}\n\n")
+        // String concat helpers: codegen's string-concat path emits real
+        // calls to these into product IR; they previously resolved from
+        // runtime.c at link time. Bodies mirror runtime.c exactly
+        // (malloc_raw-backed, NUL-terminated, empty-part handling).
+        let h_strlen as i32 = self.rt_body_missing("define i64 @mantiq_strlen(ptr" to cstr)
+        let h_concat as i32 = self.rt_body_missing("define ptr @mantiq_concat_str(ptr" to cstr)
+        if h_strlen == 1 to i32:
+            append_cstr(out, "declare i64 @strlen(ptr)\n")
+            append_cstr(out, "define i64 @mantiq_strlen(ptr %s) {\nentry:\n  %n = icmp eq ptr %s, null\n  br i1 %n, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %l = call i64 @strlen(ptr %s)\n  ret i64 %l\n}\n\n")
+        if h_concat == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_concat_str(ptr %a, i64 %alen, ptr %b, i64 %blen) {\nentry:\n  %abad = icmp sle i64 %alen, 0\n  %anull = icmp eq ptr %a, null\n  %aempty = or i1 %abad, %anull\n  br i1 %aempty, label %aempty_bchk, label %bfull_chk\naempty_bchk:\n  %bbad = icmp sle i64 %blen, 0\n  %bnull = icmp eq ptr %b, null\n  %bempty = or i1 %bbad, %bnull\n  br i1 %bempty, label %retempty, label %retcopyb\nretempty:\n  %e = call ptr @mantiq_malloc_raw(i64 1)\n  store i8 0, ptr %e\n  ret ptr %e\nretcopyb:\n  %bl1 = add i64 %blen, 1\n  %nb = call ptr @mantiq_malloc_raw(i64 %bl1)\n  %mb = call ptr @memcpy(ptr %nb, ptr %b, i64 %blen)\n  %bep = getelementptr i8, ptr %nb, i64 %blen\n  store i8 0, ptr %bep\n  ret ptr %nb\nbfull_chk:\n  %bbad2 = icmp sle i64 %blen, 0\n  %bnull2 = icmp eq ptr %b, null\n  %bempty2 = or i1 %bbad2, %bnull2\n  br i1 %bempty2, label %retcopya, label %retboth\nretcopya:\n  %al1 = add i64 %alen, 1\n  %na = call ptr @mantiq_malloc_raw(i64 %al1)\n  %ma = call ptr @memcpy(ptr %na, ptr %a, i64 %alen)\n  %aep = getelementptr i8, ptr %na, i64 %alen\n  store i8 0, ptr %aep\n  ret ptr %na\nretboth:\n  %total = add i64 %alen, %blen\n  %tot1 = add i64 %total, 1\n  %nb2 = call ptr @mantiq_malloc_raw(i64 %tot1)\n  %ma2 = call ptr @memcpy(ptr %nb2, ptr %a, i64 %alen)\n  %bdest = getelementptr i8, ptr %nb2, i64 %alen\n  %mb2 = call ptr @memcpy(ptr %bdest, ptr %b, i64 %blen)\n  %tep = getelementptr i8, ptr %nb2, i64 %total\n  store i8 0, ptr %tep\n  ret ptr %nb2\n}\n\n")
+
+        // ── Milestone D (products): runtime.c definitions for features the
+        // compiler TU never calls but products do (print/conversions/async/
+        // channels/quantum/RTTI). Shared string constants and libc/pthread
+        // declares are emitted unconditionally (declare hygiene dedupes
+        // repeats); each define is gated on its own rt_body_missing needle
+        // so bodies arriving via imported std or user code always win.
+        append_cstr(out, "@__nz_prt_d = private unnamed_addr constant [3 x i8] c\"%d\\00\"\n")
+        append_cstr(out, "@__nz_prt_s = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n")
+        append_cstr(out, "@__nz_prt_p = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n")
+        append_cstr(out, "@__nz_prt_f = private unnamed_addr constant [3 x i8] c\"%f\\00\"\n")
+        append_cstr(out, "@__nz_prt_sp = private unnamed_addr constant [2 x i8] c\" \\00\"\n")
+        append_cstr(out, "@__nz_prt_nl = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n")
+        append_cstr(out, "@__nz_prt_true = private unnamed_addr constant [5 x i8] c\"True\\00\"\n")
+        append_cstr(out, "@__nz_prt_false = private unnamed_addr constant [6 x i8] c\"False\\00\"\n")
+        append_cstr(out, "@__nz_cnv_d = private unnamed_addr constant [3 x i8] c\"%d\\00\"\n")
+        append_cstr(out, "@__nz_cnv_ld = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n")
+        append_cstr(out, "@__nz_cnv_lu = private unnamed_addr constant [5 x i8] c\"%llu\\00\"\n")
+        append_cstr(out, "@__nz_cnv_f = private unnamed_addr constant [3 x i8] c\"%f\\00\"\n")
+        append_cstr(out, "@__nz_cnv_true = private unnamed_addr constant [5 x i8] c\"True\\00\"\n")
+        append_cstr(out, "@__nz_cnv_false = private unnamed_addr constant [6 x i8] c\"False\\00\"\n")
+        append_cstr(out, "declare i32 @printf(ptr, ...)\n")
+        append_cstr(out, "declare i32 @snprintf(ptr, i64, ptr, ...)\n")
+        append_cstr(out, "declare i64 @fwrite(ptr, i64, i64, ptr)\n")
+        append_cstr(out, "declare void @memset(ptr, i32, i64)\n")
+        append_cstr(out, "declare ptr @memcpy(ptr, ptr, i64)\n")
+        append_cstr(out, "@stdout = external global ptr\n")
+        append_cstr(out, "declare i32 @pthread_create(ptr, ptr, ptr, ptr)\n")
+        append_cstr(out, "declare i32 @pthread_join(ptr, ptr)\n")
+        append_cstr(out, "declare i32 @pthread_mutex_init(ptr, ptr)\n")
+        append_cstr(out, "declare i32 @pthread_mutex_lock(ptr)\n")
+        append_cstr(out, "declare i32 @pthread_mutex_unlock(ptr)\n")
+        append_cstr(out, "declare i32 @pthread_mutex_destroy(ptr)\n")
+        append_cstr(out, "declare i32 @pthread_cond_init(ptr, ptr)\n")
+        append_cstr(out, "declare i32 @pthread_cond_signal(ptr)\n")
+        append_cstr(out, "declare i32 @pthread_cond_broadcast(ptr)\n")
+        append_cstr(out, "declare i32 @pthread_cond_wait(ptr, ptr)\n")
+        append_cstr(out, "declare i32 @pthread_cond_destroy(ptr)\n")
+
+        let h_prt_i32 as i32 = self.rt_body_missing("define void @mantiq_print_i32(" to cstr)
+        let h_prt_bool as i32 = self.rt_body_missing("define void @mantiq_print_bool(" to cstr)
+        let h_prt_float as i32 = self.rt_body_missing("define void @mantiq_print_float(" to cstr)
+        let h_prt_ptr as i32 = self.rt_body_missing("define void @mantiq_print_ptr(" to cstr)
+        let h_prt_space as i32 = self.rt_body_missing("define void @mantiq_print_space(" to cstr)
+        let h_prt_nl as i32 = self.rt_body_missing("define void @mantiq_print_newline(" to cstr)
+        let h_prt_str as i32 = self.rt_body_missing("define void @mantiq_print_str(" to cstr)
+        let h_prt_cstr as i32 = self.rt_body_missing("define void @mantiq_print_cstr(" to cstr)
+        if h_prt_i32 == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_i32(i32 %v) {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_d, i32 %v)\n  ret void\n}\n\n")
+        if h_prt_bool == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_bool(i32 %v) {\nentry:\n  %t = icmp ne i32 %v, 0\n  br i1 %t, label %tt, label %ff\ntt:\n  %r1 = call i32 (ptr, ...) @printf(ptr @__nz_prt_true)\n  ret void\nff:\n  %r2 = call i32 (ptr, ...) @printf(ptr @__nz_prt_false)\n  ret void\n}\n\n")
+        if h_prt_float == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_float(float %v) {\n  %d = fpext float %v to double\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_f, double %d)\n  ret void\n}\n\n")
+        if h_prt_ptr == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_ptr(ptr %v) {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_p, ptr %v)\n  ret void\n}\n\n")
+        if h_prt_space == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_space() {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_sp)\n  ret void\n}\n\n")
+        if h_prt_nl == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_newline() {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_nl)\n  ret void\n}\n\n")
+        if h_prt_str == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_str(ptr %p, i64 %len) {\nentry:\n  %pn = icmp eq ptr %p, null\n  %ln = icmp sle i64 %len, 0\n  %skip = or i1 %pn, %ln\n  br i1 %skip, label %outb, label %go\ngo:\n  %so = load ptr, ptr @stdout\n  %r = call i64 @fwrite(ptr %p, i64 1, i64 %len, ptr %so)\n  br label %outb\noutb:\n  ret void\n}\n\n")
+        if h_prt_cstr == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_cstr(ptr %p) {\nentry:\n  %pn = icmp eq ptr %p, null\n  br i1 %pn, label %outb, label %go\ngo:\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_s, ptr %p)\n  br label %outb\noutb:\n  ret void\n}\n\n")
+
+        let h_cnv_i32 as i32 = self.rt_body_missing("define ptr @mantiq_i32_to_str(" to cstr)
+        let h_cnv_i64 as i32 = self.rt_body_missing("define ptr @mantiq_i64_to_str(" to cstr)
+        let h_cnv_u64 as i32 = self.rt_body_missing("define ptr @mantiq_u64_to_str(" to cstr)
+        let h_cnv_f32 as i32 = self.rt_body_missing("define ptr @mantiq_float_to_str(" to cstr)
+        let h_cnv_f64 as i32 = self.rt_body_missing("define ptr @mantiq_f64_to_str(" to cstr)
+        let h_cnv_ch as i32 = self.rt_body_missing("define ptr @mantiq_char_to_str(" to cstr)
+        let h_cnv_bl as i32 = self.rt_body_missing("define ptr @mantiq_bool_to_str(" to cstr)
+        if h_cnv_i32 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_i32_to_str(i32 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buf, i64 32, ptr @__nz_cnv_d, i32 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_i64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_i64_to_str(i64 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buf, i64 32, ptr @__nz_cnv_ld, i64 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_u64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_u64_to_str(i64 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buf, i64 32, ptr @__nz_cnv_lu, i64 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_f32 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_float_to_str(float %v, ptr %out) {\nentry:\n  %buf = alloca [64 x i8], align 16\n  %d = fpext float %v to double\n  %l = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buf, i64 64, ptr @__nz_cnv_f, double %d)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_f64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_f64_to_str(double %v, ptr %out) {\nentry:\n  %buf = alloca [64 x i8], align 16\n  %l = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buf, i64 64, ptr @__nz_cnv_f, double %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_ch == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_char_to_str(i8 %v, ptr %out) {\nentry:\n  %p = call ptr @mantiq_malloc_raw(i64 2)\n  store i8 %v, ptr %p\n  %ep = getelementptr i8, ptr %p, i64 1\n  store i8 0, ptr %ep\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 1, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h_cnv_bl == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_bool_to_str(i32 %v, ptr %out) {\nentry:\n  %t = icmp ne i32 %v, 0\n  %src = select i1 %t, ptr @__nz_cnv_true, ptr @__nz_cnv_false\n  %len = select i1 %t, i64 4, i64 5\n  %l1 = add i64 %len, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %m = call ptr @memcpy(ptr %p, ptr %src, i64 %l1)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %len, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+
+        // ── Milestone D (products): definitions for symbols codegen can
+        // emit calls for that the compiler TU itself never exercises.
+        // Mirrors runtime.c exactly; differential-tested against the C
+        // implementations. Struct offsets are glibc x86-64: Task size
+        // 128 (mutex@40, cond@80), Channel size 184 (mutex@48,
+        // not_empty@88, not_full@136).
+        let h_mantiq_strlen as i32 = self.rt_body_missing("define i64 @mantiq_strlen(" to cstr)
+        let h_mantiq_concat_str as i32 = self.rt_body_missing("define ptr @mantiq_concat_str(" to cstr)
+        let h_nizam_task_runner as i32 = self.rt_body_missing("define ptr @__nizam_task_runner(" to cstr)
+        let h_mantiq_spawn as i32 = self.rt_body_missing("define ptr @mantiq_spawn(" to cstr)
+        let h_mantiq_await as i32 = self.rt_body_missing("define ptr @mantiq_await(" to cstr)
+        let h_mantiq_channel_new as i32 = self.rt_body_missing("define ptr @__mantiq_channel_new(" to cstr)
+        let h_mantiq_channel_send as i32 = self.rt_body_missing("define void @__mantiq_channel_send(" to cstr)
+        let h_mantiq_channel_recv as i32 = self.rt_body_missing("define ptr @__mantiq_channel_recv(" to cstr)
+        let h_mantiq_channel_try_send as i32 = self.rt_body_missing("define i32 @__mantiq_channel_try_send(" to cstr)
+        let h_mantiq_channel_try_recv as i32 = self.rt_body_missing("define ptr @__mantiq_channel_try_recv(" to cstr)
+        let h_mantiq_channel_close as i32 = self.rt_body_missing("define void @__mantiq_channel_close(" to cstr)
+        let h_mantiq_channel_is_closed as i32 = self.rt_body_missing("define i32 @__mantiq_channel_is_closed(" to cstr)
+        let h_mantiq_channel_len as i32 = self.rt_body_missing("define i64 @__mantiq_channel_len(" to cstr)
+        let h_mantiq_channel_cap as i32 = self.rt_body_missing("define i64 @__mantiq_channel_cap(" to cstr)
+        let h_mantiq_channel_free as i32 = self.rt_body_missing("define void @__mantiq_channel_free(" to cstr)
+        let h_mantiq_quantum_qbit as i32 = self.rt_body_missing("define i32 @mantiq_quantum_qbit(" to cstr)
+        let h_mantiq_quantum_h as i32 = self.rt_body_missing("define i32 @mantiq_quantum_h(" to cstr)
+        let h_mantiq_quantum_measure as i32 = self.rt_body_missing("define i32 @mantiq_quantum_measure(" to cstr)
+        let h_mantiq_quantum_cnot as i32 = self.rt_body_missing("define void @mantiq_quantum_cnot(" to cstr)
+        let h_mantiq_quantum_x as i32 = self.rt_body_missing("define i32 @mantiq_quantum_x(" to cstr)
+        let h_mantiq_quantum_y as i32 = self.rt_body_missing("define i32 @mantiq_quantum_y(" to cstr)
+        let h_mantiq_quantum_z as i32 = self.rt_body_missing("define i32 @mantiq_quantum_z(" to cstr)
+        let h_mantiq_isa as i32 = self.rt_body_missing("define i32 @mantiq_isa(" to cstr)
+        if h_mantiq_strlen == 1 to i32:
+            append_cstr(out, "declare i64 @strlen(ptr)\n")
+            append_cstr(out, "define i64 @mantiq_strlen(ptr %s) {\nentry:\n  %n = icmp eq ptr %s, null\n  br i1 %n, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %l = call i64 @strlen(ptr %s)\n  ret i64 %l\n}\n\n")
+        if h_mantiq_concat_str == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_concat_str(ptr %a, i64 %alen, ptr %b, i64 %blen) {\nentry:\n  %abad = icmp sle i64 %alen, 0\n  %anull = icmp eq ptr %a, null\n  %aempty = or i1 %abad, %anull\n  br i1 %aempty, label %aempty_bchk, label %bfull_chk\naempty_bchk:\n  %bbad = icmp sle i64 %blen, 0\n  %bnull = icmp eq ptr %b, null\n  %bempty = or i1 %bbad, %bnull\n  br i1 %bempty, label %retempty, label %retcopyb\nretempty:\n  %e = call ptr @mantiq_malloc_raw(i64 1)\n  store i8 0, ptr %e\n  ret ptr %e\nretcopyb:\n  %bl1 = add i64 %blen, 1\n  %nb = call ptr @mantiq_malloc_raw(i64 %bl1)\n  %mb = call ptr @memcpy(ptr %nb, ptr %b, i64 %blen)\n  %bep = getelementptr i8, ptr %nb, i64 %blen\n  store i8 0, ptr %bep\n  ret ptr %nb\nbfull_chk:\n  %bbad2 = icmp sle i64 %blen, 0\n  %bnull2 = icmp eq ptr %b, null\n  %bempty2 = or i1 %bbad2, %bnull2\n  br i1 %bempty2, label %retcopya, label %retboth\nretcopya:\n  %al1 = add i64 %alen, 1\n  %na = call ptr @mantiq_malloc_raw(i64 %al1)\n  %ma = call ptr @memcpy(ptr %na, ptr %a, i64 %alen)\n  %aep = getelementptr i8, ptr %na, i64 %alen\n  store i8 0, ptr %aep\n  ret ptr %na\nretboth:\n  %total = add i64 %alen, %blen\n  %tot1 = add i64 %total, 1\n  %nb2 = call ptr @mantiq_malloc_raw(i64 %tot1)\n  %ma2 = call ptr @memcpy(ptr %nb2, ptr %a, i64 %alen)\n  %bdest = getelementptr i8, ptr %nb2, i64 %alen\n  %mb2 = call ptr @memcpy(ptr %bdest, ptr %b, i64 %blen)\n  %tep = getelementptr i8, ptr %nb2, i64 %total\n  store i8 0, ptr %tep\n  ret ptr %nb2\n}\n\n; ---- async runtime (POSIX pthread; Task: thread=0 func=8 env=16 result=24 done=32 mutex=40[40] cond=80[48] size=128) ----\n\n")
+        if h_nizam_task_runner == 1 to i32:
+            append_cstr(out, "define internal ptr @__nizam_task_runner(ptr %arg) {\nentry:\n  %fp = getelementptr i8, ptr %arg, i64 8\n  %func = load ptr, ptr %fp\n  %ep = getelementptr i8, ptr %arg, i64 16\n  %env = load ptr, ptr %ep\n  %res = call ptr %func(ptr %env)\n  %rp = getelementptr i8, ptr %arg, i64 24\n  store ptr %res, ptr %rp\n  %mp = getelementptr i8, ptr %arg, i64 40\n  %l1 = call i32 @pthread_mutex_lock(ptr %mp)\n  %dp = getelementptr i8, ptr %arg, i64 32\n  store i32 1, ptr %dp\n  %cp = getelementptr i8, ptr %arg, i64 80\n  %s1 = call i32 @pthread_cond_signal(ptr %cp)\n  %l2 = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret ptr null\n}\n\n")
+        if h_mantiq_spawn == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_spawn(ptr %func, ptr %env) {\nentry:\n  %task = call ptr @mantiq_malloc(i64 128)\n  %fp = getelementptr i8, ptr %task, i64 8\n  store ptr %func, ptr %fp\n  %ep = getelementptr i8, ptr %task, i64 16\n  store ptr %env, ptr %ep\n  %mp = getelementptr i8, ptr %task, i64 40\n  %i1 = call i32 @pthread_mutex_init(ptr %mp, ptr null)\n  %cp = getelementptr i8, ptr %task, i64 80\n  %i2 = call i32 @pthread_cond_init(ptr %cp, ptr null)\n  %tp = getelementptr i8, ptr %task, i64 0\n  %cr = call i32 @pthread_create(ptr %tp, ptr null, ptr @__nizam_task_runner, ptr %task)\n  ret ptr %task\n}\n\n")
+        if h_mantiq_await == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_await(ptr %task) {\nentry:\n  %tn = icmp eq ptr %task, null\n  br i1 %tn, label %ret0, label %lock\nret0:\n  ret ptr null\nlock:\n  %mp = getelementptr i8, ptr %task, i64 40\n  %cp = getelementptr i8, ptr %task, i64 80\n  %l1 = call i32 @pthread_mutex_lock(ptr %mp)\n  br label %loop\nloop:\n  %dp = getelementptr i8, ptr %task, i64 32\n  %done = load i32, ptr %dp\n  %nd = icmp eq i32 %done, 0\n  br i1 %nd, label %wait, label %unlock\nwait:\n  %w = call i32 @pthread_cond_wait(ptr %cp, ptr %mp)\n  br label %loop\nunlock:\n  %l2 = call i32 @pthread_mutex_unlock(ptr %mp)\n  %rp = getelementptr i8, ptr %task, i64 24\n  %result = load ptr, ptr %rp\n  %tp = getelementptr i8, ptr %task, i64 0\n  %thread = load ptr, ptr %tp\n  %j = call i32 @pthread_join(ptr %thread, ptr null)\n  %d1 = call i32 @pthread_mutex_destroy(ptr %mp)\n  %d2 = call i32 @pthread_cond_destroy(ptr %cp)\n  call void @mantiq_free(ptr %task)\n  ret ptr %result\n}\n\n; ---- channels (POSIX; Channel: buf=0 cap=8 head=16 tail=24 count=32 closed=40 mutex=48[40] ne=88[48] nf=136[48] size=184) ----\n\n")
+        if h_mantiq_channel_new == 1 to i32:
+            append_cstr(out, "define ptr @__mantiq_channel_new(i64 %capacity, i64 %elem_size) {\nentry:\n  %cneg = icmp sle i64 %capacity, 0\n  %cap = select i1 %cneg, i64 32, i64 %capacity\n  %ch = call ptr @mantiq_malloc(i64 184)\n  %bsz = mul i64 %cap, 8\n  %buf = call ptr @mantiq_malloc(i64 %bsz)\n  store ptr %buf, ptr %ch\n  %c8 = getelementptr i8, ptr %ch, i64 8\n  store i64 %cap, ptr %c8\n  %c16 = getelementptr i8, ptr %ch, i64 16\n  store i64 0, ptr %c16\n  %c24 = getelementptr i8, ptr %ch, i64 24\n  store i64 0, ptr %c24\n  %c32 = getelementptr i8, ptr %ch, i64 32\n  store i64 0, ptr %c32\n  %c40 = getelementptr i8, ptr %ch, i64 40\n  store i32 0, ptr %c40\n  %c48 = getelementptr i8, ptr %ch, i64 48\n  %i1 = call i32 @pthread_mutex_init(ptr %c48, ptr null)\n  %c88 = getelementptr i8, ptr %ch, i64 88\n  %i2 = call i32 @pthread_cond_init(ptr %c88, ptr null)\n  %c136 = getelementptr i8, ptr %ch, i64 136\n  %i3 = call i32 @pthread_cond_init(ptr %c136, ptr null)\n  ret ptr %ch\n}\n\n")
+        if h_mantiq_channel_send == 1 to i32:
+            append_cstr(out, "define void @__mantiq_channel_send(ptr %chan, ptr %val, i64 %esz) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %out, label %lock\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  br label %fullloop\nfullloop:\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %full = icmp eq i64 %cnt, %cap\n  %cl40 = getelementptr i8, ptr %chan, i64 40\n  %closed = load i32, ptr %cl40\n  %nc = icmp eq i32 %closed, 0\n  %block = and i1 %full, %nc\n  br i1 %block, label %dowait, label %postfull\ndowait:\n  %nf = getelementptr i8, ptr %chan, i64 136\n  %w = call i32 @pthread_cond_wait(ptr %nf, ptr %mp)\n  br label %fullloop\npostfull:\n  %cl40b = getelementptr i8, ptr %chan, i64 40\n  %closed2 = load i32, ptr %cl40b\n  %isc = icmp ne i32 %closed2, 0\n  br i1 %isc, label %rel, label %dosend\ndosend:\n  %szneg = icmp sle i64 %esz, 0\n  %sz = select i1 %szneg, i64 8, i64 %esz\n  %slot = call ptr @mantiq_malloc(i64 %sz)\n  %vn = icmp eq ptr %val, null\n  br i1 %vn, label %zeroit, label %copyit\nzeroit:\n  %m0 = call ptr @memset(ptr %slot, i32 0, i64 %sz)\n  br label %putslot\ncopyit:\n  %mc = call ptr @memcpy(ptr %slot, ptr %val, i64 %sz)\n  br label %putslot\nputslot:\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %tp24 = getelementptr i8, ptr %chan, i64 24\n  %tail = load i64, ptr %tp24\n  %sp = getelementptr ptr, ptr %buf, i64 %tail\n  store ptr %slot, ptr %sp\n  %t1 = add i64 %tail, 1\n  %capb = getelementptr i8, ptr %chan, i64 8\n  %cap2 = load i64, ptr %capb\n  %t2 = srem i64 %t1, %cap2\n  store i64 %t2, ptr %tp24\n  %c32b = getelementptr i8, ptr %chan, i64 32\n  %cnt2 = load i64, ptr %c32b\n  %c3 = add i64 %cnt2, 1\n  store i64 %c3, ptr %c32b\n  %ne = getelementptr i8, ptr %chan, i64 88\n  %sg = call i32 @pthread_cond_signal(ptr %ne)\n  br label %rel\nrel:\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  br label %out\nout:\n  ret void\n}\n\n")
+        if h_mantiq_channel_recv == 1 to i32:
+            append_cstr(out, "define ptr @__mantiq_channel_recv(ptr %chan, i64 %esz) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %ret0, label %lock\nret0:\n  ret ptr null\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  br label %emptyloop\nemptyloop:\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %empty = icmp eq i64 %cnt, 0\n  %cl40 = getelementptr i8, ptr %chan, i64 40\n  %closed = load i32, ptr %cl40\n  %nc = icmp eq i32 %closed, 0\n  %block = and i1 %empty, %nc\n  br i1 %block, label %dowait, label %postempty\ndowait:\n  %ne = getelementptr i8, ptr %chan, i64 88\n  %w = call i32 @pthread_cond_wait(ptr %ne, ptr %mp)\n  br label %emptyloop\npostempty:\n  %cnt32b = getelementptr i8, ptr %chan, i64 32\n  %cnt2 = load i64, ptr %cnt32b\n  %cl40b = getelementptr i8, ptr %chan, i64 40\n  %closed2 = load i32, ptr %cl40b\n  %isc = icmp ne i32 %closed2, 0\n  %drained = and i1 %empty, %isc\n  br i1 %drained, label %drainret, label %take\ndrainret:\n  %u1 = call i32 @pthread_mutex_unlock(ptr %mp)\n  %szneg = icmp sle i64 %esz, 0\n  %sz = select i1 %szneg, i64 8, i64 %esz\n  %eslot = call ptr @mantiq_malloc(i64 %sz)\n  %m0 = call ptr @memset(ptr %eslot, i32 0, i64 %sz)\n  ret ptr %eslot\ntake:\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %hp16 = getelementptr i8, ptr %chan, i64 16\n  %head = load i64, ptr %hp16\n  %sp = getelementptr ptr, ptr %buf, i64 %head\n  %slot = load ptr, ptr %sp\n  %h1 = add i64 %head, 1\n  %capb = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %capb\n  %h2 = srem i64 %h1, %cap\n  store i64 %h2, ptr %hp16\n  %c3 = sub i64 %cnt2, 1\n  store i64 %c3, ptr %cnt32b\n  %nf = getelementptr i8, ptr %chan, i64 136\n  %sg = call i32 @pthread_cond_signal(ptr %nf)\n  %u2 = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret ptr %slot\n}\n\n")
+        if h_mantiq_channel_try_send == 1 to i32:
+            append_cstr(out, "define i32 @__mantiq_channel_try_send(ptr %chan, ptr %val, i64 %esz) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %no, label %lock\nno:\n  ret i32 0\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %full = icmp eq i64 %cnt, %cap\n  %cl40 = getelementptr i8, ptr %chan, i64 40\n  %closed = load i32, ptr %cl40\n  %isc = icmp ne i32 %closed, 0\n  %reject = or i1 %full, %isc\n  br i1 %reject, label %reject_rel, label %dosend\ndosend:\n  %szneg = icmp sle i64 %esz, 0\n  %sz = select i1 %szneg, i64 8, i64 %esz\n  %slot = call ptr @mantiq_malloc(i64 %sz)\n  %vn = icmp eq ptr %val, null\n  br i1 %vn, label %zeroit, label %copyit\nzeroit:\n  %m0 = call ptr @memset(ptr %slot, i32 0, i64 %sz)\n  br label %putslot\ncopyit:\n  %mc = call ptr @memcpy(ptr %slot, ptr %val, i64 %sz)\n  br label %putslot\nputslot:\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %tp24 = getelementptr i8, ptr %chan, i64 24\n  %tail = load i64, ptr %tp24\n  %sp = getelementptr ptr, ptr %buf, i64 %tail\n  store ptr %slot, ptr %sp\n  %t1 = add i64 %tail, 1\n  %t2 = srem i64 %t1, %cap\n  store i64 %t2, ptr %tp24\n  %c3 = add i64 %cnt, 1\n  store i64 %c3, ptr %cnt32\n  %ne = getelementptr i8, ptr %chan, i64 88\n  %sg = call i32 @pthread_cond_signal(ptr %ne)\n  br label %rel\nrel:\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret i32 1\nreject_rel:\n  %ur = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret i32 0\n}\n\n")
+        if h_mantiq_channel_try_recv == 1 to i32:
+            append_cstr(out, "define ptr @__mantiq_channel_try_recv(ptr %chan, i64 %esz, ptr %has_val) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %nochan, label %lock\nnochan:\n  %hv0 = icmp eq ptr %has_val, null\n  br i1 %hv0, label %no_out, label %no_set\nno_set:\n  store i32 0, ptr %has_val\n  br label %no_out\nno_out:\n  ret ptr null\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %empty = icmp eq i64 %cnt, 0\n  br i1 %empty, label %none, label %take\nnone:\n  %hv1 = icmp eq ptr %has_val, null\n  br i1 %hv1, label %none_rel, label %none_set\nnone_set:\n  store i32 0, ptr %has_val\n  br label %none_rel\nnone_rel:\n  %u1 = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret ptr null\ntake:\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %hp16 = getelementptr i8, ptr %chan, i64 16\n  %head = load i64, ptr %hp16\n  %sp = getelementptr ptr, ptr %buf, i64 %head\n  %slot = load ptr, ptr %sp\n  %h1 = add i64 %head, 1\n  %capb = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %capb\n  %h2 = srem i64 %h1, %cap\n  store i64 %h2, ptr %hp16\n  %c3 = sub i64 %cnt, 1\n  store i64 %c3, ptr %cnt32\n  %hv2 = icmp eq ptr %has_val, null\n  br i1 %hv2, label %take_sig, label %take_set\ntake_set:\n  store i32 1, ptr %has_val\n  br label %take_sig\ntake_sig:\n  %nf = getelementptr i8, ptr %chan, i64 136\n  %sg = call i32 @pthread_cond_signal(ptr %nf)\n  %u2 = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret ptr %slot\n}\n\n")
+        if h_mantiq_channel_close == 1 to i32:
+            append_cstr(out, "define void @__mantiq_channel_close(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %out, label %lock\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cl40 = getelementptr i8, ptr %chan, i64 40\n  store i32 1, ptr %cl40\n  %ne = getelementptr i8, ptr %chan, i64 88\n  %b1 = call i32 @pthread_cond_broadcast(ptr %ne)\n  %nf = getelementptr i8, ptr %chan, i64 136\n  %b2 = call i32 @pthread_cond_broadcast(ptr %nf)\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  br label %out\nout:\n  ret void\n}\n\n")
+        if h_mantiq_channel_is_closed == 1 to i32:
+            append_cstr(out, "define i32 @__mantiq_channel_is_closed(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %yes, label %lock\nyes:\n  ret i32 1\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cl40 = getelementptr i8, ptr %chan, i64 40\n  %res = load i32, ptr %cl40\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret i32 %res\n}\n\n")
+        if h_mantiq_channel_len == 1 to i32:
+            append_cstr(out, "define i64 @__mantiq_channel_len(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %zero, label %lock\nzero:\n  ret i64 0\nlock:\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  ret i64 %cnt\n}\n\n")
+        if h_mantiq_channel_cap == 1 to i32:
+            append_cstr(out, "define i64 @__mantiq_channel_cap(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  ret i64 %cap\n}\n\n")
+        if h_mantiq_channel_free == 1 to i32:
+            append_cstr(out, "define void @__mantiq_channel_free(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %out, label %go\ngo:\n  call void @__mantiq_channel_close(ptr %chan)\n  %mp = getelementptr i8, ptr %chan, i64 48\n  %l = call i32 @pthread_mutex_lock(ptr %mp)\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %hp16 = getelementptr i8, ptr %chan, i64 16\n  %head = load i64, ptr %hp16\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  br label %iloop\niloop:\n  %ivp = alloca i64\n  store i64 0, ptr %ivp\n  br label %ichk\nichk:\n  %iv = load i64, ptr %ivp\n  %more = icmp slt i64 %iv, %cnt\n  br i1 %more, label %ibody, label %idone\nibody:\n  %idx0 = add i64 %head, %iv\n  %idx = srem i64 %idx0, %cap\n  %sp = getelementptr ptr, ptr %buf, i64 %idx\n  %slot = load ptr, ptr %sp\n  %sn = icmp eq ptr %slot, null\n  br i1 %sn, label %inext, label %ifree\nifree:\n  call void @mantiq_free(ptr %slot)\n  br label %inext\ninext:\n  %iv2 = load i64, ptr %ivp\n  %iv3 = add i64 %iv2, 1\n  store i64 %iv3, ptr %ivp\n  br label %ichk\nidone:\n  call void @mantiq_free(ptr %buf)\n  %u = call i32 @pthread_mutex_unlock(ptr %mp)\n  %d = call i32 @pthread_mutex_destroy(ptr %mp)\n  call void @mantiq_free(ptr %chan)\n  br label %out\nout:\n  ret void\n}\n\n; ---- quantum simulator (s_mantiq_qubits[64]) ----\n\n")
+        if h_mantiq_quantum_qbit == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_qbit(i32 %id) {\nentry:\n  %idx = and i32 %id, 63\n  %nz = icmp ne i32 %id, 0\n  %v = zext i1 %nz to i32\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  store i32 %v, ptr %p\n  ret i32 %idx\n}\n\n")
+        if h_mantiq_quantum_h == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_h(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n")
+        if h_mantiq_quantum_measure == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_measure(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  ret i32 %v\n}\n\n")
+        if h_mantiq_quantum_cnot == 1 to i32:
+            append_cstr(out, "define void @mantiq_quantum_cnot(i32 %c, i32 %t) {\nentry:\n  %ci = and i32 %c, 63\n  %cp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ci\n  %cv = load i32, ptr %cp\n  %set = icmp ne i32 %cv, 0\n  br i1 %set, label %flip, label %out\nflip:\n  %ti = and i32 %t, 63\n  %tp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ti\n  %tv = load i32, ptr %tp\n  %nv = xor i32 %tv, 1\n  store i32 %nv, ptr %tp\n  br label %out\nout:\n  ret void\n}\n\n")
+        if h_mantiq_quantum_x == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_x(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
+        if h_mantiq_quantum_y == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_y(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
+        if h_mantiq_quantum_z == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_quantum_z(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n; ---- RTTI isa (TypeDescriptor: type_id=0 i32, name=8, parent=16 i32, n=20 i32, ids=24) ----\n\n")
+        if h_mantiq_isa == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_isa(ptr %rtti, i32 %target) {\nentry:\n  %rn = icmp eq ptr %rtti, null\n  br i1 %rn, label %no, label %chk\nchk:\n  %tid = load i32, ptr %rtti\n  %eq1 = icmp eq i32 %tid, %target\n  br i1 %eq1, label %yes, label %chk2\nchk2:\n  %pidp = getelementptr i8, ptr %rtti, i64 16\n  %pid = load i32, ptr %pidp\n  %eq2 = icmp eq i32 %pid, %target\n  %tnz = icmp ne i32 %target, 0\n  %hit2 = and i1 %eq2, %tnz\n  br i1 %hit2, label %yes, label %chk3\nchk3:\n  %nip = getelementptr i8, ptr %rtti, i64 20\n  %ni = load i32, ptr %nip\n  %idsp = getelementptr i8, ptr %rtti, i64 24\n  %ids = load ptr, ptr %idsp\n  %ivp = alloca i32\n  store i32 0, ptr %ivp\n  br label %iloop\niloop:\n  %iv = load i32, ptr %ivp\n  %more = icmp slt i32 %iv, %ni\n  br i1 %more, label %ibody, label %no\nibody:\n  %idsn = icmp eq ptr %ids, null\n  br i1 %idsn, label %inext, label %icmp2\nicmp2:\n  %ep = getelementptr i32, ptr %ids, i32 %iv\n  %ev = load i32, ptr %ep\n  %hit = icmp eq i32 %ev, %target\n  br i1 %hit, label %yes, label %inext\ninext:\n  %iv2 = load i32, ptr %ivp\n  %iv3 = add i32 %iv2, 1\n  store i32 %iv3, ptr %ivp\n  br label %iloop\nyes:\n  ret i32 1\nno:\n  ret i32 0\n}\n\n")
 
     public fn generate(self as ptr[LLVMCodegen], root as ptr[Node]) as String:
         extern fn nizam_set_target_ptr_size(sz as i32)
@@ -2895,7 +3136,6 @@ struct LLVMCodegen:
         extern fn strcmp(s1 as cstr, s2 as cstr) as i32
         extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
         extern fn strstr(haystack as cstr, needle as cstr) as cstr
-        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
 
         if t != None to ptr[Type]:
             let k as TypeKind = (deref t).kind
@@ -2910,7 +3150,7 @@ struct LLVMCodegen:
                         return String.make("List_String" to cstr)
                     elif (deref pl).kind == TypeKind.Struct:
                         let pl_n as String = (deref pl).name
-                        if pl_n.data != None to ptr[u8] and mantiq_type_needs_drop(pl_n.data to cstr) != 0 to i32:
+                        if pl_n.data != None to ptr[u8] and self.type_needs_drop(pl_n):
                             let b as StringBuilder = StringBuilder.make()
                             append_cstr(ref b, "List_" to cstr)
                             append_str(ref b, pl_n)
@@ -2932,7 +3172,7 @@ struct LLVMCodegen:
                         return String.make("String" to cstr)
                     if strcmp(st_c, "Dict" to cstr) == 0:
                         return String.make("Dict" to cstr)
-                    if mantiq_type_needs_drop(st_c) != 0 to i32:
+                    if self.type_needs_drop(st_n):
                         return st_n
 
         if node != None to ptr[Node]:
@@ -2954,9 +3194,8 @@ struct LLVMCodegen:
                             if strstr(an, "String" to cstr) != None to cstr:
                                 return String.make("List_String" to cstr)
                             return String.make("List_flat" to cstr)
-                        if mantiq_type_needs_drop(an) != 0 to i32:
+                        if self.type_needs_drop((deref pa).name):
                             return (deref pa).name
-
         return String.make("" to cstr)
 
     public fn drop_type_base(self as ptr[LLVMCodegen], type_name as String) as String:
@@ -14844,7 +15083,6 @@ struct LLVMCodegen:
     public fn emit_auto_drops(self as ptr[LLVMCodegen], drops as List[String]):
         extern fn strcmp(s1 as cstr, s2 as cstr) as i32
         extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
 
         let count as i64 = drops.length()
         var i as i64 = 0 to i64
@@ -14961,7 +15199,7 @@ struct LLVMCodegen:
                         append_str(ref (deref self).main_out, elem_base)
                         elem_base.deinit()
                         append_cstr(ref (deref self).main_out, ")\n")
-                    elif mantiq_type_needs_drop(st_c) != 0 to i32:
+                    elif self.type_needs_drop(sem_t):
                         let drop_base as String = self.drop_type_base(sem_t)
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
                         append_str(ref (deref self).main_out, drop_base)
@@ -14971,7 +15209,7 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, ")\n")
                 elif llvm_t.len > 0 to usize and (deref llvm_t.data) == 37 to u8:
                     let st_name as cstr = (llvm_t.data to usize + 1 to usize) to cstr
-                    if mantiq_type_needs_drop(st_name) != 0 to i32:
+                    if self.type_needs_drop(String.make(st_name)):
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
                         append_cstr(ref (deref self).main_out, st_name)
                         append_cstr(ref (deref self).main_out, "(ptr %")
@@ -15210,7 +15448,6 @@ struct LLVMCodegen:
     public fn emit_struct_drop_glue(self as ptr[LLVMCodegen], node as ptr[Node], name as String):
         extern fn strcmp(s1 as cstr, s2 as cstr) as i32
         extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
 
         let n_cstr as cstr = name.data to cstr
         if strcmp(n_cstr, "String" to cstr) == 0 or strcmp(n_cstr, "StringBuilder" to cstr) == 0 or strcmp(n_cstr, "List" to cstr) == 0 or strcmp(n_cstr, "Dict" to cstr) == 0:
@@ -15334,7 +15571,7 @@ struct LLVMCodegen:
                         append_str(ref (deref self).main_out, elem_base)
                         elem_base.deinit()
                         append_cstr(ref (deref self).main_out, ")\n")
-                    elif mantiq_type_needs_drop(f_st_c) != 0 to i32:
+                    elif self.type_needs_drop(f_sem_t):
                         let drop_base as String = self.drop_type_base(f_sem_t)
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_")
                         append_str(ref (deref self).main_out, drop_base)

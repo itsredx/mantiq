@@ -1354,10 +1354,10 @@ fn __mantiq_list_decode(out_str as ptr, list_addr as ptr):
     (deref s).slen = llen
     (deref s).scap = llen + 1
 
-// byte list build from a hex string (runtime.c __mantiq_list_fromhex)
+// byte list build from a hex string (was runtime.c __mantiq_list_fromhex)
 fn __mantiq_list_fromhex(out_list as ptr, hex_str as ptr):
     extern fn mantiq_malloc(size as i64) as ptr
-    extern fn mantiq_strlen(s as ptr) as i64
+    extern fn strlen(s as ptr) as usize
     let l as ptr[MListRaw] = out_list to ptr[MListRaw]
     (deref l).mdata = None to ptr[u8]
     (deref l).mlen = 0 to i64
@@ -1365,7 +1365,7 @@ fn __mantiq_list_fromhex(out_list as ptr, hex_str as ptr):
     if hex_str == None to ptr:
         return
     let hx as ptr[u8] = hex_str to ptr[u8]
-    let slen as i64 = mantiq_strlen(hex_str)
+    let slen as i64 = strlen(hex_str) to i64
     let count as i64 = slen / 2
     if count == 0 to i64:
         return

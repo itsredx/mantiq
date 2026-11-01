@@ -70,6 +70,21 @@ struct BorrowChecker:
     public var current_row as u32
     public var cfg_analyzer as ptr[CFGAnalyzer]
 
+    // Needs-drop registry check (replaces the C-side mantiq_type_needs_drop
+    // consult that used to live inside is_copy_type). Structs registered by
+    // Sema.check_and_register_struct_drop are move-only.
+    public fn sema_needs_drop_type(self as ptr[BorrowChecker], t as ptr[Type]) as bool:
+        if t == None to ptr[Type]:
+            return False
+        if (deref self).sema == None to ptr[Sema]:
+            return False
+        if (deref t).kind != TypeKind.Struct:
+            return False
+        let nm as String = (deref t).name
+        if nm.data == None to ptr[u8]:
+            return False
+        return (deref (deref (deref self).sema).needs_drop_types).has(nm)
+
     public fn init_bc(self as ptr[BorrowChecker]):
         (deref self).errors = List[String]()
         (deref self).current_file = String.make("" to cstr)
@@ -247,7 +262,7 @@ struct BorrowChecker:
                 if info.state == ObjectState.Owned:
                     let t as ptr[Type] = info.var_type
                     if t != None to ptr[Type]:
-                        if (is_copy_type(t) == False or (deref sym).is_context_manager) and not self.is_aliasing_init(sym):
+                        if (is_copy_type(t) == False or self.sema_needs_drop_type(t) or (deref sym).is_context_manager) and not self.is_aliasing_init(sym):
                             drops.append(sym)
                             (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = t)
             i = i + 1 to i64
@@ -522,7 +537,7 @@ struct BorrowChecker:
                 if sym != None to ptr[Symbol]:
                     t = (deref sym).resolved_type
             if t != None to ptr[Type]:
-                if is_copy_type(t):
+                if is_copy_type(t) and not self.sema_needs_drop_type(t):
                     return
         else:
             if (deref self).sema != None to ptr[Sema]:
@@ -530,7 +545,7 @@ struct BorrowChecker:
                 if sym != None to ptr[Symbol]:
                     let t as ptr[Type] = (deref sym).resolved_type
                     if t != None to ptr[Type]:
-                        if is_copy_type(t):
+                        if is_copy_type(t) and not self.sema_needs_drop_type(t):
                             return
         self.mark_moved(name)
 
@@ -782,7 +797,7 @@ struct BorrowChecker:
                         if info.state == ObjectState.Owned:
                             let t as ptr[Type] = info.var_type
                             if t != None to ptr[Type]:
-                                if (is_copy_type(t) == False or (deref sym).is_context_manager) and not self.is_aliasing_init(sym):
+                                if (is_copy_type(t) == False or self.sema_needs_drop_type(t) or (deref sym).is_context_manager) and not self.is_aliasing_init(sym):
                                     var is_returned as bool = False
                                     if return_val != None to ptr[Node]:
                                         if node_kind(return_val) == NodeType.Identifier:

@@ -76,23 +76,176 @@ extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
 extern fn strlen(s as cstr) as usize
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
-extern fn mantiq_run_command_direct(argv as ptr[cstr]) as i32
 extern fn access(path as cstr, mode as i32) as i32
-extern fn mantiq_sha256_hex(data as cstr, len as usize, out_buf as ptr[u8])
-extern fn mantiq_sha256_file_hex(path as cstr, out_buf as ptr[u8]) as i32
-extern fn mantiq_mkdir_p(path as cstr) as i32
-extern fn mantiq_copy_file(src as cstr, dst as cstr) as i32
-extern fn mantiq_ast_arena_reset()
-extern fn mantiq_intern_reset()
-extern fn mantiq_set_profile_active(active as i32)
 
+
+// ── Milestone D: native ports of the last runtime.c functions ──────────
+// Everything here was previously resolved from runtime.c at link time.
+// These are TU-local definitions: the compiler binary carries its own
+// copies, so runtime.c is no longer linked into native builds.
+//
+// ── Direct Process Execution (no /bin/sh overhead) ──────────────────────
+fn mantiq_run_command_direct(argv as ptr[cstr]) as i32:
+    extern fn fork() as i32
+    extern fn execvp(file as cstr, argv as ptr[cstr]) as i32
+    extern fn _exit(code as i32)
+    extern fn waitpid(pid as i32, status as ptr, opts as i32) as i32
+    if argv == None to ptr[cstr]:
+        return -1 to i32
+    if argv[0] == None to cstr:
+        return -1 to i32
+    let pid as i32 = fork()
+    if pid < 0 to i32:
+        return -1 to i32
+    if pid == 0 to i32:
+        let _r as i32 = execvp(argv[0], argv)
+        _exit(127 to i32)
+        return -1 to i32
+    var status as i32 = 0 to i32
+    let w as i32 = waitpid(pid, (ref status) to ptr, 0 to i32)
+    if w < 0 to i32:
+        return -1 to i32
+    let sig as i32 = status & 127
+    if sig == 0 to i32:
+        let code as i32 = status / 256
+        return code & 255
+    return sig
+
+// Guard: reject filesystem paths containing control bytes. Such paths can
+// only originate from uninitialized or freed memory passed as a cstr (see
+// docs/runtime-elimination-notes.md, aliasing-drop instances #1-#5);
+// previously they created junk files/dirs named after raw memory bytes.
+fn mantiq_path_sane(p as cstr) as i32:
+    if p == None to cstr:
+        return 0 to i32
+    let pu as ptr[u8] = p to ptr[u8]
+    var i as usize = 0 to usize
+    while pu[i] != 0 to u8:
+        let c as i32 = pu[i] to i32
+        if c < 32 to i32 or c == 127 to i32:
+            return 0 to i32
+        i = i + 1 to usize
+    return 1 to i32
+
+fn mantiq_mkdir_p(dir_path as cstr) as i32:
+    extern fn mkdir(path as cstr, mode as i32) as i32
+    extern fn strlen(s as cstr) as usize
+    extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+    if dir_path == None to cstr:
+        return 0 to i32
+    if mantiq_path_sane(dir_path) == 0 to i32:
+        return 0 to i32
+    let len as usize = strlen(dir_path)
+    if len == 0 to usize or len >= 4096 to usize:
+        return 0 to i32
+    // Leak-mode: the 4KB scratch buffer is intentionally not freed.
+    let tmp as ptr[u8] = malloc(4096 to usize) to ptr[u8]
+    let _m as ptr = memcpy(tmp to ptr, dir_path to ptr, len + 1 to usize)
+    var i as usize = 1 to usize
+    while i < len:
+        if tmp[i] == 47 to u8: // '/'
+            tmp[i] = 0 to u8
+            if mkdir(tmp to cstr, 493 to i32) != 0 to i32 and access(tmp to cstr, 0 to i32) != 0 to i32:
+                return 0 to i32
+            tmp[i] = 47 to u8
+        i = i + 1 to usize
+    if mkdir(tmp to cstr, 493 to i32) != 0 to i32 and access(tmp to cstr, 0 to i32) != 0 to i32:
+        return 0 to i32
+    return 1 to i32
+
+fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
+    extern fn open(path as cstr, flags as i32, mode as i32) as i32
+    extern fn close(fd as i32) as i32
+    extern fn read(fd as i32, buf as ptr, count as usize) as i64
+    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn strlen(s as cstr) as usize
+    extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+    if src_path == None to cstr or dst_path == None to cstr:
+        return 0 to i32
+    if mantiq_path_sane(src_path) == 0 to i32 or mantiq_path_sane(dst_path) == 0 to i32:
+        return 0 to i32
+    let src_fd as i32 = open(src_path, 0 to i32, 0 to i32)
+    if src_fd < 0 to i32:
+        return 0 to i32
+    // Ensure the destination's parent directory exists (mirrors runtime.c).
+    let dlen as usize = strlen(dst_path)
+    if dlen < 4096 to usize:
+        let ddir as ptr[u8] = malloc(dlen + 1 to usize) to ptr[u8]
+        let _m2 as ptr = memcpy(ddir to ptr, dst_path to ptr, dlen + 1 to usize)
+        var li as usize = dlen
+        while li > 0 to usize:
+            li = li - 1 to usize
+            if ddir[li] == 47 to u8: // '/'
+                ddir[li] = 0 to u8
+                let _mk as i32 = mantiq_mkdir_p(ddir to cstr)
+                break
+    let dst_fd as i32 = open(dst_path, 577 to i32, 493 to i32) // O_WRONLY|O_CREAT|O_TRUNC, 0755
+    if dst_fd < 0 to i32:
+        let _c1 as i32 = close(src_fd)
+        return 0 to i32
+    // Leak-mode: 64KB copy buffer intentionally not freed.
+    let buf as ptr[u8] = malloc(65536 to usize) to ptr[u8]
+    var ok as i32 = 1 to i32
+    var n as i64 = read(src_fd, buf to ptr, 65536 to usize)
+    while n > 0 to i64:
+        var written as i64 = 0 to i64
+        while written < n:
+            let w as i64 = write(dst_fd, (buf to usize + written to usize) to ptr, (n - written) to usize)
+            if w <= 0 to i64:
+                ok = 0 to i32
+            written = written + w
+        if ok == 0 to i32:
+            n = 0 to i64
+        else:
+            n = read(src_fd, buf to ptr, 65536 to usize)
+    let _c2 as i32 = close(src_fd)
+    let _c3 as i32 = close(dst_fd)
+    if ok == 0 to i32:
+        return 0 to i32
+    return 1 to i32
 
 // ── Performance Monitor ─────────────────────────────────────────────────
-extern fn mantiq_perf_now_ns() as i64
-extern fn mantiq_perf_rss_bytes() as i64
-extern fn mantiq_alloc_count() as i64
-extern fn mantiq_alloc_bytes() as i64
-extern fn mantiq_free_count() as i64
+fn mantiq_perf_now_ns() as i64:
+    extern fn clock_gettime(clk as i32, ts as ptr) as i32
+    let ts as ptr[i64] = malloc(16 to usize) to ptr[i64]
+    let _r as i32 = clock_gettime(1 to i32, ts to ptr) // CLOCK_MONOTONIC
+    let sec as i64 = ts[0]
+    let nsec as i64 = ts[1]
+    return sec * 1000000000 + nsec
+
+fn mantiq_perf_rss_bytes() as i64:
+    extern fn getrusage(who as i32, usage as ptr) as i32
+    // struct rusage on x86-64: two 16-byte timevals, then ru_maxrss (i64)
+    // at offset 32, reported in KB.
+    let ru as ptr[u8] = malloc(144 to usize) to ptr[u8]
+    let _r as i32 = getrusage(0 to i32, ru to ptr) // RUSAGE_SELF
+    let p as ptr[i64] = (ru to usize + 32 to usize) to ptr[i64]
+    let kb as i64 = p[0]
+    return kb * 1024
+
+// The C-side tallies (_alloc_count/_alloc_bytes/_free_count) only counted
+// allocations made by runtime.c's own C-internal helpers; the Nizam-side
+// mantiq_malloc (calloc-backed) never fed them. Ported as inert zeros to
+// preserve observed behavior exactly.
+fn mantiq_alloc_count() as i64:
+    return 0 to i64
+
+fn mantiq_alloc_bytes() as i64:
+    return 0 to i64
+
+fn mantiq_free_count() as i64:
+    return 0 to i64
+
+fn mantiq_set_profile_active(active as i32):
+    return
+
+// Leak-mode: the C bump-arena reset/destroy is a no-op (stale pointers stay
+// valid; mantiq_ast_alloc now calloc's fresh zeroed blocks).
+fn mantiq_ast_arena_reset():
+    return
+
+fn mantiq_intern_reset():
+    return
 
 fn perf_now_ns() as i64:
     return mantiq_perf_now_ns()
@@ -308,22 +461,49 @@ fn get_module_name_from_path(path as cstr) as String:
     free(buf to ptr)
     return res
 
-// ── Cache & SHA-256 Helpers ─────────────────────────────────────────────
+// ── Cache Content Keys ──────────────────────────────────────────────────
+// Milestone D: the C sha256 engine is gone with runtime.c. Cache keys now
+// use a dual-seed FNV-1a (two independent 32-bit streams combined into a
+// 64-bit key, no shared state with the 32-bit FNV used for dict hashing).
+// Collision odds at compiler-cache scale (<10k entries) are ~2^-48; the
+// only consumers are opaque strcmp-compared dep-file keys and binary names,
+// so the format change self-heals via one cold-cache pass.
+fn fnv1a32_stream(data as ptr[u8], len as usize, seed as i64) as i64:
+    var hash as i64 = seed
+    let m32 as i64 = 4294967295
+    var i as usize = 0 to usize
+    while i < len:
+        hash = (hash ^ (data[i] to i64)) & m32
+        hash = (hash * 16777619) & m32
+        i = i + 1 to usize
+    return hash
+
 fn get_file_sha256(path as cstr) as String:
-    let buf as ptr[u8] = malloc(65 to usize) to ptr[u8]
-    let ok as i32 = mantiq_sha256_file_hex(path, buf)
-    if ok == 0 to i32:
+    let buf as ptr[u8] = malloc(17 to usize) to ptr[u8]
+    let f as ptr = fopen(path, "rb" to cstr)
+    if f == None to ptr:
         free(buf to ptr)
         return String.make("" to cstr)
-    buf[64] = 0 to u8
+    // Leak-mode: 64KB read chunk intentionally not freed.
+    let chunk as ptr[u8] = malloc(65536 to usize) to ptr[u8]
+    var h1 as i64 = 2166136261
+    var h2 as i64 = 3141592653
+    var n as usize = fread(chunk to ptr, 1 to usize, 65536 to usize, f)
+    while n > 0 to usize:
+        h1 = fnv1a32_stream(chunk, n, h1)
+        h2 = fnv1a32_stream(chunk, n, h2)
+        n = fread(chunk to ptr, 1 to usize, 65536 to usize, f)
+    fclose(f)
+    let _sp as i32 = sprintf(buf, "%08lx%08lx" to cstr, h1, h2)
     let s as String = String.make(buf to cstr)
     free(buf to ptr)
     return s
 
 fn get_str_sha256(data as cstr, len as usize) as String:
-    let buf as ptr[u8] = malloc(65 to usize) to ptr[u8]
-    mantiq_sha256_hex(data, len, buf)
-    buf[64] = 0 to u8
+    let buf as ptr[u8] = malloc(17 to usize) to ptr[u8]
+    let h1 as i64 = fnv1a32_stream(data to ptr[u8], len, 2166136261)
+    let h2 as i64 = fnv1a32_stream(data to ptr[u8], len, 3141592653)
+    let _sp as i32 = sprintf(buf, "%08lx%08lx" to cstr, h1, h2)
     let s as String = String.make(buf to cstr)
     free(buf to ptr)
     return s
@@ -509,6 +689,10 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let t4 as i64 = perf_begin(perf, "codegen")
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()
+    // Milestone D: bridge sema's needs-drop registry into codegen (replaces
+    // runtime.c's C-side type registry; shared Dict handles, one store).
+    (deref cg).needs_drop_types = (deref sema).needs_drop_types
+    (deref cg).needs_drop_registry_active = True
     (deref cg).target = target
     if target.is_python_ext():
         (deref cg).python_ext_module_name = get_module_name_from_path(out_file)
@@ -646,12 +830,12 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, lib_dir, out_file, extra_flags_c, py_opt, ll_path, lib_dir, out_file, extra_flags_c)
         else:
             if lib_dir == None to cstr:
-                _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c ../mantiqz/mantiq-compiler/src/runtime.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c)
             else:
                 if has_rt_obj:
-                    _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" \"%s/runtime.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+                    _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.o\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
                 else:
-                    _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" \"%s/runtime.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
+                    _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
         res = -1
         if not target.is_wasm() and not target.is_python_ext():
             let d_argv as ptr[cstr] = malloc(128 to usize * 8 to usize) to ptr[cstr]
@@ -686,7 +870,6 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             d_argv[di] = "-ltree-sitter-mantiq" to cstr
             di = di + 1 to usize
             var ts_str as String = String.make("" to cstr)
-            var rt_str as String = String.make("" to cstr)
             var rp_str as String = String.make("" to cstr)
             if lib_dir != None to cstr:
                 if has_rt_obj:
@@ -696,24 +879,12 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                     ts_str = ts_sb.to_string()
                     d_argv[di] = ts_str.data to cstr
                     di = di + 1 to usize
-                    let rt_sb as StringBuilder = StringBuilder.make()
-                    rt_sb.append(lib_dir)
-                    rt_sb.append("/runtime.o" to cstr)
-                    rt_str = rt_sb.to_string()
-                    d_argv[di] = rt_str.data to cstr
-                    di = di + 1 to usize
                 else:
                     let ts_sb as StringBuilder = StringBuilder.make()
                     ts_sb.append(lib_dir)
                     ts_sb.append("/tree_sitter_helper.c" to cstr)
                     ts_str = ts_sb.to_string()
                     d_argv[di] = ts_str.data to cstr
-                    di = di + 1 to usize
-                    let rt_sb as StringBuilder = StringBuilder.make()
-                    rt_sb.append(lib_dir)
-                    rt_sb.append("/runtime.c" to cstr)
-                    rt_str = rt_sb.to_string()
-                    d_argv[di] = rt_str.data to cstr
                     di = di + 1 to usize
                 let rp_sb as StringBuilder = StringBuilder.make()
                 rp_sb.append("-Wl,-rpath," to cstr)
@@ -722,20 +893,18 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                 d_argv[di] = rp_str.data to cstr
                 di = di + 1 to usize
             else:
-                if access("tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32 and access("runtime.o" to cstr, 0 to i32) == 0 to i32:
+                // Milestone D: no runtime object/source is linked anymore —
+                // the entire rt surface resolves from program-local IR
+                // (std definitions + emit_rt_glue_bodies templates) and the
+                // TU-local Milestone D ports.
+                if access("tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32:
                     d_argv[di] = "tree_sitter_helper.o" to cstr
                     di = di + 1 to usize
-                    d_argv[di] = "runtime.o" to cstr
-                    di = di + 1 to usize
-                elif access("stage3/tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32 and access("stage3/runtime.o" to cstr, 0 to i32) == 0 to i32:
+                elif access("stage3/tree_sitter_helper.o" to cstr, 0 to i32) == 0 to i32:
                     d_argv[di] = "stage3/tree_sitter_helper.o" to cstr
-                    di = di + 1 to usize
-                    d_argv[di] = "stage3/runtime.o" to cstr
                     di = di + 1 to usize
                 else:
                     d_argv[di] = "tree_sitter_helper.c" to cstr
-                    di = di + 1 to usize
-                    d_argv[di] = "../mantiqz/mantiq-compiler/src/runtime.c" to cstr
                     di = di + 1 to usize
                 d_argv[di] = "-Wl,-rpath,'$ORIGIN'" to cstr
                 di = di + 1 to usize

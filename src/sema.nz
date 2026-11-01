@@ -263,6 +263,10 @@ struct Sema:
     public var link_targets as List[String]
     public var loaded_module_paths as List[String]
     public var active_closure_depth as i32
+    // Needs-drop registry (name -> True), replacing runtime.c's C-side
+    // registry. Populated by check_and_register_struct_drop; main bridges
+    // the same Dict into LLVMCodegen for the codegen phase.
+    public var needs_drop_types as Dict[String, bool]
 
     public fn init_sema(self as ptr[Sema], file_path as cstr):
         (deref self).mode = LanguageMode.Nizam
@@ -276,6 +280,7 @@ struct Sema:
         (deref self).link_targets = List[String]()
         (deref self).loaded_module_paths = List[String]()
         (deref self).active_closure_depth = 0 to i32
+        (deref self).needs_drop_types = Dict[String, bool]()
         
         let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
@@ -339,8 +344,22 @@ struct Sema:
     public fn lookup_symbol(self as ptr[Sema], name as String) as ptr[Symbol]:
         if name.len == 0 to usize or name.data == None to ptr[u8]:
             return None to ptr[Symbol]
-        extern fn __mantiq_scope_lookup(curr as ptr[u8], global_scope as ptr[u8], name_ptr as cstr, name_len as usize) as ptr[Symbol]
-        return __mantiq_scope_lookup((deref self).current_scope to ptr[u8], (deref self).global_scope to ptr[u8], name.data to cstr, name.len)
+        // Nizam port of runtime.c __mantiq_scope_lookup: walk the scope
+        // parent chain; if the global scope was not on that chain, check it
+        // once at the end (exact C semantics).
+        var curr as ptr[Scope] = (deref self).current_scope
+        var visited_global as bool = False
+        while curr != None to ptr[Scope]:
+            if curr == (deref self).global_scope:
+                visited_global = True
+            if (deref curr).symbols.has(name):
+                return (deref curr).symbols[name]
+            curr = (deref curr).parent
+        if not visited_global and (deref self).global_scope != None to ptr[Scope]:
+            let gs as ptr[Scope] = (deref self).global_scope
+            if (deref gs).symbols.has(name):
+                return (deref gs).symbols[name]
+        return None to ptr[Symbol]
 
     public fn check_closure_capture(self as ptr[Sema], name as String, sym as ptr[Symbol]):
         if (deref self).active_closure_depth == 0 to i32:
@@ -1750,11 +1769,9 @@ struct Sema:
         let s_cstr as cstr = name.data to cstr
         extern fn strcmp(s1 as cstr, s2 as cstr) as i32
         extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
-        extern fn mantiq_type_set_needs_drop(type_name as cstr, needs_drop as i32)
-        extern fn mantiq_type_needs_drop(type_name as cstr) as i32
 
         if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0 or strcmp(s_cstr, "Set" to cstr) == 0:
-            mantiq_type_set_needs_drop(s_cstr, 1 to i32)
+            (deref self).needs_drop_types[String.make(s_cstr)] = True
             return
 
         var needs_drop as bool = False
@@ -1780,7 +1797,7 @@ struct Sema:
                             needs_drop = True
                         elif fk == TypeKind.Struct:
                             let f_sn as ptr[u8] = (deref f_inf).name.data
-                            if f_sn != None to ptr[u8] and mantiq_type_needs_drop(f_sn to cstr) != 0 to i32:
+                            if f_sn != None to ptr[u8] and (deref self).needs_drop_types.has(String.make(f_sn to cstr)):
                                 needs_drop = True
                     if not needs_drop:
                         let ann_p as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(decl)
@@ -1791,9 +1808,9 @@ struct Sema:
                                 let pa as ptr[TypeAnnotation] = (deref a_ref).val_ptr to ptr[TypeAnnotation]
                                 if pa != None to ptr[TypeAnnotation] and (deref pa).name.data != None to ptr[u8]:
                                     let an as cstr = (deref pa).name.data to cstr
-                                    if strncmp(an, "String" to cstr, 6 to usize) == 0 or strncmp(an, "List" to cstr, 4 to usize) == 0 or strncmp(an, "Dict" to cstr, 4 to usize) == 0 or strncmp(an, "StringBuilder" to cstr, 13 to usize) == 0 or mantiq_type_needs_drop(an) != 0 to i32:
+                                    if strncmp(an, "String" to cstr, 6 to usize) == 0 or strncmp(an, "List" to cstr, 4 to usize) == 0 or strncmp(an, "Dict" to cstr, 4 to usize) == 0 or strncmp(an, "StringBuilder" to cstr, 13 to usize) == 0 or (deref self).needs_drop_types.has(String.make(an)):
                                         needs_drop = True
                 i = i + 1 to i64
 
         if needs_drop:
-            mantiq_type_set_needs_drop(s_cstr, 1 to i32)
+            (deref self).needs_drop_types[String.make(s_cstr)] = True
