@@ -2158,17 +2158,6 @@ struct LLVMCodegen:
             append_cstr(out, "define void @mantiq_page_free(ptr %p, i64 %size) {\nentry:\n  %nul = icmp eq ptr %p, null\n  %neg = icmp sle i64 %size, 0\n  %skip = or i1 %nul, %neg\n  br i1 %skip, label %out, label %go\ngo:\n  %al = add i64 %size, 4095\n  %a2 = and i64 %al, -4096\n  %r = call i32 @munmap(ptr %p, i64 %a2)\n  br label %out\nout:\n  ret void\n}\n\n")
         if h_arena_chk == 1 to i32:
             append_cstr(out, "define i32 @mantiq_is_arena_ptr(ptr %p) {\n  ret i32 0\n}\n\n")
-        // String concat helpers: codegen's string-concat path emits real
-        // calls to these into product IR; they previously resolved from
-        // runtime.c at link time. Bodies mirror runtime.c exactly
-        // (malloc_raw-backed, NUL-terminated, empty-part handling).
-        let h_strlen as i32 = self.rt_body_missing("define i64 @mantiq_strlen(ptr" to cstr)
-        let h_concat as i32 = self.rt_body_missing("define ptr @mantiq_concat_str(ptr" to cstr)
-        if h_strlen == 1 to i32:
-            append_cstr(out, "declare i64 @strlen(ptr)\n")
-            append_cstr(out, "define i64 @mantiq_strlen(ptr %s) {\nentry:\n  %n = icmp eq ptr %s, null\n  br i1 %n, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %l = call i64 @strlen(ptr %s)\n  ret i64 %l\n}\n\n")
-        if h_concat == 1 to i32:
-            append_cstr(out, "define ptr @mantiq_concat_str(ptr %a, i64 %alen, ptr %b, i64 %blen) {\nentry:\n  %abad = icmp sle i64 %alen, 0\n  %anull = icmp eq ptr %a, null\n  %aempty = or i1 %abad, %anull\n  br i1 %aempty, label %aempty_bchk, label %bfull_chk\naempty_bchk:\n  %bbad = icmp sle i64 %blen, 0\n  %bnull = icmp eq ptr %b, null\n  %bempty = or i1 %bbad, %bnull\n  br i1 %bempty, label %retempty, label %retcopyb\nretempty:\n  %e = call ptr @mantiq_malloc_raw(i64 1)\n  store i8 0, ptr %e\n  ret ptr %e\nretcopyb:\n  %bl1 = add i64 %blen, 1\n  %nb = call ptr @mantiq_malloc_raw(i64 %bl1)\n  %mb = call ptr @memcpy(ptr %nb, ptr %b, i64 %blen)\n  %bep = getelementptr i8, ptr %nb, i64 %blen\n  store i8 0, ptr %bep\n  ret ptr %nb\nbfull_chk:\n  %bbad2 = icmp sle i64 %blen, 0\n  %bnull2 = icmp eq ptr %b, null\n  %bempty2 = or i1 %bbad2, %bnull2\n  br i1 %bempty2, label %retcopya, label %retboth\nretcopya:\n  %al1 = add i64 %alen, 1\n  %na = call ptr @mantiq_malloc_raw(i64 %al1)\n  %ma = call ptr @memcpy(ptr %na, ptr %a, i64 %alen)\n  %aep = getelementptr i8, ptr %na, i64 %alen\n  store i8 0, ptr %aep\n  ret ptr %na\nretboth:\n  %total = add i64 %alen, %blen\n  %tot1 = add i64 %total, 1\n  %nb2 = call ptr @mantiq_malloc_raw(i64 %tot1)\n  %ma2 = call ptr @memcpy(ptr %nb2, ptr %a, i64 %alen)\n  %bdest = getelementptr i8, ptr %nb2, i64 %alen\n  %mb2 = call ptr @memcpy(ptr %bdest, ptr %b, i64 %blen)\n  %tep = getelementptr i8, ptr %nb2, i64 %total\n  store i8 0, ptr %tep\n  ret ptr %nb2\n}\n\n")
 
         // ── Milestone D (products): runtime.c definitions for features the
         // compiler TU never calls but products do (print/conversions/async/
