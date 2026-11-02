@@ -247,6 +247,57 @@ fn mantiq_ast_arena_reset():
 fn mantiq_intern_reset():
     return
 
+// ── Allocator / interning surface (last runtime.c link-time deps) ───────
+// Leak-mode semantics: allocations are never released, so the C arena, slab
+// and page machinery reduce to fresh zeroed allocations. The needle text in
+// emit_rt_glue_bodies (codegen.nz) matches these compiled defines, so the
+// TU-side templates skip themselves in self-hosted builds.
+//   - mantiq_ast_alloc:    calloc's a fresh zeroed block (min size 1).
+//   - mantiq_alloc_box32:  32-byte zeroed box (was a 64KB bump slab; under
+//     leak-mode both are semantically a permanent 32-byte grant).
+//   - mantiq_intern_string: fresh zero-terminated copy, no deduplication
+//     (all consumers strcmp anyway).
+//   - mantiq_page_alloc/free: mmap/munmap rounded to 4KB pages; NULL on
+//     failure (callers only test NULL; Linux mmap never returns NULL).
+fn mantiq_ast_alloc(sz as usize) as ptr:
+    extern fn calloc(nmemb as usize, cnt as usize) as ptr
+    if sz == 0 to usize:
+        return calloc(1 to usize, 1 to usize)
+    return calloc(1 to usize, sz)
+
+fn mantiq_alloc_box32() as ptr:
+    extern fn calloc(nmemb as usize, sz as usize) as ptr
+    return calloc(1 to usize, 32 to usize)
+
+fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]:
+    extern fn calloc(nmemb as usize, sz as usize) as ptr
+    if s == None to cstr or len == 0 to usize:
+        return calloc(1 to usize, 1 to usize) to ptr[u8]
+    let buf as ptr[u8] = calloc(1 to usize, len + 1 to usize) to ptr[u8]
+    let _m as ptr = memcpy(buf to ptr, s to ptr, len)
+    return buf
+
+fn mantiq_page_alloc(req_size as usize) as ptr[u8]:
+    extern fn mmap(addr as ptr, length as usize, prot as i32, flags as i32, fd as i32, offset as i64) as ptr
+    if req_size == 0 to usize:
+        return None to ptr[u8]
+    let aligned as usize = ((req_size + 4095 to usize) / 4096 to usize) * 4096 to usize
+    let res as ptr = mmap(None to ptr, aligned, 3 to i32, 34 to i32, -1 to i32, 0 to i64)
+    // MAP_FAILED == (void*)-1; Nizam has no inttoptr literal, so build the
+    // sentinel from an all-ones usize.
+    let map_failed as ptr = (0 - 1 to usize) to ptr
+    if res == None to ptr or res == map_failed:
+        return None to ptr[u8]
+    return res to ptr[u8]
+
+fn mantiq_page_free(ptr_val as ptr[u8], req_size as usize):
+    extern fn munmap(addr as ptr, length as usize) as i32
+    if ptr_val == None to ptr[u8] or req_size == 0 to usize:
+        return
+    let aligned as usize = ((req_size + 4095 to usize) / 4096 to usize) * 4096 to usize
+    let _r as i32 = munmap(ptr_val to ptr, aligned)
+    return
+
 fn perf_now_ns() as i64:
     return mantiq_perf_now_ns()
 

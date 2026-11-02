@@ -788,14 +788,56 @@ against runtime.c with an identical C driver:
   content semantics, page alignment — identical. Known intentional
   deltas (documented inert): intern dedup gone, is_arena_ptr -> 0.
 
-### Bootstrap
-Old builder lacks the new templates, so the TU build is two-stage:
-stage 1 builds with runtime.c still linked (bootstrap; output binary
-carries all new codegen), stage 2 rebuilds the TU with the new binary
-whose emission covers everything -> links without runtime.c.
-Chain: `~/.local/share/nizam-tools/rtunlink_chain.sh`
+### Bootstrap -> single-stage pivot
+Originally two-stage: stage 1 built with runtime.c still linked
+(bootstrap; output binary carries all new codegen), stage 2 rebuilt the
+TU with the new binary whose emission covers everything -> links
+without runtime.c. Both stage-1 attempts were killed by server restarts
+(~35-40 CPU-min each; Tier-2 cache is keyed by the FINAL IR hash, so
+killed builds cannot resume).
+
+Pivot: the TU now defines its LAST five runtime.c-resolved symbols as
+TU-local Nizam fns in main.nz — `mantiq_ast_alloc`, `mantiq_alloc_box32`,
+`mantiq_intern_string`, `mantiq_page_alloc`, `mantiq_page_free` — so the
+OLD builder compiles the full new sources in ONE stage. The old baked
+d_argv still lists runtime.c on the link line, but the linker never
+pulls runtime.o (every mantiq symbol it could satisfy is already
+defined in the TU). Signatures match the consumers (lower.nz externs,
+std/mem.nz externs) and the emitted define lines match the
+emit_rt_glue_bodies needle text, so the TU-side templates skip
+themselves in future self-hosted builds. Leak-mode simplifications:
+ast_alloc = calloc(1, max(sz,1)); box32 = 32-byte calloc (slab machinery
+unneeded when free is a no-op); page_alloc returns NULL on any failure
+(callers only test NULL; Linux mmap never returns NULL, MAP_FAILED is
+built as `(0 - 1 to usize) to ptr`).
+Chain: `~/.local/share/nizam-tools/rtunlink_chain.sh` (single stage)
 (log: rtunlink.log; suite journal: rt_nolink.state — FRESH journal,
 the old `suite_resume.state` is seeded 50 PASS and would skip all).
+
+### Collision safety net
+runtime.c's non-static definitions are now `__attribute__((weak))` (all
+of them, not just the colliders). If a future TU edit re-introduces an
+undefined mantiq symbol, the linker pulls runtime.o and its weak defs
+lose to the TU's strong Nizam defs instead of erroring with multiple
+definitions. Native builds that define everything never pull runtime.o.
+
+### clang-23 optimizer bug (worked around in the shim)
+clang was upgraded 22.1.8 -> 23.1.3 on 2026-10-22. LLVM 22 AND 23 crash
+(SIGSEGV in `TargetLibraryInfoImpl::getLibFunc` during instcombine on
+the entry function) when a call passes FEWER arguments than the callee
+declaration has parameters — e.g. `call ptr @calloc(i64 1)` against
+`declare ptr @calloc(i64, i64)`. The builder passes
+`-disable-llvm-verifier`, so the malformed call reaches the optimizer.
+The crash is probabilistic under ASLR; `setarch --addr-no-randomize`
+makes it deterministic (llvm-reduce + that flag produced the minimal
+testcase). Root trigger found and fixed in the sources: a parameter
+named `size` collides with the `size` UNARY OPERATOR keyword — the
+parser treats a bare `size` identifier as the sizeof-like operator,
+which both corrupted the comparison (`icmp eq i64 1024, 0`) and DROPPED
+the argument from the following call. Renamed to `sz`.
+The shim (`clangshim/clang`) additionally retries with
+`-fno-inline-functions` if the optimizer dies by signal, as a belt-
+and-suspenders fallback for any future malformed-IR shape.
 
 ### Known remaining gaps (documented, out of scope)
 - `mantiq_py_*` symbols: native products using python-embed interop

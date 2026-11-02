@@ -78,7 +78,7 @@ int nizam_get_target_ptr_size(void) {
 }
 
 // Simulated thread pool / parallel loop execution
-void __mantiq_parallel_for(int start, int end, void (*closure)(void*, int), void* env) {
+__attribute__((weak)) void __mantiq_parallel_for(int start, int end, void (*closure)(void*, int), void* env) {
     printf("[Runtime] Dispatching parallel loop from %d to %d to thread pool...\n", start, end);
     for (int i = start; i < end; i++) {
         // In a real implementation, this would be pushed to a thread queue
@@ -192,21 +192,21 @@ static long long _alloc_bytes = 0;
 static long long _free_count = 0;
 static int _mantiq_profile_active = 0;
 
-void mantiq_set_profile_active(int active) {
+__attribute__((weak)) void mantiq_set_profile_active(int active) {
     _mantiq_profile_active = active;
 }
 
-int mantiq_is_profile_active(void) {
+__attribute__((weak)) int mantiq_is_profile_active(void) {
     return _mantiq_profile_active;
 }
 
-long long mantiq_alloc_count(void) { return _alloc_count; }
-long long mantiq_alloc_bytes(void) { return _alloc_bytes; }
-long long mantiq_free_count(void) { return _free_count; }
+__attribute__((weak)) long long mantiq_alloc_count(void) { return _alloc_count; }
+__attribute__((weak)) long long mantiq_alloc_bytes(void) { return _alloc_bytes; }
+__attribute__((weak)) long long mantiq_free_count(void) { return _free_count; }
 
 // Memory Management for Closures and Objects
 // ── Virtual Page Allocation (POSIX mmap / Windows VirtualAlloc) ───────
-void* mantiq_page_alloc(int64_t size) {
+__attribute__((weak)) void* mantiq_page_alloc(int64_t size) {
     if (size <= 0) return NULL;
     size_t page_sz = 4096;
     size_t aligned = ((size_t)size + page_sz - 1) & ~(page_sz - 1);
@@ -221,7 +221,7 @@ void* mantiq_page_alloc(int64_t size) {
 #endif
 }
 
-void mantiq_page_free(void* ptr, int64_t size) {
+__attribute__((weak)) void mantiq_page_free(void* ptr, int64_t size) {
     if (!ptr || size <= 0) return;
     size_t page_sz = 4096;
     size_t aligned = ((size_t)size + page_sz - 1) & ~(page_sz - 1);
@@ -239,7 +239,7 @@ void mantiq_page_free(void* ptr, int64_t size) {
 static uint8_t* _mantiq_box32_slab = NULL;
 static size_t _mantiq_box32_offset = MANTIQ_BOX32_SLAB_SIZE;
 
-void* mantiq_alloc_box32(void) {
+__attribute__((weak)) void* mantiq_alloc_box32(void) {
     if (_mantiq_box32_offset + 32 > MANTIQ_BOX32_SLAB_SIZE) {
         _mantiq_box32_slab = (uint8_t*)sys_malloc(MANTIQ_BOX32_SLAB_SIZE);
         if (!_mantiq_box32_slab) {
@@ -257,15 +257,15 @@ void* mantiq_alloc_box32(void) {
     return ptr;
 }
 
-int64_t mantiq_get_alloc_count(void) {
+__attribute__((weak)) int64_t mantiq_get_alloc_count(void) {
     return (int64_t)_alloc_count;
 }
 
-int64_t mantiq_get_alloc_bytes(void) {
+__attribute__((weak)) int64_t mantiq_get_alloc_bytes(void) {
     return (int64_t)_alloc_bytes;
 }
 
-int mantiq_is_arena_ptr(void* ptr);
+__attribute__((weak)) int mantiq_is_arena_ptr(void* ptr);
 
 // ── Milestone C: internal allocation/hash copies ──────────────────────
 // The PUBLIC bodies for mantiq_malloc / mantiq_malloc_raw / mantiq_free /
@@ -342,7 +342,7 @@ static uint32_t mantiq_hash_string_c(const char* s, int64_t len) {
 
 
 
-int64_t mantiq_strlen(const char* s) {
+__attribute__((weak)) int64_t mantiq_strlen(const char* s) {
     if (!s) return 0;
     return (int64_t)strlen(s);
 }
@@ -361,7 +361,7 @@ typedef struct MantiqArena {
     size_t default_chunk_size;
 } MantiqArena;
 
-MantiqArena* mantiq_arena_create(size_t chunk_size) {
+__attribute__((weak)) MantiqArena* mantiq_arena_create(size_t chunk_size) {
     if (chunk_size < 4096) chunk_size = 65536;
     MantiqArena* a = (MantiqArena*)mantiq_malloc_c(sizeof(MantiqArena));
     a->default_chunk_size = chunk_size;
@@ -378,7 +378,7 @@ MantiqArena* mantiq_arena_create(size_t chunk_size) {
     return a;
 }
 
-void* mantiq_arena_alloc(MantiqArena* a, size_t size) {
+__attribute__((weak)) void* mantiq_arena_alloc(MantiqArena* a, size_t size) {
     if (!a) return mantiq_malloc_c(size);
     size_t aligned_size = (size + 7) & ~((size_t)7);
     if (__builtin_expect(_mantiq_profile_active, 0)) {
@@ -416,7 +416,7 @@ void* mantiq_arena_alloc(MantiqArena* a, size_t size) {
     return new_c->data;
 }
 
-void mantiq_arena_reset(MantiqArena* a) {
+__attribute__((weak)) void mantiq_arena_reset(MantiqArena* a) {
     if (!a) return;
     MantiqArenaChunk* c = a->first;
     while (c) {
@@ -426,7 +426,7 @@ void mantiq_arena_reset(MantiqArena* a) {
     a->current = a->first;
 }
 
-void mantiq_arena_destroy(MantiqArena* a) {
+__attribute__((weak)) void mantiq_arena_destroy(MantiqArena* a) {
     if (!a) return;
     MantiqArenaChunk* c = a->first;
     while (c) {
@@ -440,7 +440,7 @@ void mantiq_arena_destroy(MantiqArena* a) {
 // ── AST & Symbol Bump Arena ───────────────────────────────────────────
 static MantiqArena* g_ast_arena = NULL;
 
-void* mantiq_ast_alloc(size_t size) {
+__attribute__((weak)) void* mantiq_ast_alloc(size_t size) {
     if (!g_ast_arena) {
         g_ast_arena = mantiq_arena_create(262144); // 256 KB chunk size
     }
@@ -451,13 +451,13 @@ void* mantiq_ast_alloc(size_t size) {
     return ptr;
 }
 
-void mantiq_ast_arena_reset(void) {
+__attribute__((weak)) void mantiq_ast_arena_reset(void) {
     if (g_ast_arena) {
         mantiq_arena_reset(g_ast_arena);
     }
 }
 
-void mantiq_ast_arena_destroy(void) {
+__attribute__((weak)) void mantiq_ast_arena_destroy(void) {
     if (g_ast_arena) {
         mantiq_arena_destroy(g_ast_arena);
         g_ast_arena = NULL;
@@ -498,7 +498,7 @@ __attribute__((weak)) extern void* __mantiq_dict_get(void* d, void* key, uint32_
 
 
 
-const char* mantiq_intern_string(const char* s, size_t len) {
+__attribute__((weak)) const char* mantiq_intern_string(const char* s, size_t len) {
     if (!s || len == 0) return g_mantiq_empty_str;
     if (!g_intern_arena) {
         g_intern_arena = mantiq_arena_create(65536); // 64 KB chunk size
@@ -530,14 +530,14 @@ const char* mantiq_intern_string(const char* s, size_t len) {
     return new_entry->str;
 }
 
-void mantiq_intern_reset(void) {
+__attribute__((weak)) void mantiq_intern_reset(void) {
     if (g_intern_arena) {
         mantiq_arena_reset(g_intern_arena);
     }
     memset(g_intern_table, 0, sizeof(g_intern_table));
 }
 
-void mantiq_intern_destroy(void) {
+__attribute__((weak)) void mantiq_intern_destroy(void) {
     if (g_intern_arena) {
         mantiq_arena_destroy(g_intern_arena);
         g_intern_arena = NULL;
@@ -554,7 +554,7 @@ typedef struct {
 
 static MantiqDropRegistry g_drop_registry = {NULL, 0, 0};
 
-int mantiq_type_needs_drop(const char* type_name) {
+__attribute__((weak)) int mantiq_type_needs_drop(const char* type_name) {
     if (!type_name || type_name[0] == '\0') return 0;
     if (strcmp(type_name, "String") == 0 ||
         strcmp(type_name, "StringBuilder") == 0 ||
@@ -575,7 +575,7 @@ int mantiq_type_needs_drop(const char* type_name) {
     return 0;
 }
 
-void mantiq_type_set_needs_drop(const char* type_name, int needs_drop) {
+__attribute__((weak)) void mantiq_type_set_needs_drop(const char* type_name, int needs_drop) {
     if (!type_name || type_name[0] == '\0') return;
     int already = mantiq_type_needs_drop(type_name);
     if (needs_drop) {
@@ -610,7 +610,7 @@ void mantiq_type_set_needs_drop(const char* type_name, int needs_drop) {
     }
 }
 
-void mantiq_drop_registry_clear(void) {
+__attribute__((weak)) void mantiq_drop_registry_clear(void) {
     for (size_t i = 0; i < g_drop_registry.count; i++) {
         if (g_drop_registry.names[i]) free(g_drop_registry.names[i]);
     }
@@ -620,7 +620,7 @@ void mantiq_drop_registry_clear(void) {
     g_drop_registry.capacity = 0;
 }
 
-int mantiq_is_arena_ptr(void* ptr) {
+__attribute__((weak)) int mantiq_is_arena_ptr(void* ptr) {
     if (!ptr) return 0;
     if (g_ast_arena) {
         MantiqArenaChunk* c = g_ast_arena->first;
@@ -758,7 +758,7 @@ static void mantiq_sha256_final(MantiqSha256* ctx, uint8_t digest[32]) {
     }
 }
 
-void mantiq_sha256_hex(const char* data, size_t len, char* out_hex_64) {
+__attribute__((weak)) void mantiq_sha256_hex(const char* data, size_t len, char* out_hex_64) {
     if (!out_hex_64) return;
     MantiqSha256 ctx;
     mantiq_sha256_init(&ctx);
@@ -775,7 +775,7 @@ void mantiq_sha256_hex(const char* data, size_t len, char* out_hex_64) {
     out_hex_64[64] = '\0';
 }
 
-int mantiq_sha256_file_hex(const char* path, char* out_hex_64) {
+__attribute__((weak)) int mantiq_sha256_file_hex(const char* path, char* out_hex_64) {
     if (!path || !out_hex_64) return 0;
     FILE* f = fopen(path, "rb");
     if (!f) return 0;
@@ -815,7 +815,7 @@ static int mantiq_path_sane(const char* p) {
     return 1;
 }
 
-int mantiq_mkdir_p(const char* dir_path) {
+__attribute__((weak)) int mantiq_mkdir_p(const char* dir_path) {
     if (!dir_path || !dir_path[0]) return 0;
     if (!mantiq_path_sane(dir_path)) return 0;
     char tmp[4096];
@@ -837,7 +837,7 @@ int mantiq_mkdir_p(const char* dir_path) {
     return 1;
 }
 
-int mantiq_copy_file(const char* src_path, const char* dst_path) {
+__attribute__((weak)) int mantiq_copy_file(const char* src_path, const char* dst_path) {
     if (!src_path || !dst_path) return 0;
     if (!mantiq_path_sane(src_path) || !mantiq_path_sane(dst_path)) return 0;
     int src_fd = open(src_path, O_RDONLY);
@@ -888,7 +888,7 @@ int mantiq_copy_file(const char* src_path, const char* dst_path) {
 }
 
 #include <stdint.h>
-int __mantiq_streq(const char* s1, int64_t l1, const char* s2, int64_t l2) {
+__attribute__((weak)) int __mantiq_streq(const char* s1, int64_t l1, const char* s2, int64_t l2) {
     if (l1 != l2) return 0;
     return memcmp(s1, s2, l1) == 0;
 }
@@ -915,7 +915,7 @@ typedef struct {
     void* closure_node;
 } MantiqScope;
 
-void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char* name_ptr, size_t name_len) {
+__attribute__((weak)) void* __mantiq_scope_lookup(void* current_scope, void* global_scope, const char* name_ptr, size_t name_len) {
     if (!current_scope || !name_ptr || name_len == 0) return NULL;
     uint32_t hash = mantiq_hash_string_c(name_ptr, (int64_t)name_len);
     struct MantiqStr { const char* ptr; size_t len; } key = { name_ptr, name_len };
@@ -1119,11 +1119,11 @@ typedef void (*MantiqDropFn)(void* elem_ptr);
 // capture list without byval copies, whose drop glue would free AST-owned
 // heap buffers mid-call.
 // Print builtins
-void mantiq_print_i32(int val) {
+__attribute__((weak)) void mantiq_print_i32(int val) {
     printf("%d", val);
 }
 
-void mantiq_print_bool(int val) {
+__attribute__((weak)) void mantiq_print_bool(int val) {
     if (val) {
         printf("True");
     } else {
@@ -1131,46 +1131,46 @@ void mantiq_print_bool(int val) {
     }
 }
 
-void mantiq_print_float(float val) {
+__attribute__((weak)) void mantiq_print_float(float val) {
     printf("%f", val);
 }
 
-void mantiq_print_ptr(void* val) {
+__attribute__((weak)) void mantiq_print_ptr(void* val) {
     printf("%p", val);
 }
 
-void mantiq_print_space() {
+__attribute__((weak)) void mantiq_print_space() {
     printf(" ");
 }
 
-void mantiq_print_newline() {
+__attribute__((weak)) void mantiq_print_newline() {
     printf("\n");
 }
 
-void mantiq_print_dict_start() { printf("{"); }
-void mantiq_print_dict_end() { printf("}"); }
-void mantiq_print_list_start() { printf("["); }
-void mantiq_print_list_end() { printf("]"); }
-void mantiq_print_colon() { printf(": "); }
-void mantiq_print_comma() { printf(", "); }
+__attribute__((weak)) void mantiq_print_dict_start() { printf("{"); }
+__attribute__((weak)) void mantiq_print_dict_end() { printf("}"); }
+__attribute__((weak)) void mantiq_print_list_start() { printf("["); }
+__attribute__((weak)) void mantiq_print_list_end() { printf("]"); }
+__attribute__((weak)) void mantiq_print_colon() { printf(": "); }
+__attribute__((weak)) void mantiq_print_comma() { printf(", "); }
 
-void mantiq_flush_stdout() {
+__attribute__((weak)) void mantiq_flush_stdout() {
     fflush(stdout);
 }
 
-void mantiq_print_str(const char* ptr, long long len) {
+__attribute__((weak)) void mantiq_print_str(const char* ptr, long long len) {
     if (ptr && len > 0) {
         fwrite(ptr, 1, len, stdout);
     }
 }
 
-void mantiq_print_cstr(const char* ptr) {
+__attribute__((weak)) void mantiq_print_cstr(const char* ptr) {
     if (ptr) {
         printf("%s", ptr);
     }
 }
 
-void mantiq_write(int fd, const char* ptr, long long len) {
+__attribute__((weak)) void mantiq_write(int fd, const char* ptr, long long len) {
     if (ptr && len > 0) {
 #ifdef _WIN32
         FILE* stream = stdout;
@@ -1184,7 +1184,7 @@ void mantiq_write(int fd, const char* ptr, long long len) {
     }
 }
 
-void* mantiq_read(int fd, long long len, long long* out_len) {
+__attribute__((weak)) void* mantiq_read(int fd, long long len, long long* out_len) {
     char* buf = mantiq_malloc_c(len + 1);
 #ifdef _WIN32
     FILE* stream = stdin;
@@ -1200,7 +1200,7 @@ void* mantiq_read(int fd, long long len, long long* out_len) {
     return buf;
 }
 
-int mantiq_fs_open(const char* path, long long path_len, const char* mode, long long mode_len) {
+__attribute__((weak)) int mantiq_fs_open(const char* path, long long path_len, const char* mode, long long mode_len) {
     char path_buf[1024];
     if (path_len >= 1024) path_len = 1023;
     memcpy(path_buf, path, path_len);
@@ -1236,7 +1236,7 @@ int mantiq_fs_open(const char* path, long long path_len, const char* mode, long 
 #endif
 }
 
-void mantiq_fs_close(int fd) {
+__attribute__((weak)) void mantiq_fs_close(int fd) {
 #ifdef _WIN32
     _close(fd);
 #else
@@ -1366,7 +1366,7 @@ const char* compiler_lib_dir(void) {
 #endif
 }
 
-char mantiq_fs_exists(const char* path, long long path_len) {
+__attribute__((weak)) char mantiq_fs_exists(const char* path, long long path_len) {
     char path_buf[1024];
     if (path_len >= 1024) path_len = 1023;
     memcpy(path_buf, path, path_len);
@@ -1382,7 +1382,7 @@ char mantiq_fs_exists(const char* path, long long path_len) {
 }
 
 // F-String / Interpolation Utilities
-void* mantiq_concat_str(const void* a_ptr, long long a_len, const void* b_ptr, long long b_len) {
+__attribute__((weak)) void* mantiq_concat_str(const void* a_ptr, long long a_len, const void* b_ptr, long long b_len) {
     if (a_len <= 0 || !a_ptr) {
         if (b_len <= 0 || !b_ptr) {
             char* empty = (char*)mantiq_malloc_raw_c(1);
@@ -1408,7 +1408,7 @@ void* mantiq_concat_str(const void* a_ptr, long long a_len, const void* b_ptr, l
     return new_ptr;
 }
 
-void* mantiq_i32_to_str(int val, long long* out_len) {
+__attribute__((weak)) void* mantiq_i32_to_str(int val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%d", val);
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1417,7 +1417,7 @@ void* mantiq_i32_to_str(int val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_float_to_str(float val, long long* out_len) {
+__attribute__((weak)) void* mantiq_float_to_str(float val, long long* out_len) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%f", val);
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1426,7 +1426,7 @@ void* mantiq_float_to_str(float val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_i64_to_str(long long val, long long* out_len) {
+__attribute__((weak)) void* mantiq_i64_to_str(long long val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%lld", val);
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1435,7 +1435,7 @@ void* mantiq_i64_to_str(long long val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_u64_to_str(unsigned long long val, long long* out_len) {
+__attribute__((weak)) void* mantiq_u64_to_str(unsigned long long val, long long* out_len) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%llu", val);
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1444,7 +1444,7 @@ void* mantiq_u64_to_str(unsigned long long val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_f64_to_str(double val, long long* out_len) {
+__attribute__((weak)) void* mantiq_f64_to_str(double val, long long* out_len) {
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "%f", val);
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1453,7 +1453,7 @@ void* mantiq_f64_to_str(double val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_char_to_str(char val, long long* out_len) {
+__attribute__((weak)) void* mantiq_char_to_str(char val, long long* out_len) {
     char* new_ptr = (char*)mantiq_malloc_raw_c(2);
     new_ptr[0] = val;
     new_ptr[1] = '\0';
@@ -1461,7 +1461,7 @@ void* mantiq_char_to_str(char val, long long* out_len) {
     return new_ptr;
 }
 
-void* mantiq_bool_to_str(int val, long long* out_len) {
+__attribute__((weak)) void* mantiq_bool_to_str(int val, long long* out_len) {
     const char* str = val ? "True" : "False";
     long long len = val ? 4 : 5;
     char* new_ptr = (char*)mantiq_malloc_raw_c(len + 1);
@@ -1515,7 +1515,7 @@ static unsigned __stdcall task_runner_win(void* arg) {
     return 0;
 }
 
-MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
+__attribute__((weak)) MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     MantiqTask* task = (MantiqTask*)sys_malloc(sizeof(MantiqTask));
     task->func = func;
     task->env = env;
@@ -1529,7 +1529,7 @@ MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     return task;
 }
 
-void* mantiq_await(MantiqTask* task) {
+__attribute__((weak)) void* mantiq_await(MantiqTask* task) {
     if (!task) return NULL;
     
     EnterCriticalSection(&task->mutex);
@@ -1563,7 +1563,7 @@ typedef struct MantiqChannel {
     CONDITION_VARIABLE not_full;
 } MantiqChannel;
 
-MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
+__attribute__((weak)) MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     (void)elem_size;
     if (capacity <= 0) capacity = 32;
     MantiqChannel* chan = (MantiqChannel*)sys_malloc(sizeof(MantiqChannel));
@@ -1579,7 +1579,7 @@ MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     return chan;
 }
 
-void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan) return;
     EnterCriticalSection(&chan->mutex);
     while (chan->count == chan->capacity && !chan->is_closed) {
@@ -1600,7 +1600,7 @@ void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size
     LeaveCriticalSection(&chan->mutex);
 }
 
-void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
+__attribute__((weak)) void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     if (!chan) return NULL;
     EnterCriticalSection(&chan->mutex);
     while (chan->count == 0 && !chan->is_closed) {
@@ -1621,7 +1621,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     return slot;
 }
 
-int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan) return 0;
     EnterCriticalSection(&chan->mutex);
     if (chan->count == chan->capacity || chan->is_closed) {
@@ -1640,7 +1640,7 @@ int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_s
     return 1;
 }
 
-void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
+__attribute__((weak)) void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
     if (!chan) {
         if (has_val) *has_val = 0;
         return NULL;
@@ -1660,7 +1660,7 @@ void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has
     return slot;
 }
 
-void __mantiq_channel_close(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_close(MantiqChannel* chan) {
     if (!chan) return;
     EnterCriticalSection(&chan->mutex);
     chan->is_closed = 1;
@@ -1669,7 +1669,7 @@ void __mantiq_channel_close(MantiqChannel* chan) {
     LeaveCriticalSection(&chan->mutex);
 }
 
-int __mantiq_channel_is_closed(MantiqChannel* chan) {
+__attribute__((weak)) int __mantiq_channel_is_closed(MantiqChannel* chan) {
     if (!chan) return 1;
     EnterCriticalSection(&chan->mutex);
     int res = chan->is_closed;
@@ -1677,7 +1677,7 @@ int __mantiq_channel_is_closed(MantiqChannel* chan) {
     return res;
 }
 
-int64_t __mantiq_channel_len(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_len(MantiqChannel* chan) {
     if (!chan) return 0;
     EnterCriticalSection(&chan->mutex);
     int64_t cnt = chan->count;
@@ -1685,11 +1685,11 @@ int64_t __mantiq_channel_len(MantiqChannel* chan) {
     return cnt;
 }
 
-int64_t __mantiq_channel_cap(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_cap(MantiqChannel* chan) {
     return chan ? chan->capacity : 0;
 }
 
-void __mantiq_channel_free(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_free(MantiqChannel* chan) {
     if (!chan) return;
     __mantiq_channel_close(chan);
     EnterCriticalSection(&chan->mutex);
@@ -1738,7 +1738,7 @@ static void wasi_run_ready_task(void) {
     }
 }
 
-MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
+__attribute__((weak)) MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     MantiqTask* task = (MantiqTask*)mantiq_malloc_c(sizeof(MantiqTask));
     task->func = func;
     task->env = env;
@@ -1749,7 +1749,7 @@ MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     return task;
 }
 
-void* mantiq_await(MantiqTask* task) {
+__attribute__((weak)) void* mantiq_await(MantiqTask* task) {
     if (!task) return NULL;
     while (!task->is_done) {
         if (g_wasi_ready_head) {
@@ -1775,7 +1775,7 @@ typedef struct MantiqChannel {
     int is_closed;
 } MantiqChannel;
 
-MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
+__attribute__((weak)) MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     (void)elem_size;
     if (capacity <= 0) capacity = 32;
     MantiqChannel* chan = (MantiqChannel*)mantiq_malloc_c(sizeof(MantiqChannel));
@@ -1788,7 +1788,7 @@ MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     return chan;
 }
 
-void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan || chan->is_closed) return;
     int64_t sz = elem_size > 0 ? elem_size : 8;
     void* slot = mantiq_malloc_c(sz);
@@ -1799,7 +1799,7 @@ void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size
     chan->count++;
 }
 
-void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
+__attribute__((weak)) void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     if (!chan) return NULL;
     int64_t sz = elem_size > 0 ? elem_size : 8;
     while (chan->count == 0 && !chan->is_closed) {
@@ -1820,7 +1820,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     return slot;
 }
 
-int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan || chan->count == chan->capacity || chan->is_closed) return 0;
     int64_t sz = elem_size > 0 ? elem_size : 8;
     void* slot = mantiq_malloc_c(sz);
@@ -1832,7 +1832,7 @@ int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_s
     return 1;
 }
 
-void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
+__attribute__((weak)) void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
     if (!chan || chan->count == 0) {
         if (has_val) *has_val = 0;
         return NULL;
@@ -1844,23 +1844,23 @@ void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has
     return slot;
 }
 
-void __mantiq_channel_close(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_close(MantiqChannel* chan) {
     if (chan) chan->is_closed = 1;
 }
 
-int __mantiq_channel_is_closed(MantiqChannel* chan) {
+__attribute__((weak)) int __mantiq_channel_is_closed(MantiqChannel* chan) {
     return !chan || chan->is_closed;
 }
 
-int64_t __mantiq_channel_len(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_len(MantiqChannel* chan) {
     return chan ? chan->count : 0;
 }
 
-int64_t __mantiq_channel_cap(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_cap(MantiqChannel* chan) {
     return chan ? chan->capacity : 0;
 }
 
-void __mantiq_channel_free(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_free(MantiqChannel* chan) {
     if (!chan) return;
     for (int64_t i = 0; i < chan->count; i++) {
         int64_t idx = (chan->head + i) % chan->capacity;
@@ -1894,7 +1894,7 @@ static void* task_runner(void* arg) {
     return NULL;
 }
 
-MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
+__attribute__((weak)) MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     MantiqTask* task = (MantiqTask*)mantiq_malloc_c(sizeof(MantiqTask));
     task->func = func;
     task->env = env;
@@ -1907,7 +1907,7 @@ MantiqTask* mantiq_spawn(void* (*func)(void*), void* env) {
     return task;
 }
 
-void* mantiq_await(MantiqTask* task) {
+__attribute__((weak)) void* mantiq_await(MantiqTask* task) {
     if (!task) return NULL;
     
     pthread_mutex_lock(&task->mutex);
@@ -1940,7 +1940,7 @@ typedef struct MantiqChannel {
     pthread_cond_t not_full;
 } MantiqChannel;
 
-MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
+__attribute__((weak)) MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     (void)elem_size;
     if (capacity <= 0) capacity = 32;
     MantiqChannel* chan = (MantiqChannel*)mantiq_malloc_c(sizeof(MantiqChannel));
@@ -1956,7 +1956,7 @@ MantiqChannel* __mantiq_channel_new(int64_t capacity, int64_t elem_size) {
     return chan;
 }
 
-void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan) return;
     pthread_mutex_lock(&chan->mutex);
     while (chan->count == chan->capacity && !chan->is_closed) {
@@ -1977,7 +1977,7 @@ void __mantiq_channel_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size
     pthread_mutex_unlock(&chan->mutex);
 }
 
-void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
+__attribute__((weak)) void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     if (!chan) return NULL;
     pthread_mutex_lock(&chan->mutex);
     while (chan->count == 0 && !chan->is_closed) {
@@ -1998,7 +1998,7 @@ void* __mantiq_channel_recv(MantiqChannel* chan, int64_t elem_size) {
     return slot;
 }
 
-int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
+__attribute__((weak)) int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_size) {
     if (!chan) return 0;
     pthread_mutex_lock(&chan->mutex);
     if (chan->count == chan->capacity || chan->is_closed) {
@@ -2017,7 +2017,7 @@ int __mantiq_channel_try_send(MantiqChannel* chan, void* val_ptr, int64_t elem_s
     return 1;
 }
 
-void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
+__attribute__((weak)) void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has_val) {
     if (!chan) {
         if (has_val) *has_val = 0;
         return NULL;
@@ -2037,7 +2037,7 @@ void* __mantiq_channel_try_recv(MantiqChannel* chan, int64_t elem_size, int* has
     return slot;
 }
 
-void __mantiq_channel_close(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_close(MantiqChannel* chan) {
     if (!chan) return;
     pthread_mutex_lock(&chan->mutex);
     chan->is_closed = 1;
@@ -2046,7 +2046,7 @@ void __mantiq_channel_close(MantiqChannel* chan) {
     pthread_mutex_unlock(&chan->mutex);
 }
 
-int __mantiq_channel_is_closed(MantiqChannel* chan) {
+__attribute__((weak)) int __mantiq_channel_is_closed(MantiqChannel* chan) {
     if (!chan) return 1;
     pthread_mutex_lock(&chan->mutex);
     int res = chan->is_closed;
@@ -2054,7 +2054,7 @@ int __mantiq_channel_is_closed(MantiqChannel* chan) {
     return res;
 }
 
-int64_t __mantiq_channel_len(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_len(MantiqChannel* chan) {
     if (!chan) return 0;
     pthread_mutex_lock(&chan->mutex);
     int64_t cnt = chan->count;
@@ -2062,11 +2062,11 @@ int64_t __mantiq_channel_len(MantiqChannel* chan) {
     return cnt;
 }
 
-int64_t __mantiq_channel_cap(MantiqChannel* chan) {
+__attribute__((weak)) int64_t __mantiq_channel_cap(MantiqChannel* chan) {
     return chan ? chan->capacity : 0;
 }
 
-void __mantiq_channel_free(MantiqChannel* chan) {
+__attribute__((weak)) void __mantiq_channel_free(MantiqChannel* chan) {
     if (!chan) return;
     __mantiq_channel_close(chan);
     pthread_mutex_lock(&chan->mutex);
@@ -2084,12 +2084,12 @@ void __mantiq_channel_free(MantiqChannel* chan) {
 
 #endif
 
-void mantiq_init(int argc, char** argv) {
+__attribute__((weak)) void mantiq_init(int argc, char** argv) {
     (void)argc;
     (void)argv;
 }
 
-void mantiq_process_exit(int code) {
+__attribute__((weak)) void mantiq_process_exit(int code) {
     exit(code);
 }
 
@@ -2183,7 +2183,7 @@ static void mantiq_init_args_from_proc() {
 #endif
 }
 
-MantiqListAsciiStr* mantiq_process_args() {
+__attribute__((weak)) MantiqListAsciiStr* mantiq_process_args() {
     mantiq_init_args_from_proc();
     static MantiqListAsciiStr* cached_list = NULL;
     if (cached_list) return cached_list;
@@ -2204,27 +2204,27 @@ MantiqListAsciiStr* mantiq_process_args() {
     return cached_list;
 }
 
-void mantiq_panic(const char* message) {
+__attribute__((weak)) void mantiq_panic(const char* message) {
     fprintf(stderr, "Runtime Panic: %s\n", message);
     exit(1);
 }
 
-void mantiq_panic_at(const char* message, const char* file, int line, int col) {
+__attribute__((weak)) void mantiq_panic_at(const char* message, const char* file, int line, int col) {
     fprintf(stderr, "Runtime Panic: %s at %s:%d:%d\n", message, file, line, col);
     exit(1);
 }
 
-long long mantiq_time_now() {
+__attribute__((weak)) long long mantiq_time_now() {
     return (long long)time(NULL);
 }
 
-long long mantiq_perf_now_ns() {
+__attribute__((weak)) long long mantiq_perf_now_ns() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
 }
 
-long long mantiq_perf_rss_bytes() {
+__attribute__((weak)) long long mantiq_perf_rss_bytes() {
 #ifdef __linux__
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
@@ -2234,7 +2234,7 @@ long long mantiq_perf_rss_bytes() {
 #endif
 }
 
-void mantiq_time_sleep(int seconds) {
+__attribute__((weak)) void mantiq_time_sleep(int seconds) {
 #ifdef _WIN32
     Sleep(seconds * 1000);
 #else
@@ -2242,7 +2242,7 @@ void mantiq_time_sleep(int seconds) {
 #endif
 }
 
-MantiqAsciiStr* mantiq_sys_os() {
+__attribute__((weak)) MantiqAsciiStr* mantiq_sys_os() {
     static MantiqAsciiStr os_str;
 #if defined(_WIN32)
     os_str.ptr = "windows";
@@ -2263,7 +2263,7 @@ MantiqAsciiStr* mantiq_sys_os() {
     return &os_str;
 }
 
-MantiqAsciiStr* mantiq_sys_arch() {
+__attribute__((weak)) MantiqAsciiStr* mantiq_sys_arch() {
     static MantiqAsciiStr arch_str;
 #if defined(__wasm32__) || defined(__wasm__)
     arch_str.ptr = "wasm32";
@@ -2281,7 +2281,7 @@ MantiqAsciiStr* mantiq_sys_arch() {
     return &arch_str;
 }
 
-MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
+__attribute__((weak)) MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
@@ -2300,7 +2300,7 @@ MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
     return &val_str;
 }
 
-void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val_ptr, long long val_len) {
+__attribute__((weak)) void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val_ptr, long long val_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
@@ -2320,7 +2320,7 @@ void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val
     mantiq_free_c(val);
 }
 
-void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
+__attribute__((weak)) void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
@@ -2416,7 +2416,7 @@ typedef struct MantiqTypeDescriptor {
     const int32_t* interface_ids;
 } MantiqTypeDescriptor;
 
-int32_t mantiq_isa(const void* rtti_ptr, int32_t target_type_id) {
+__attribute__((weak)) int32_t mantiq_isa(const void* rtti_ptr, int32_t target_type_id) {
     if (!rtti_ptr) return 0;
     const MantiqTypeDescriptor* desc = (const MantiqTypeDescriptor*)rtti_ptr;
     if (desc->type_id == target_type_id) return 1;
@@ -2432,36 +2432,36 @@ int32_t mantiq_isa(const void* rtti_ptr, int32_t target_type_id) {
 // ── Quantum Simulator ────────────────────────────────────────────────────────
 static int32_t s_mantiq_qubits[64] = {0};
 
-int32_t mantiq_quantum_qbit(int32_t id) {
+__attribute__((weak)) int32_t mantiq_quantum_qbit(int32_t id) {
     s_mantiq_qubits[id & 63] = (id != 0) ? 1 : 0;
     return id & 63;
 }
 
-int32_t mantiq_quantum_h(int32_t q) {
+__attribute__((weak)) int32_t mantiq_quantum_h(int32_t q) {
     return q & 63;
 }
 
-int32_t mantiq_quantum_measure(int32_t q) {
+__attribute__((weak)) int32_t mantiq_quantum_measure(int32_t q) {
     return s_mantiq_qubits[q & 63];
 }
 
-void mantiq_quantum_cnot(int32_t control, int32_t target) {
+__attribute__((weak)) void mantiq_quantum_cnot(int32_t control, int32_t target) {
     if (s_mantiq_qubits[control & 63]) {
         s_mantiq_qubits[target & 63] ^= 1;
     }
 }
 
-int32_t mantiq_quantum_x(int32_t q) {
+__attribute__((weak)) int32_t mantiq_quantum_x(int32_t q) {
     s_mantiq_qubits[q & 63] ^= 1;
     return q & 63;
 }
 
-int32_t mantiq_quantum_y(int32_t q) {
+__attribute__((weak)) int32_t mantiq_quantum_y(int32_t q) {
     s_mantiq_qubits[q & 63] ^= 1;
     return q & 63;
 }
 
-int32_t mantiq_quantum_z(int32_t q) {
+__attribute__((weak)) int32_t mantiq_quantum_z(int32_t q) {
     return q & 63;
 }
 
@@ -2556,7 +2556,7 @@ extern int PyObject_GetBuffer(void*, void*, int) __attribute__((weak));
 extern void PyBuffer_Release(void*) __attribute__((weak));
 #endif
 
-MantiqBufferOwner* mantiq_buffer_owner_create(void* data, size_t count, uint32_t elem_sz, const char* fmt) {
+__attribute__((weak)) MantiqBufferOwner* mantiq_buffer_owner_create(void* data, size_t count, uint32_t elem_sz, const char* fmt) {
     MantiqBufferOwner* owner = (MantiqBufferOwner*)mantiq_malloc_c((int64_t)sizeof(MantiqBufferOwner));
     if (!owner) return NULL;
     owner->ref_count = 1;
@@ -2575,12 +2575,12 @@ MantiqBufferOwner* mantiq_buffer_owner_create(void* data, size_t count, uint32_t
     return owner;
 }
 
-void mantiq_buffer_owner_retain(MantiqBufferOwner* owner) {
+__attribute__((weak)) void mantiq_buffer_owner_retain(MantiqBufferOwner* owner) {
     if (!owner) return;
     __atomic_add_fetch(&owner->ref_count, 1, __ATOMIC_SEQ_CST);
 }
 
-void mantiq_buffer_owner_release(MantiqBufferOwner* owner) {
+__attribute__((weak)) void mantiq_buffer_owner_release(MantiqBufferOwner* owner) {
     if (!owner) return;
     int32_t rc = __atomic_sub_fetch(&owner->ref_count, 1, __ATOMIC_SEQ_CST);
     if (rc <= 0) {
@@ -2593,7 +2593,7 @@ void mantiq_buffer_owner_release(MantiqBufferOwner* owner) {
     }
 }
 
-int __mantiq_py_bf_getbuffer(void* exporter, void* view_ptr, int flags) {
+__attribute__((weak)) int __mantiq_py_bf_getbuffer(void* exporter, void* view_ptr, int flags) {
 #if !defined(__wasi__)
     if (!exporter || !view_ptr) {
         if (&PyExc_BufferError && PyExc_BufferError && PyErr_SetString) {
@@ -2634,7 +2634,7 @@ int __mantiq_py_bf_getbuffer(void* exporter, void* view_ptr, int flags) {
 #endif
 }
 
-void __mantiq_py_bf_releasebuffer(void* exporter, void* view_ptr) {
+__attribute__((weak)) void __mantiq_py_bf_releasebuffer(void* exporter, void* view_ptr) {
     (void)view_ptr;
     if (!exporter) return;
     MantiqPyWrapper* wrap = (MantiqPyWrapper*)exporter;
@@ -2643,7 +2643,7 @@ void __mantiq_py_bf_releasebuffer(void* exporter, void* view_ptr) {
     }
 }
 
-void __mantiq_py_tp_dealloc_buffer(void* self) {
+__attribute__((weak)) void __mantiq_py_tp_dealloc_buffer(void* self) {
 #if !defined(__wasi__)
     if (!self) return;
     MantiqPyWrapper* wrap = (MantiqPyWrapper*)self;
@@ -2657,7 +2657,7 @@ void __mantiq_py_tp_dealloc_buffer(void* self) {
 #endif
 }
 
-void* __mantiq_py_wrap_buffer(void* data, size_t count, uint32_t elem_sz, const char* fmt, void* type_obj) {
+__attribute__((weak)) void* __mantiq_py_wrap_buffer(void* data, size_t count, uint32_t elem_sz, const char* fmt, void* type_obj) {
 #if !defined(__wasi__)
     if (!type_obj || !PyType_GenericNew) return NULL;
     MantiqPyWrapper* obj = (MantiqPyWrapper*)PyType_GenericNew(type_obj, NULL, NULL);
@@ -2672,7 +2672,7 @@ void* __mantiq_py_wrap_buffer(void* data, size_t count, uint32_t elem_sz, const 
 #endif
 }
 
-int __mantiq_py_extract_buffer(void* obj, void* py_buf_out, void** out_data, int64_t* out_len, uint32_t expected_elem_sz, const char* expected_fmt) {
+__attribute__((weak)) int __mantiq_py_extract_buffer(void* obj, void* py_buf_out, void** out_data, int64_t* out_len, uint32_t expected_elem_sz, const char* expected_fmt) {
 #if !defined(__wasi__)
     (void)expected_fmt;
     if (!obj || !py_buf_out || !out_data || !out_len || !PyObject_GetBuffer) {
@@ -2711,7 +2711,7 @@ int __mantiq_py_extract_buffer(void* obj, void* py_buf_out, void** out_data, int
 }
 
 // ── Python FFI Phase 5: Embedded Python Runtime Support ─────────────────
-void mantiq_py_init(void) {
+__attribute__((weak)) void mantiq_py_init(void) {
 #if !defined(__wasi__)
     if (!Py_IsInitialized) {
         fprintf(stderr, "Error: CPython runtime symbols not linked (-lpython3.12 missing)\n");
@@ -2723,7 +2723,7 @@ void mantiq_py_init(void) {
 #endif
 }
 
-void* mantiq_py_import(const char* name) {
+__attribute__((weak)) void* mantiq_py_import(const char* name) {
 #if !defined(__wasi__)
     mantiq_py_init();
     if (!PyImport_ImportModule) return NULL;
@@ -2737,7 +2737,7 @@ void* mantiq_py_import(const char* name) {
 #endif
 }
 
-void* mantiq_py_getattr(void* obj, const char* name) {
+__attribute__((weak)) void* mantiq_py_getattr(void* obj, const char* name) {
 #if !defined(__wasi__)
     if (!obj || !PyObject_GetAttrString) return NULL;
     void* attr = PyObject_GetAttrString(obj, name);
@@ -2750,7 +2750,7 @@ void* mantiq_py_getattr(void* obj, const char* name) {
 #endif
 }
 
-void* mantiq_py_call(void* callable, void* tuple_args) {
+__attribute__((weak)) void* mantiq_py_call(void* callable, void* tuple_args) {
 #if !defined(__wasi__)
     if (!callable || !PyObject_CallObject) {
         if (tuple_args && Py_DecRef) Py_DecRef(tuple_args);
@@ -2768,7 +2768,7 @@ void* mantiq_py_call(void* callable, void* tuple_args) {
 #endif
 }
 
-void mantiq_py_decref(void* obj) {
+__attribute__((weak)) void mantiq_py_decref(void* obj) {
 #if !defined(__wasi__)
     if (obj && Py_DecRef) {
         Py_DecRef(obj);
@@ -2776,7 +2776,7 @@ void mantiq_py_decref(void* obj) {
 #endif
 }
 
-void mantiq_py_incref(void* obj) {
+__attribute__((weak)) void mantiq_py_incref(void* obj) {
 #if !defined(__wasi__)
     if (obj && Py_IncRef) {
         Py_IncRef(obj);
@@ -2784,7 +2784,7 @@ void mantiq_py_incref(void* obj) {
 #endif
 }
 
-double mantiq_py_to_f64(void* obj) {
+__attribute__((weak)) double mantiq_py_to_f64(void* obj) {
 #if !defined(__wasi__)
     if (!obj || !PyFloat_AsDouble) return 0.0;
     return PyFloat_AsDouble(obj);
@@ -2793,7 +2793,7 @@ double mantiq_py_to_f64(void* obj) {
 #endif
 }
 
-int64_t mantiq_py_to_i64(void* obj) {
+__attribute__((weak)) int64_t mantiq_py_to_i64(void* obj) {
 #if !defined(__wasi__)
     if (!obj || !PyLong_AsLongLong) return 0;
     return (int64_t)PyLong_AsLongLong(obj);
@@ -2802,7 +2802,7 @@ int64_t mantiq_py_to_i64(void* obj) {
 #endif
 }
 
-int32_t mantiq_py_to_i32(void* obj) {
+__attribute__((weak)) int32_t mantiq_py_to_i32(void* obj) {
 #if !defined(__wasi__)
     if (!obj || !PyLong_AsLongLong) return 0;
     return (int32_t)PyLong_AsLongLong(obj);
@@ -2811,7 +2811,7 @@ int32_t mantiq_py_to_i32(void* obj) {
 #endif
 }
 
-bool mantiq_py_to_bool(void* obj) {
+__attribute__((weak)) bool mantiq_py_to_bool(void* obj) {
 #if !defined(__wasi__)
     if (!obj || !PyObject_IsTrue) return false;
     return PyObject_IsTrue(obj) != 0;
@@ -2820,7 +2820,7 @@ bool mantiq_py_to_bool(void* obj) {
 #endif
 }
 
-const char* mantiq_py_to_cstr(void* obj) {
+__attribute__((weak)) const char* mantiq_py_to_cstr(void* obj) {
 #if !defined(__wasi__)
     if (!obj || !PyUnicode_AsUTF8AndSize) return "";
     int64_t size = 0;
@@ -2832,7 +2832,7 @@ const char* mantiq_py_to_cstr(void* obj) {
 #endif
 }
 
-void* mantiq_py_box_list_f64(double* items, int64_t count) {
+__attribute__((weak)) void* mantiq_py_box_list_f64(double* items, int64_t count) {
 #if !defined(__wasi__)
     if (!PyList_New) return NULL;
     void* list = PyList_New(count > 0 ? count : 0);
@@ -2849,7 +2849,7 @@ void* mantiq_py_box_list_f64(double* items, int64_t count) {
 #endif
 }
 
-void* mantiq_py_box_list_i64(int64_t* items, int64_t count) {
+__attribute__((weak)) void* mantiq_py_box_list_i64(int64_t* items, int64_t count) {
 #if !defined(__wasi__)
     if (!PyList_New) return NULL;
     void* list = PyList_New(count > 0 ? count : 0);
@@ -2994,7 +2994,7 @@ void nizam_webview_destroy(NizamWebview *wv) {
 }
 
 // ── Direct Process Execution (no /bin/sh overhead) ───────────────────
-int32_t mantiq_run_command_direct(const char* const* argv) {
+__attribute__((weak)) int32_t mantiq_run_command_direct(const char* const* argv) {
     if (!argv || !argv[0]) return -1;
 #if defined(__unix__) || defined(__APPLE__)
     pid_t pid = fork();
