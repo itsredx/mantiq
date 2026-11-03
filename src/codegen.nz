@@ -7064,13 +7064,25 @@ struct LLVMCodegen:
                             let zi_key as String = zi_sb.to_string()
                             zi_sb.deinit()
                             if (deref self).zero_arg_inits.has(zi_key):
+                                // Type the alloca/load with the call's
+                                // inferred LLVM type — the consumer (e.g. the
+                                // VarDecl store) types the value the same way.
+                                // Hardcoding "%"+name breaks erased generics
+                                // whose repr is a literal struct type.
+                                let st_ty as String = self.llvm_type(node_inferred_type(node))
+                                if st_ty.len == 0 to usize or strcmp(st_ty.data to cstr, "void" to cstr) == 0:
+                                    let st_sb as StringBuilder = StringBuilder.make()
+                                    append_cstr(ref st_sb, "%" to cstr)
+                                    append_str(ref st_sb, c_name)
+                                    st_ty = st_sb.to_string()
+                                    st_sb.deinit()
                                 let c_alloc as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, c_alloc to cstr)
-                                append_cstr(ref (deref self).main_out, " = alloca %")
-                                append_str(ref (deref self).main_out, c_name)
-                                append_cstr(ref (deref self).main_out, "\n  store %")
-                                append_str(ref (deref self).main_out, c_name)
+                                append_cstr(ref (deref self).main_out, " = alloca ")
+                                append_str(ref (deref self).main_out, st_ty)
+                                append_cstr(ref (deref self).main_out, "\n  store ")
+                                append_str(ref (deref self).main_out, st_ty)
                                 append_cstr(ref (deref self).main_out, " ")
                                 append_cstr(ref (deref self).main_out, cur_v to cstr)
                                 append_cstr(ref (deref self).main_out, ", ptr ")
@@ -7083,8 +7095,8 @@ struct LLVMCodegen:
                                 let c_ld as ptr[u8] = self.fresh_temp()
                                 append_cstr(ref (deref self).main_out, "  ")
                                 append_cstr(ref (deref self).main_out, c_ld to cstr)
-                                append_cstr(ref (deref self).main_out, " = load %")
-                                append_str(ref (deref self).main_out, c_name)
+                                append_cstr(ref (deref self).main_out, " = load ")
+                                append_str(ref (deref self).main_out, st_ty)
                                 append_cstr(ref (deref self).main_out, ", ptr ")
                                 append_cstr(ref (deref self).main_out, c_alloc to cstr)
                                 append_cstr(ref (deref self).main_out, "\n")
