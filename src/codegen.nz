@@ -1183,6 +1183,10 @@ struct LLVMCodegen:
     public var var_types as Dict[String, String]
     public var defined_functions as Dict[String, bool]
     public var program_functions as Dict[String, bool]
+    // Structs declaring a zero-arg __init__ (self only). The zero-arg ctor
+    // path must call it — returning bare zeroinitializer leaves managed
+    // fields (Dict/List handles) null, segfaulting on first use.
+    public var zero_arg_inits as Dict[String, bool]
     public var current_return_type as String
     public var current_struct_name as String
     public var struct_sizes as Dict[String, i64]
@@ -1230,6 +1234,7 @@ struct LLVMCodegen:
         (deref self).var_types = Dict[String, String]()
         (deref self).defined_functions = Dict[String, bool]()
         (deref self).program_functions = Dict[String, bool]()
+        (deref self).zero_arg_inits = Dict[String, bool]()
         (deref self).current_return_type = String.make("void" to cstr)
         (deref self).current_struct_name = String.make("" to cstr)
         (deref self).struct_sizes = Dict[String, i64]()
@@ -2742,6 +2747,8 @@ struct LLVMCodegen:
                             append_cstr(ref m_mangled, "_" to cstr)
                             append_str(ref m_mangled, m_nm)
                             set_dict_bool(ref (deref self).program_functions, m_mangled.to_string(), True)
+                            if strcmp(m_nm.data to cstr, "__init__" to cstr) == 0 and (node_params(s_d)).length() == 1 to i64:
+                                set_dict_bool(ref (deref self).zero_arg_inits, m_mangled.to_string(), True)
                         s_i = s_i + 1 to i64
             elif dk == NodeType.ClassDecl:
                 let cn as String = node_name(decl)
@@ -7045,6 +7052,44 @@ struct LLVMCodegen:
                             append_cstr(ref (deref self).main_out, "\n")
                             cur_v = iv
                             f_idx = f_idx + 1 to i64
+                        // Zero-arg ctor of a struct with a no-arg __init__:
+                        // call it. Returning bare zeroinitializer leaves
+                        // managed fields (Dict/List handles) null -> segfault
+                        // on first use (pre-existing gap; masked in tests by
+                        // explicit .init() calls).
+                        if args.length() == 0 to i64:
+                            let zi_sb as StringBuilder = StringBuilder.make()
+                            append_str(ref zi_sb, c_name)
+                            append_cstr(ref zi_sb, "___init__" to cstr)
+                            let zi_key as String = zi_sb.to_string()
+                            zi_sb.deinit()
+                            if (deref self).zero_arg_inits.has(zi_key):
+                                let c_alloc as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, c_alloc to cstr)
+                                append_cstr(ref (deref self).main_out, " = alloca %")
+                                append_str(ref (deref self).main_out, c_name)
+                                append_cstr(ref (deref self).main_out, "\n  store %")
+                                append_str(ref (deref self).main_out, c_name)
+                                append_cstr(ref (deref self).main_out, " ")
+                                append_cstr(ref (deref self).main_out, cur_v to cstr)
+                                append_cstr(ref (deref self).main_out, ", ptr ")
+                                append_cstr(ref (deref self).main_out, c_alloc to cstr)
+                                append_cstr(ref (deref self).main_out, "\n  call void @")
+                                append_str(ref (deref self).main_out, zi_key)
+                                append_cstr(ref (deref self).main_out, "(ptr ")
+                                append_cstr(ref (deref self).main_out, c_alloc to cstr)
+                                append_cstr(ref (deref self).main_out, ")\n")
+                                let c_ld as ptr[u8] = self.fresh_temp()
+                                append_cstr(ref (deref self).main_out, "  ")
+                                append_cstr(ref (deref self).main_out, c_ld to cstr)
+                                append_cstr(ref (deref self).main_out, " = load %")
+                                append_str(ref (deref self).main_out, c_name)
+                                append_cstr(ref (deref self).main_out, ", ptr ")
+                                append_cstr(ref (deref self).main_out, c_alloc to cstr)
+                                append_cstr(ref (deref self).main_out, "\n")
+                                cur_v = c_ld
+                            zi_key.deinit()
                         return cur_v
 
         let arg_buf as StringBuilder = StringBuilder.make()
