@@ -704,6 +704,26 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     while gm_i < gen_mods.length():
         sema.declare_pass(gen_mods[gm_i])
         gm_i = gm_i + 1 to i64
+    // Generated instantiation bodies are snippets of the module's own source,
+    // so their free identifiers refer to the module's siblings (Set's body
+    // uses Dict). Those names are only in scope via explicit imports; expose
+    // each loaded module's scope symbols that the main file did not import,
+    // but only when instantiations actually exist (no semantic change for
+    // programs without module generics).
+    if gen_mods.length() > 0 to i64:
+        let gscope as ptr[Scope] = (deref sema).global_scope
+        let lm_keys as List[String] = (deref sema).loaded_modules.keys()
+        var lm_i as i64 = 0 to i64
+        while lm_i < lm_keys.length():
+            let msc as ptr[Scope] = (deref sema).loaded_modules[lm_keys[lm_i]]
+            let msym_keys as List[String] = (deref msc).symbols.keys()
+            var mk_i as i64 = 0 to i64
+            while mk_i < msym_keys.length():
+                let ms_k as String = msym_keys[mk_i]
+                if not (deref gscope).symbols.has(ms_k):
+                    (deref gscope).symbols[ms_k] = (deref msc).symbols[ms_k]
+                mk_i = mk_i + 1 to i64
+            lm_i = lm_i + 1 to i64
     sema.resolve_pass(root)
     sema.analyze_gil_safety(root)
     perf_end(perf, "sema", t1)
