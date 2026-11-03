@@ -7200,7 +7200,23 @@ struct LLVMCodegen:
                             break
 
                     if is_deref_obj:
-                        obj_val = self.emit_expr(inner_rec)
+                        // Deref-receiver: pointer-typed sources keep the
+                        // loaded pointer (instance deref). Aggregate-typed
+                        // sources are value identity — pass the slot's
+                        // address, mirroring the emit_lvalue_ptr deref rule;
+                        // emit_expr here would load the whole struct and
+                        // pass it where a ptr receiver is expected.
+                        let dr_t as ptr[Type] = node_inferred_type(inner_rec)
+                        var dr_agg as bool = False
+                        if dr_t != None to ptr[Type]:
+                            let dr_k as TypeKind = (deref dr_t).kind
+                            if dr_k == TypeKind.Struct or dr_k == TypeKind.Class or dr_k == TypeKind.Interface or dr_k == TypeKind.Union or dr_k == TypeKind.Enum:
+                                if strcmp(type_to_llvm(dr_t).data to cstr, "ptr" to cstr) != 0:
+                                    dr_agg = True
+                        if dr_agg:
+                            obj_val = self.emit_lvalue_ptr(inner_rec)
+                        else:
+                            obj_val = self.emit_expr(inner_rec)
                     else:
                         let obj_inf_t as String = type_to_llvm(node_inferred_type(obj_node))
                         if strcmp(obj_inf_t.data to cstr, "ptr" to cstr) == 0:
