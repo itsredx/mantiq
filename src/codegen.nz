@@ -2321,6 +2321,27 @@ struct LLVMCodegen:
             append_cstr(out, "define i32 @mantiq_quantum_z(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n; ---- RTTI isa (TypeDescriptor: type_id=0 i32, name=8, parent=16 i32, n=20 i32, ids=24) ----\n\n")
         if h_mantiq_isa == 1 to i32:
             append_cstr(out, "define i32 @mantiq_isa(ptr %rtti, i32 %target) {\nentry:\n  %rn = icmp eq ptr %rtti, null\n  br i1 %rn, label %no, label %chk\nchk:\n  %tid = load i32, ptr %rtti\n  %eq1 = icmp eq i32 %tid, %target\n  br i1 %eq1, label %yes, label %chk2\nchk2:\n  %pidp = getelementptr i8, ptr %rtti, i64 16\n  %pid = load i32, ptr %pidp\n  %eq2 = icmp eq i32 %pid, %target\n  %tnz = icmp ne i32 %target, 0\n  %hit2 = and i1 %eq2, %tnz\n  br i1 %hit2, label %yes, label %chk3\nchk3:\n  %nip = getelementptr i8, ptr %rtti, i64 20\n  %ni = load i32, ptr %nip\n  %idsp = getelementptr i8, ptr %rtti, i64 24\n  %ids = load ptr, ptr %idsp\n  %ivp = alloca i32\n  store i32 0, ptr %ivp\n  br label %iloop\niloop:\n  %iv = load i32, ptr %ivp\n  %more = icmp slt i32 %iv, %ni\n  br i1 %more, label %ibody, label %no\nibody:\n  %idsn = icmp eq ptr %ids, null\n  br i1 %idsn, label %inext, label %icmp2\nicmp2:\n  %ep = getelementptr i32, ptr %ids, i32 %iv\n  %ev = load i32, ptr %ep\n  %hit = icmp eq i32 %ev, %target\n  br i1 %hit, label %yes, label %inext\ninext:\n  %iv2 = load i32, ptr %ivp\n  %iv3 = add i32 %iv2, 1\n  store i32 %iv3, ptr %ivp\n  br label %iloop\nyes:\n  ret i32 1\nno:\n  ret i32 0\n}\n\n")
+        // Diagnostics terminal width (error.nz extern; was runtime.c):
+        // COLUMNS env (clamped 70..120 after -4), else TIOCGWINSZ on fd 1,
+        // else 84. struct winsize: ws_row u16@0, ws_col u16@2.
+        let h_term_w as i32 = self.rt_body_missing("define i32 @nizam_get_terminal_width(" to cstr)
+        if h_term_w == 1 to i32:
+            append_cstr(out, "@__nz_term_cols = private unnamed_addr constant [8 x i8] c\"COLUMNS\00\"\n")
+            append_cstr(out, "define i32 @nizam_get_terminal_width() {\nentry:\n  %env = call ptr @getenv(ptr @__nz_term_cols)\n  %envn = icmp ne ptr %env, null\n  br i1 %envn, label %parse, label %tryio\nparse:\n  %pw = call i32 @atoi(ptr %env)\n  %p20 = icmp sgt i32 %pw, 20\n  br i1 %p20, label %envw, label %tryio\nenvw:\n  %w0 = sub i32 %pw, 4\n  %lo0 = icmp slt i32 %w0, 70\n  %w1 = select i1 %lo0, i32 70, i32 %w0\n  %hi0 = icmp sgt i32 %w1, 120\n  %w2 = select i1 %hi0, i32 120, i32 %w1\n  ret i32 %w2\ntryio:\n  %ws = alloca [8 x i8]\n  %io = call i32 @ioctl(i32 1, i64 21523, ptr %ws)\n  %iook = icmp eq i32 %io, 0\n  br i1 %iook, label %colchk, label %dfl\ncolchk:\n  %colp = getelementptr i8, ptr %ws, i64 2\n  %col16 = load i16, ptr %colp\n  %col = zext i16 %col16 to i32\n  %c20 = icmp sgt i32 %col, 20\n  br i1 %c20, label %iolw, label %dfl\niolw:\n  %iw0 = sub i32 %col, 4\n  %ilo = icmp slt i32 %iw0, 70\n  %iw1 = select i1 %ilo, i32 70, i32 %iw0\n  %ihi = icmp sgt i32 %iw1, 120\n  %iw2 = select i1 %ihi, i32 120, i32 %iw1\n  ret i32 %iw2\ndfl:\n  ret i32 84\n}\n\n")
+        // Target pointer size (runtime.c global g_nizam_target_pointer_size):
+        // products importing compiler modules (test_codegen & co) call these.
+        let h_set_tps as i32 = self.rt_body_missing("define void @nizam_set_target_ptr_size(" to cstr)
+        let h_get_tps as i32 = self.rt_body_missing("define i32 @nizam_get_target_ptr_size(" to cstr)
+        if h_set_tps == 1 to i32 and h_get_tps == 1 to i32:
+            append_cstr(out, "@__nizam_target_ptr_size = internal global i32 8\n")
+            append_cstr(out, "define void @nizam_set_target_ptr_size(i32 %sz) {\nentry:\n  store i32 %sz, ptr @__nizam_target_ptr_size\n  ret void\n}\n\n")
+            append_cstr(out, "define i32 @nizam_get_target_ptr_size() {\nentry:\n  %v = load i32, ptr @__nizam_target_ptr_size\n  ret i32 %v\n}\n\n")
+        // LLVM float formatter (codegen float-literal emission helper):
+        // 0.0 -> "0.000000e+00"; else bitcast (f32 narrowed first) -> "0x%016llX".
+        let h_flt as i32 = self.rt_body_missing("define void @format_llvm_float(" to cstr)
+        if h_flt == 1 to i32:
+            append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\00\"\n@__nz_flt_hex = private unnamed_addr constant [11 x i8] c\"0x%016llX\00\"\n")
+            append_cstr(out, "define void @format_llvm_float(double %val, i32 %is_f32, ptr %out_buf) {\nentry:\n  %z = fcmp oeq double %val, 0.000000e+00\n  br i1 %z, label %zero, label %bits\nzero:\n  %c0 = call ptr @memcpy(ptr %out_buf, ptr @__nz_flt_zero, i64 13)\n  ret void\nbits:\n  %is32 = icmp ne i32 %is_f32, 0\n  br i1 %is32, label %narrow, label %wide\nnarrow:\n  %f = fptrunc double %val to float\n  %d = fpext float %f to double\n  %u1 = bitcast double %d to i64\n  br label %emit\nwide:\n  %u2 = bitcast double %val to i64\n  br label %emit\nemit:\n  %u = phi i64 [ %u1, %narrow ], [ %u2, %wide ]\n  %c1 = call i32 (ptr, ...) @sprintf(ptr %out_buf, ptr @__nz_flt_hex, i64 %u)\n  ret void\n}\n\n")
 
     public fn generate(self as ptr[LLVMCodegen], root as ptr[Node]) as String:
         extern fn nizam_set_target_ptr_size(sz as i32)

@@ -150,7 +150,7 @@ fn main() -> i32:
     let test12_ir as cstr = "define i32 @main() { entry: ret i32 0 }\n" to cstr
     let ok12 as bool = write_file("/tmp/nz_test12.ll" to cstr, test12_ir, 39 to usize)
     if ok12:
-        let r12 as i32 = system("clang-15 -fsyntax-only -x ir /tmp/nz_test12.ll 2>/dev/null || clang -fsyntax-only -x ir /tmp/nz_test12.ll 2>/dev/null" to cstr)
+        let r12 as i32 = system("clang-15 -fsyntax-only -x ir /tmp/nz_test12.ll 2>/dev/null || clang -x ir -c /tmp/nz_test12.ll -o /tmp/nz_test12.o 2>/dev/null" to cstr)
         if r12 == 0:
             let p12 as i32 = printf("Test 12 (Clang Syntax Check): PASSED!\n" to cstr)
         else:
