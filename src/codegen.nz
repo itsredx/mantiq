@@ -2326,7 +2326,7 @@ struct LLVMCodegen:
         // else 84. struct winsize: ws_row u16@0, ws_col u16@2.
         let h_term_w as i32 = self.rt_body_missing("define i32 @nizam_get_terminal_width(" to cstr)
         if h_term_w == 1 to i32:
-            append_cstr(out, "@__nz_term_cols = private unnamed_addr constant [8 x i8] c\"COLUMNS\00\"\n")
+            append_cstr(out, "@__nz_term_cols = private unnamed_addr constant [8 x i8] c\"COLUMNS\\00\"\n")
             append_cstr(out, "define i32 @nizam_get_terminal_width() {\nentry:\n  %env = call ptr @getenv(ptr @__nz_term_cols)\n  %envn = icmp ne ptr %env, null\n  br i1 %envn, label %parse, label %tryio\nparse:\n  %pw = call i32 @atoi(ptr %env)\n  %p20 = icmp sgt i32 %pw, 20\n  br i1 %p20, label %envw, label %tryio\nenvw:\n  %w0 = sub i32 %pw, 4\n  %lo0 = icmp slt i32 %w0, 70\n  %w1 = select i1 %lo0, i32 70, i32 %w0\n  %hi0 = icmp sgt i32 %w1, 120\n  %w2 = select i1 %hi0, i32 120, i32 %w1\n  ret i32 %w2\ntryio:\n  %ws = alloca [8 x i8]\n  %io = call i32 @ioctl(i32 1, i64 21523, ptr %ws)\n  %iook = icmp eq i32 %io, 0\n  br i1 %iook, label %colchk, label %dfl\ncolchk:\n  %colp = getelementptr i8, ptr %ws, i64 2\n  %col16 = load i16, ptr %colp\n  %col = zext i16 %col16 to i32\n  %c20 = icmp sgt i32 %col, 20\n  br i1 %c20, label %iolw, label %dfl\niolw:\n  %iw0 = sub i32 %col, 4\n  %ilo = icmp slt i32 %iw0, 70\n  %iw1 = select i1 %ilo, i32 70, i32 %iw0\n  %ihi = icmp sgt i32 %iw1, 120\n  %iw2 = select i1 %ihi, i32 120, i32 %iw1\n  ret i32 %iw2\ndfl:\n  ret i32 84\n}\n\n")
         // Target pointer size (runtime.c global g_nizam_target_pointer_size):
         // products importing compiler modules (test_codegen & co) call these.
@@ -2340,7 +2340,7 @@ struct LLVMCodegen:
         // 0.0 -> "0.000000e+00"; else bitcast (f32 narrowed first) -> "0x%016llX".
         let h_flt as i32 = self.rt_body_missing("define void @format_llvm_float(" to cstr)
         if h_flt == 1 to i32:
-            append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\00\"\n@__nz_flt_hex = private unnamed_addr constant [11 x i8] c\"0x%016llX\00\"\n")
+            append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\\00\"\n@__nz_flt_hex = private unnamed_addr constant [11 x i8] c\"0x%016llX\\00\"\n")
             append_cstr(out, "define void @format_llvm_float(double %val, i32 %is_f32, ptr %out_buf) {\nentry:\n  %z = fcmp oeq double %val, 0.000000e+00\n  br i1 %z, label %zero, label %bits\nzero:\n  %c0 = call ptr @memcpy(ptr %out_buf, ptr @__nz_flt_zero, i64 13)\n  ret void\nbits:\n  %is32 = icmp ne i32 %is_f32, 0\n  br i1 %is32, label %narrow, label %wide\nnarrow:\n  %f = fptrunc double %val to float\n  %d = fpext float %f to double\n  %u1 = bitcast double %d to i64\n  br label %emit\nwide:\n  %u2 = bitcast double %val to i64\n  br label %emit\nemit:\n  %u = phi i64 [ %u1, %narrow ], [ %u2, %wide ]\n  %c1 = call i32 (ptr, ...) @sprintf(ptr %out_buf, ptr @__nz_flt_hex, i64 %u)\n  ret void\n}\n\n")
 
     public fn generate(self as ptr[LLVMCodegen], root as ptr[Node]) as String:
