@@ -3869,6 +3869,21 @@ fn monomorphize_with_sources(lowerer as ptr[Lowerer], mod_struct_g as Dict[Strin
         st.rewrite_annotation(annots[ai])
         ai = ai + 1 to i64
     st.fixup_calls((deref lowerer).generic_calls)
-    return (deref st).generated
+    let gen as List[ptr[Node]] = (deref st).generated
+    if gen.length() > 0 to i64:
+        // Append to root so codegen (and every later pass) sees the
+        // specialized defs; the caller declare_passes the returned list.
+        let existing as List[ptr[Node]] = node_declarations(root)
+        let combined as List[ptr[Node]] = List[ptr[Node]]()
+        var ei as i64 = 0 to i64
+        while ei < existing.length():
+            combined.append(existing[ei])
+            ei = ei + 1 to i64
+        var gi as i64 = 0 to i64
+        while gi < gen.length():
+            combined.append(gen[gi])
+            gi = gi + 1 to i64
+        set_node_declarations(root, combined)
+    return gen
 
 
