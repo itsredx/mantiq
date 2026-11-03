@@ -5,7 +5,7 @@ from std.collections import List, Dict
 import symbols
 from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
 import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr, monomorphize_program
+from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr, monomorphize_program, monomorphize_with_sources
 import sema
 from sema import Sema
 import types
@@ -694,6 +694,16 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     (deref sema).engine = engine
     (deref sema).root_ast = root
     sema.declare_pass(root)
+    // Milestone M: module generic templates loaded (and merged into root)
+    // during the declare pass; re-run monomorphisation now so module
+    // generics (Set[i32] etc.) get real specialized defs and the program's
+    // annotations/calls are rewritten to the mangled names. Declare the
+    // generated defs so resolve/typecheck see them.
+    let gen_mods as List[ptr[Node]] = monomorphize_with_sources(lowerer, (deref sema).mod_struct_generics, (deref sema).mod_fun_generics, (deref sema).mod_generic_source, root)
+    var gm_i as i64 = 0 to i64
+    while gm_i < gen_mods.length():
+        sema.declare_pass(gen_mods[gm_i])
+        gm_i = gm_i + 1 to i64
     sema.resolve_pass(root)
     sema.analyze_gil_safety(root)
     perf_end(perf, "sema", t1)

@@ -254,6 +254,13 @@ struct Sema:
     public var global_scope as ptr[Scope]
     public var loaded_modules as Dict[String, ptr[Scope]]
     public var module_asts as Dict[String, ptr[Node]]
+    // Milestone M (monomorphisation): generic templates declared by imported
+    // modules. The mono pass runs pre-sema (before modules load), so sema
+    // snapshots each module's registries + module source text here; main
+    // re-runs monomorphisation after the declare pass with these seeds.
+    public var mod_struct_generics as Dict[String, List[String]]
+    public var mod_fun_generics as Dict[String, List[String]]
+    public var mod_generic_source as Dict[String, String]
     public var fn_scopes as Dict[usize, ptr[Scope]]
     public var errors as List[String]
     public var current_file as String
@@ -274,6 +281,9 @@ struct Sema:
         (deref self).errors = List[String]()
         (deref self).loaded_modules = Dict[String, ptr[Scope]]()
         (deref self).module_asts = Dict[String, ptr[Node]]()
+        (deref self).mod_struct_generics = Dict[String, List[String]]()
+        (deref self).mod_fun_generics = Dict[String, List[String]]()
+        (deref self).mod_generic_source = Dict[String, String]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
         (deref self).root_ast = None to ptr[Node]
         (deref self).engine = None to ptr[DiagnosticEngine]
@@ -824,6 +834,26 @@ struct Sema:
             self.report_error_with_code("E0001" to cstr, String.make("compilation error in module" to cstr), resolved_path, node_span(node))
             content.deinit()
             return
+
+        // Milestone M: snapshot this module's generic templates for the
+        // post-declare monomorphisation re-run (main.nz). The template
+        // spans index into THIS module's text, so record it per name.
+        let msg_snap as Dict[String, List[String]] = (deref lowerer).struct_generics
+        let mfg_snap as Dict[String, List[String]] = (deref lowerer).fun_generics
+        let msg_keys as List[String] = msg_snap.keys()
+        var mg_i as i64 = 0 to i64
+        while mg_i < msg_keys.length():
+            let mg_k as String = msg_keys[mg_i]
+            (deref self).mod_struct_generics[mg_k] = msg_snap[mg_k]
+            (deref self).mod_generic_source[mg_k] = String.make(content.data to cstr)
+            mg_i = mg_i + 1 to i64
+        let mfg_keys as List[String] = mfg_snap.keys()
+        mg_i = 0 to i64
+        while mg_i < mfg_keys.length():
+            let mf_k as String = mfg_keys[mg_i]
+            (deref self).mod_fun_generics[mf_k] = mfg_snap[mf_k]
+            (deref self).mod_generic_source[mf_k] = String.make(content.data to cstr)
+            mg_i = mg_i + 1 to i64
             
         let saved_scope as ptr[Scope] = (deref self).current_scope
         let saved_file as String = (deref self).current_file

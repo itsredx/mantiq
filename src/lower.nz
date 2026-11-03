@@ -3571,6 +3571,10 @@ struct MonoState:
     public var generated as List[ptr[Node]]
     public var param_list as List[String]
     public var fun_names as Dict[String, bool]
+    // Milestone M: per-template source text. Module templates' spans index
+    // into their own module file, not the program's source; sema seeds this
+    // dict (generic base name -> module source) before the re-run.
+    public var tmpl_source as Dict[String, String]
 
     public fn init_mono(self as ptr[MonoState], source as String, file_path as String):
         (deref self).source = source
@@ -3581,6 +3585,7 @@ struct MonoState:
         (deref self).generated = List[ptr[Node]]()
         (deref self).param_list = List[String]()
         (deref self).fun_names = Dict[String, bool]()
+        (deref self).tmpl_source = Dict[String, String]()
 
     public fn collect_one(self as ptr[MonoState], d as ptr[Node], generics as Dict[String, List[String]]):
         let nm as String = node_name(d)
@@ -3588,6 +3593,8 @@ struct MonoState:
             let ps as List[String] = generics[nm]
             (deref self).templates[nm] = d
             (deref self).params[nm] = ps
+            if not (deref self).tmpl_source.has(nm):
+                (deref self).tmpl_source[nm] = (deref self).source
             var j as i64 = 0 to i64
             while j < ps.length():
                 (deref self).param_list.append(ps[j])
@@ -3723,7 +3730,13 @@ struct MonoState:
         let sp as Span = node_span(tmpl)
         let start as usize = sp.start_byte to usize
         let end as usize = sp.end_byte to usize
-        let snip as ptr[String] = slice_string((deref self).source.data, (deref self).source.len, start, end) to ptr[String]
+        // Milestone M: module templates live in their own file's text; use
+        // the seeded per-template source when present (falls back to the
+        // program source for in-program templates).
+        var mono_src as String = (deref self).source
+        if (deref self).tmpl_source.has(base):
+            mono_src = (deref self).tmpl_source[base]
+        let snip as ptr[String] = slice_string((deref mono_src).data, (deref mono_src).len, start, end) to ptr[String]
         let low2 as ptr[Lowerer] = make_lowerer_from_cstr((deref snip).data to cstr, (deref self).file_path.data to cstr)
         let root2 as ptr[Node] = (deref low2).lower_source()
         drop(snip to ptr)
@@ -3779,6 +3792,15 @@ struct MonoState:
                                         let gname as GName = parse_gname(nm)
                                         if nm.data != None to ptr[u8] and not gname.valid:
                                             set_node_name(callee, nm)
+                                        elif gname.valid and (deref self).templates.has(gname.base):
+                                            // Milestone M: explicit `foo[i32](...)`
+                                            // annots that the rewrite pass did not
+                                            // touch (module generic fns): mangle
+                                            // the callee and register the
+                                            // instantiation for generation.
+                                            let mangled_c as String = self.resolve_and_mangle(gname.base, gname.args)
+                                            if mangled_c.data != None to ptr[u8]:
+                                                set_node_name(callee, mangled_c)
             i = i + 1 to i64
 
 fn monomorphize_program(lowerer as ptr[Lowerer], root as ptr[Node]) as i64:
@@ -3805,5 +3827,48 @@ fn monomorphize_program(lowerer as ptr[Lowerer], root as ptr[Node]) as i64:
             gi = gi + 1 to i64
         set_node_declarations(root, combined)
     return gen.length()
+
+
+// Milestone M: post-module monomorphisation. The primary pass
+// (monomorphize_program) runs pre-sema, before imported modules load, so
+// module generic templates (e.g. Set[T] from std.collections) are absent and
+// their instantiations fall back to the erased ABI — call sites emit
+// substituted arg types against ptr-erased defs (works only for ptr-width
+// element types; Set[i32] segfaults). Sema snapshots module generic
+// registries during import loading; main calls this after the declare pass
+// with those seeds. Returns the generated declarations (already appended to
+// root) so the caller can run sema's declare_pass over them before
+// resolve/typecheck.
+fn monomorphize_with_sources(lowerer as ptr[Lowerer], mod_struct_g as Dict[String, List[String]], mod_fun_g as Dict[String, List[String]], mod_srcs as Dict[String, String], root as ptr[Node]) as List[ptr[Node]]:
+    let msg_keys as List[String] = mod_struct_g.keys()
+    var i as i64 = 0 to i64
+    while i < msg_keys.length():
+        let k as String = msg_keys[i]
+        if not (deref lowerer).struct_generics.has(k):
+            (deref lowerer).struct_generics[k] = mod_struct_g[k]
+        i = i + 1 to i64
+    let mfg_keys as List[String] = mod_fun_g.keys()
+    i = 0 to i64
+    while i < mfg_keys.length():
+        let k2 as String = mfg_keys[i]
+        if not (deref lowerer).fun_generics.has(k2):
+            (deref lowerer).fun_generics[k2] = mod_fun_g[k2]
+        i = i + 1 to i64
+    let st as ptr[MonoState] = make[MonoState](1 to usize) to ptr[MonoState]
+    st.init_mono((deref lowerer).source_code, (deref lowerer).file_path)
+    let mgs_keys as List[String] = mod_srcs.keys()
+    i = 0 to i64
+    while i < mgs_keys.length():
+        let k3 as String = mgs_keys[i]
+        (deref st).tmpl_source[k3] = mod_srcs[k3]
+        i = i + 1 to i64
+    st.collect(root, (deref lowerer).struct_generics, (deref lowerer).fun_generics)
+    let annots as List[ptr[TypeAnnotation]] = (deref lowerer).all_annotations
+    var ai as i64 = 0 to i64
+    while ai < annots.length():
+        st.rewrite_annotation(annots[ai])
+        ai = ai + 1 to i64
+    st.fixup_calls((deref lowerer).generic_calls)
+    return (deref st).generated
 
 
