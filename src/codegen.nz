@@ -2340,7 +2340,7 @@ struct LLVMCodegen:
         // 0.0 -> "0.000000e+00"; else bitcast (f32 narrowed first) -> "0x%016llX".
         let h_flt as i32 = self.rt_body_missing("define void @format_llvm_float(" to cstr)
         if h_flt == 1 to i32:
-            append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\\00\"\n@__nz_flt_hex = private unnamed_addr constant [11 x i8] c\"0x%016llX\\00\"\n")
+            append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\\00\"\n@__nz_flt_hex = private unnamed_addr constant [10 x i8] c\"0x%016llX\\00\"\n")
             append_cstr(out, "define void @format_llvm_float(double %val, i32 %is_f32, ptr %out_buf) {\nentry:\n  %z = fcmp oeq double %val, 0.000000e+00\n  br i1 %z, label %zero, label %bits\nzero:\n  %c0 = call ptr @memcpy(ptr %out_buf, ptr @__nz_flt_zero, i64 13)\n  ret void\nbits:\n  %is32 = icmp ne i32 %is_f32, 0\n  br i1 %is32, label %narrow, label %wide\nnarrow:\n  %f = fptrunc double %val to float\n  %d = fpext float %f to double\n  %u1 = bitcast double %d to i64\n  br label %emit\nwide:\n  %u2 = bitcast double %val to i64\n  br label %emit\nemit:\n  %u = phi i64 [ %u1, %narrow ], [ %u2, %wide ]\n  %c1 = call i32 (ptr, ...) @sprintf(ptr %out_buf, ptr @__nz_flt_hex, i64 %u)\n  ret void\n}\n\n")
 
     public fn generate(self as ptr[LLVMCodegen], root as ptr[Node]) as String:
