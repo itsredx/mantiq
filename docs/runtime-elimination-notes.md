@@ -846,3 +846,45 @@ and-suspenders fallback for any future malformed-IR shape.
   target keeps linking runtime.c anyway. Template family can be added
   on demand.
 - wasm/py-ext targets: unchanged, still reference runtime.c.
+
+### Gate debug cycle (Nov 3): three template defects, all caught by the gate
+The first full chain run after the template push reached the test_std
+gate and failed three times, each on a one-line template defect. The
+cheap-validation loop (hand-patch the failing product IR, filter, clang,
+link, run — minutes, not a 26–40 min rebuild) caught two of the three
+before they cost a cycle; the third was missed because the validation
+target (test_codegen) self-declared a symbol the gate product
+(test_std) did not.
+
+1. `\\00` escaping (`850158c`): the Nizam lexer misparses a single
+   `\00` in a codegen.nz string literal — it eats the NUL escape, the
+   closing quote, and the following text, producing IR like
+   `c"COLUMNSdefine i32 @nizam_get_terminal_width() {` ([1357 x i8] vs
+   the declared [8 x i8]). IR byte escapes must be written `\\00` in
+   codegen.nz source.
+2. Format-string size (`8eab096`): `0x%016llX` is 9 chars + NUL = 10
+   bytes; the template declared `[11 x i8]`. Fixed in the hand-patch
+   artifact during validation but initially missed in the source.
+3. Missing libc declares (`102fa8f`): test_std's product IR declares
+   only `memcpy`; `getenv`/`atoi`/`ioctl`/`sprintf` were undefined
+   values. The templates now emit their own declares — safe because
+   `__cg_filter_declares` (final assembly) dedupes repeat declares and
+   drops declare/define collisions. Declares must always accompany
+   template bodies: never assume the product declares a libc function.
+
+Lesson: validate template changes against the LOWEST-assumption
+product (a test that imports compiler modules but declares nothing
+itself), and statically audit every `c"..."` literal for
+`[N x i8]`-vs-byte-count and escape doubling before rebuilding.
+
+### Final state (Nov 3, 14:50)
+- Chain run of 13:54: build OK -> nm sweep OK -> test_std gate PASS ->
+  50-test suite **50 passed, 0 failed (of 50)** -> PROMOTED
+  `nizam-new-fixed7` -> `nizam-new` (previous builder saved as
+  `nizam-new-preRTunlink.bak`).
+- `nizam-new` (1.33 MB): 68 runtime-class T-symbols defined TU-side,
+  ldd runtime refs 0, no undefined mantiq allocator/runtime symbols.
+- Products built by the promoted binary: 0 undefined `mantiq_*`
+  symbols, 0 libmantiq dependency — native products are fully
+  self-contained. runtime.c remains linked ONLY for wasm/py-ext
+  targets and the `mantiq_py_*` family (documented above).
