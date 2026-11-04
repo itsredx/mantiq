@@ -278,6 +278,23 @@ struct BorrowChecker:
                 d_idx = d_idx + 1 to i64
             set_node_auto_drops(node, drop_names)
             
+        // Remove the popped scope's entries from symbol_states. Without
+        // this the map accumulates every variable declared anywhere in
+        // the program, and snapshot_symbol_states (called 3x per IfStmt,
+        // snapshots never freed) copies all of it per branch — O(symbols
+        // x if-stmts) allocation that grows past 1 GB compiling the
+        // compiler's own source. Removal keeps the map function-scoped.
+        // Out-of-scope names are no longer consulted: scope membership is
+        // sema's job, and mark_moved/mark_dropped recreate absent entries
+        // exactly as they do for never-declared names.
+        var r_idx as i64 = 0 to i64
+        while r_idx < sym_count:
+            let r_sym as ptr[Symbol] = (deref current_scope)[r_idx]
+            let r_nm as String = (deref r_sym).name
+            if (deref self).symbol_states.has(r_nm):
+                let _rm as bool = (deref self).symbol_states.remove(r_nm)
+            r_idx = r_idx + 1 to i64
+            
         let dummy_sep2 as i32 = 0
         (deref self).scope_depth = (deref self).scope_depth - 1 to i32
 
