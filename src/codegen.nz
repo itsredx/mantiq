@@ -7895,6 +7895,43 @@ struct LLVMCodegen:
                 fn_target_name = String.make(fn_buf to cstr)
                 free(fn_buf to ptr)
 
+                // Monomorphised static calls: `FrozenSet.from_set(ref sup)`
+                // resolves to the erased def, but a specialised def
+                // (@FrozenSet_i64_from_set) may have been generated. Derive
+                // the instantiation suffix from the args' payload types
+                // (a ref to Set_i64 yields "i64") and retarget when that
+                // specialised def exists. The return type must move in
+                // step whenever the erased call returned the flat handle
+                // repr, or the store into the mono-typed var slot emits
+                // mismatched IR.
+                if node_kind(callee) == NodeType.MemberExpr:
+                    let sc_args as List[ptr[Node]] = node_params(node)
+                    var sc_i as i64 = 0 to i64
+                    while sc_i < sc_args.length():
+                        let sc_arg as ptr[Node] = get_node_decl(ref sc_args, sc_i)
+                        var sc_t as ptr[Type] = node_inferred_type(sc_arg)
+                        if sc_t != None to ptr[Type] and (deref sc_t).kind == TypeKind.RawPointer and (deref sc_t).payload != None to ptr[Type]:
+                            sc_t = (deref sc_t).payload
+                        if sc_t != None to ptr[Type] and (deref sc_t).name.data != None to ptr[u8]:
+                            let an_c as cstr = (deref sc_t).name.data to cstr
+                            let us_p as cstr = strchr(an_c, '_' to i32)
+                            if us_p != None to cstr:
+                                let sfx_c as cstr = (us_p to usize + 1 to usize) to ptr[u8] to cstr
+                                if (sfx_c to usize) != 0 to usize and deref (sfx_c to ptr[u8]) != 0 to u8:
+                                    let cand_buf as ptr[u8] = make[u8](192 to usize) to ptr[u8]
+                                    let _sc_s as i32 = sprintf(cand_buf, "%s_%s_%s" to cstr, s_nm.data to cstr, sfx_c, method_name.data to cstr)
+                                    let cand as String = String.make(cand_buf to cstr)
+                                    free(cand_buf to ptr)
+                                    if (deref self).program_functions.has(cand):
+                                        fn_target_name = cand
+                                        if strcmp(ret_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(ret_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0:
+                                            let rt_buf as ptr[u8] = make[u8](128 to usize) to ptr[u8]
+                                            let _sc_r as i32 = sprintf(rt_buf, "%%%s_%s" to cstr, s_nm.data to cstr, sfx_c)
+                                            ret_type = String.make(rt_buf to cstr)
+                                            free(rt_buf to ptr)
+                                        sc_i = sc_args.length() to i64
+                            sc_i = sc_i + 1 to i64
+
             if method_name.data != None to ptr[u8]:
                 let m_cstr as cstr = method_name.data to cstr
                 if strcmp(m_cstr, "add" to cstr) == 0 or strcmp(m_cstr, "clear" to cstr) == 0 or strcmp(m_cstr, "push" to cstr) == 0 or strcmp(m_cstr, "append" to cstr) == 0 or strcmp(m_cstr, "insert" to cstr) == 0 or strcmp(m_cstr, "deinit" to cstr) == 0 or strcmp(m_cstr, "deinit_builder" to cstr) == 0 or strcmp(m_cstr, "append_builder" to cstr) == 0 or strcmp(m_cstr, "append_str" to cstr) == 0 or strcmp(m_cstr, "append_cstr" to cstr) == 0:
@@ -14786,6 +14823,61 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, coll_val to cstr)
             append_cstr(ref (deref self).main_out, ", 0\n")
             ptr_temp = ext_reg
+
+        // Named-struct collections (monomorphised generic instances like
+        // %Tuple_i64): the flat-repr check above misses them, and the
+        // fall-through GEP'd the raw struct VALUE (invalid IR). When the
+        // struct's field 0 is the { ptr, i64, i64 } handle repr, reach the
+        // data pointer through the struct: pun the value into a temp slot,
+        // GEP field 0, load the handle, extract the buffer pointer.
+        if not is_agg_coll and (deref coll_type.data) == 37 to u8 and coll_type.len > 1 to usize and (deref coll_val) == 37 to u8:
+            let fti_sb as StringBuilder = StringBuilder.make()
+            append_cstr(ref fti_sb, "__fti_" to cstr)
+            append_cstr(ref fti_sb, (coll_type.data to usize + 1 to usize) to ptr[u8] to cstr)
+            append_cstr(ref fti_sb, ".0" to cstr)
+            let fti_k as String = fti_sb.to_string()
+            fti_sb.deinit()
+            if (deref self).type_aliases.has(fti_k):
+                let f0_t as String = (deref self).type_aliases[fti_k]
+                if strcmp(f0_t.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(f0_t.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0:
+                    let nc_slot as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, nc_slot to cstr)
+                    append_cstr(ref (deref self).main_out, " = alloca ")
+                    append_str(ref (deref self).main_out, coll_type)
+                    append_cstr(ref (deref self).main_out, "\n  store ")
+                    append_str(ref (deref self).main_out, coll_type)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, coll_val to cstr)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, nc_slot to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    let nc_fp as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, nc_fp to cstr)
+                    append_cstr(ref (deref self).main_out, " = getelementptr inbounds ")
+                    append_str(ref (deref self).main_out, coll_type)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, nc_slot to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 0\n")
+                    let nc_h as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, nc_h to cstr)
+                    append_cstr(ref (deref self).main_out, " = load ")
+                    append_str(ref (deref self).main_out, f0_t)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, nc_fp to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                    let nc_p as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, nc_p to cstr)
+                    append_cstr(ref (deref self).main_out, " = extractvalue ")
+                    append_str(ref (deref self).main_out, f0_t)
+                    append_cstr(ref (deref self).main_out, " ")
+                    append_cstr(ref (deref self).main_out, nc_h to cstr)
+                    append_cstr(ref (deref self).main_out, ", 0\n")
+                    ptr_temp = nc_p
+            fti_k.deinit()
 
         let gelem_t as String = self.index_value_llvm(node)
         let elem_ptr as ptr[u8] = self.fresh_temp()
