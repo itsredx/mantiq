@@ -7930,7 +7930,7 @@ struct LLVMCodegen:
                                             ret_type = String.make(rt_buf to cstr)
                                             free(rt_buf to ptr)
                                         sc_i = sc_args.length() to i64
-                            sc_i = sc_i + 1 to i64
+                        sc_i = sc_i + 1 to i64
 
             if method_name.data != None to ptr[u8]:
                 let m_cstr as cstr = method_name.data to cstr
