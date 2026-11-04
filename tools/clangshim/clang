@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# PATH shim for clang invoked by the Nizam compiler.
+#
+# The toolchain's merged .ll modules carry three defect classes the LLVM
+# front-end rejects (see filter.py): declare-vs-define collisions, duplicate
+# declares, and bracketed generic drop-glue names. Filter the .ll first,
+# then exec the real clang on the filtered copy with the same arguments.
+#
+# NIZAM_SHIM_ASAN=1 injects -fsanitize=address into every clang invocation
+# (both .ll and C inputs) for AddressSanitizer debugging builds.
+set -u
+REAL="${NIZAM_REAL_CLANG:-/usr/bin/clang}"
+FILTER="$(dirname "$0")/filter.py"
+if [ "${NIZAM_SHIM_LOG:-0}" = "1" ]; then
+    printf '%s\n' "--- $*" >> "$(dirname "$0")/invocations.log"
+fi
+
+llfile=""
+for a in "$@"; do
+    case "$a" in
+        *.ll) llfile="$a" ;;
+    esac
+done
+
+EXTRA=()
+if [ "${NIZAM_SHIM_ASAN:-0}" = "1" ]; then
+    EXTRA+=( -fsanitize=address -fno-omit-frame-pointer -g -O1 )
+fi
+
+if [ -n "$llfile" ] && [ -f "$llfile" ]; then
+    if $FILTER "$llfile"; then
+        filt="${llfile%.ll}.cgfilt.ll"
+        newargs=()
+        for a in "$@"; do
+            if [ "$a" = "$llfile" ]; then newargs+=("$filt"); else newargs+=("$a"); fi
+        done
+        newargs+=("${EXTRA[@]}")
+        "$REAL" "${newargs[@]}"
+        rc=$?
+        # clang-23.1.3 optimizer bug: instcombine crashes (SIGSEGV inside
+        # TargetLibraryInfoImpl::getLibFunc) after an inlining cascade over
+        # the emitted allocator surface (observed on the Milestone D TU-local
+        # port shapes). Retry without inlining before giving up.
+        if [ $rc -eq 139 ] || [ $rc -ge 128 ] && [ $rc -le 159 ]; then
+            printf 'clangshim: optimizer crash (rc=%s) on %s, retrying with -fno-inline-functions\n' "$rc" "$filt" >> "$(dirname "$0")/invocations.log"
+            noinline_args=()
+            for a in "${newargs[@]}"; do
+                case "$a" in
+                    -O2|-O3) noinline_args+=( "$a" -fno-inline-functions ) ;;
+                    *) noinline_args+=( "$a" ) ;;
+                esac
+            done
+            exec "$REAL" "${noinline_args[@]}"
+        fi
+        exit $rc
+    fi
+    exec "$REAL" "$@" "${EXTRA[@]}"
+fi
+exec "$REAL" "$@" "${EXTRA[@]}"

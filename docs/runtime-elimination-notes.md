@@ -979,3 +979,39 @@ whole-program rebuild. Two full chain runs were lost to bugs found this way
 - Sub-pointer-width element subscripts (`Tuple[i32]`-style) still use the
   erased ptr stride — pre-existing, unrelated to mono.
 - `Dict.has` still has no zeroed-dict guard (pre-existing gotcha).
+
+### Milestone M follow-up: dead-code sweep in the clang shim (Nov 4, 20:35)
+
+Real monomorphisation left every product carrying dead weight: the erased
+template copies (`@Set_add` beside `@Set_i32_add`) plus all unused std
+surface. Reachability analysis of the set_i32 IR showed the erased copies
+form a closed subgraph — only dead defs call dead defs; `main` reaches
+only mono'd defs.
+
+- Implementation: `sweep_dead_erased()` in `tools/clangshim/filter.py`
+  (also live in `~/.local/share/nizam-tools/clangshim/filter.py`). Parses
+  define blocks, BFS reachability from roots (`main` + every `@name`
+  referenced outside define bodies), drops unreachable defines.
+  Guards: skipped entirely when the module has no `@main` (library-style
+  outputs — py-ext/wasm — keep everything); no dlopen/dlsym use anywhere
+  in the toolchain's products, so full DCE on executables is sound.
+- Bring-up bugs caught offline: an index-vs-name set check (silent
+  no-op), and a false-sibling match (`Set_i32_intersection_update`
+  looked like a mono'd sibling of `Set_i32_update` while a dead-but-kept
+  caller still referenced it) — which proved the sweep must be FULL DCE,
+  not sibling-guarded: dead mono'd defs call each other too.
+- Fake-validation trap: the first suite rerun after the change finished
+  in 3 s — the product cache served binaries without invoking clang, so
+  the filter never executed. Cleared `.mantiq_cache` and reran.
+- Validation (real builds through the shim): offline — set_i32 IR 341→24
+  defines (89% smaller IR), identical output rc=0; test_set_methods
+  358→54; test_tuple_methods 344→25, all pass. Systemic — full 50-test
+  suite with cache cleared: **50 passed, 0 failed (of 50)**, promoted.
+- Product size: set_i32 binary 121,896 → 21,520 bytes (**82% smaller**);
+  suite products now ~120–160 KB.
+
+Caveat: the sweep lives in the shim (build-time tooling), not the
+compiler — the next compiler self-build also passes through it. Porting
+the sweep into codegen.nz's final assembly remains open, as does the
+rest of the limitation list (generated-snippet span mapping,
+sub-ptr-width subscripts).
