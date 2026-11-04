@@ -1,4 +1,8 @@
-# Decision 0015: std.sys Module & Platform APIs
+# Decision 0015: std.sys Module & Platform APIs (Superseded)
+
+> [!NOTE]
+> **Superseded by [Decision 0049: std.sys Native Platform Abstraction & C-Runtime Elimination](0049-std-sys-platform-abstraction-and-runtime-elimination.md)** and **[Specification 0031: Standard System Interface (std.sys)](../specification/0031-std-sys-system-interface.md)**.
+> This initial design relied on legacy `runtime.c` C shims (`mantiq_sys_*`) and lacked dual-signature support, injection-safe subprocess execution (`Command`), `Option[String]` return semantics, and zero-runtime self-sufficiency.
 
 ## Context
 

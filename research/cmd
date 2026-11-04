@@ -745,3 +745,31 @@ head -n 50 std/collections.nz
 grep -n "__mantiq" std/collections.nz | head -n 40
 git show --stat 0f59d7f4226b9564b11b141e77af3aaa074a0a51
 git status -s
+ls -la /home/red-x/hp/nizam-lang/mantiq
+find . -maxdepth 2 -iname "*cmd*"
+tail -n 25 research/cmd
+ls -la research/ docs/ examples/
+ls -la docs/specification docs/decisions
+head -n 35 docs/specification/0011-type-system.md
+head -n 40 research/paper-ideas.md
+grep -rn "format" src/ docs/ tree-sitter-mantiq/ | head -n 30
+tail -n 10 research/cmd
+head -n 45 docs/specification/0029-python-datamodels.md
+git status --ignored
+git diff src/codegen.nz
+wc -l research/formatter-spec.md research/formatter_example.nz research/formatter_example.mq docs/code-formatting-guide.md docs/specification/0030-code-formatting-style-guide.md
+ls -la /home/red-x/hp/nizam-lang/mantiq
+ls -la /home/red-x/hp/nizam-lang
+ls -la /home/red-x/hp/nizam-lang/mantiq/docs /home/red-x/hp/nizam-lang/mantiq/research /home/red-x/hp/nizam-lang/mantiq/std
+ls -la /home/red-x/hp/nizam-lang/mantiq/docs/decisions /home/red-x/hp/nizam-lang/mantiq/docs/specification
+grep -n -E "getenv|setenv|os|arch|sys|exit|system" /home/red-x/hp/nizam-lang/mantiq/runtime.c
+grep -rn "sys" /home/red-x/hp/nizam-lang/mantiq/std/ /home/red-x/hp/nizam-lang/mantiq/src/
+grep -rn "std\.sys" /home/red-x/hp/nizam-lang/mantiq/src/*.nz /home/red-x/hp/nizam-lang/mantiq/std/*.nz
+grep -n "Import" /home/red-x/hp/nizam-lang/mantiq/src/sema.nz /home/red-x/hp/nizam-lang/mantiq/src/main.nz
+grep -rn "extern fn" /home/red-x/hp/nizam-lang/mantiq/src/*.nz /home/red-x/hp/nizam-lang/mantiq/std/*.nz
+grep -n "extern fn" /home/red-x/hp/nizam-lang/mantiq/src/main.nz
+grep -n "^// ──" /home/red-x/hp/nizam-lang/mantiq/runtime.c
+grep -rn -i "supersede" /home/red-x/hp/nizam-lang/mantiq/docs/
+tail -n 10 /home/red-x/hp/nizam-lang/cmd.sh
+git -C /home/red-x/hp/nizam-lang/mantiq status
+ls -la /home/red-x/hp/nizam-lang/mantiq/research/std-sys-architecture-and-runtime-elimination.md

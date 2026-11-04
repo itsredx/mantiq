@@ -1,4 +1,8 @@
-# Specification 0004: std.sys Module
+# Specification 0004: std.sys Module (Superseded)
+
+> [!NOTE]
+> **Superseded by [Specification 0031: Standard System Interface (std.sys)](0031-std-sys-system-interface.md)** and **[Decision 0049: std.sys Native Platform Abstraction & C-Runtime Elimination](../decisions/0049-std-sys-platform-abstraction-and-runtime-elimination.md)**.
+> This early specification was based on the legacy C-runtime helpers. Refer to Specification 0031 for the complete, canonical API including dual-signature ownership, `Option[String]` environment queries, injection-safe subprocess execution (`Command`), terminal TTY detection, and high-resolution timing.
 
 - Feature: Standard Platform Information & Environment APIs
 - Syntax:
