@@ -888,3 +888,94 @@ itself), and statically audit every `c"..."` literal for
   symbols, 0 libmantiq dependency — native products are fully
   self-contained. runtime.c remains linked ONLY for wasm/py-ext
   targets and the `mantiq_py_*` family (documented above).
+
+## Milestone M — real per-type generic monomorphisation (Nov 3–4)
+
+With the runtime fully unlinked (Milestone D), the generic story moved from
+"erased ABI coercion" to genuine per-type monomorphisation: every concrete
+instantiation of a generic struct/method now gets its own specialised type
+and functions (`Set[i64]` -> `%Set_i64` + `@Set_i64_add(i64)`), generated
+from the template's actual source text rather than by retyping erased
+values.
+
+### Architecture (Option B — module generics, not the toy)
+- `sema.nz` `load_imported_module`: after lowering an imported module, a
+  snapshot of its generic registries PLUS the module's source text is kept
+  (`MonoState.tmpl_source`); each instantiation records the template's
+  source span (`register_instantiation`).
+- `lower.nz` `monomorphize_with_sources()`: after the declare pass merges
+  module decls into the root, re-runs the mono pass seeded with the
+  snapshot; generated defs are APPENDED to root, and `main.nz`
+  declare_passes them before resolve/typecheck. lower.nz cannot import
+  sema (cycle) — orchestration lives in `main.nz` `compile_source` with
+  plain dicts.
+- In-program generics (`Box2[i32]`, `pick[i32]`) were always handled by the
+  lowerer's mono pass and keep working; pass 2 is idempotent (annotations
+  already mangled have no `[`).
+- `tc.monomorphize` (typecheck.nz:1008) is DEAD code — discovered during
+  this work; in-program generics never went through it.
+
+### Fixes forced by real mono (each validated before the rebuild)
+1. `cc9eff0` + `27dd187` — the mono machinery itself: source-snapshot
+   seeding, root append, explicit-annotation call fixup.
+2. `35f776a` — E0101 scope fix: generated bodies reference module siblings
+   (e.g. `Dict` inside std.collections templates) missing from the root
+   scope; `main.nz` copies loaded-module scope symbols into the global
+   scope when instantiations exist.
+3. `e7ae95e` — zero-arg `__init__`: implicit `X()` construction previously
+   left a null dict handle (segfault). Pre-pass records structs with
+   zero-arg ctors; the no-arg ctor path emits alloca + call + load.
+4. `14f3e04` — ctor init emission typed from the call's inferred LLVM type
+   (erased copies carried flat literal reprs into mono'd slots).
+5. `b93f390` — two codegen paths where tc-side types stay erased while
+   value-side types are mono'd:
+   - static member calls (`FrozenSet.from_set(ref sup)`): derive the
+     instantiation suffix from the args' payload type names, retarget to
+     `@FrozenSet_i64_from_set` when it exists, move the ret type to the
+     named repr in step.
+   - subscript on named-struct collections (`t[2]` on `Tuple[i64]`):
+     `emit_index_addr` only recognised the flat `{ ptr, i64, i64 }` repr;
+     mono'd structs now pun the value into a temp slot, GEP field 0
+     (via the `__fti_<Struct>.0` registry), load the handle, extract the
+     buffer ptr.
+6. `031e196` — infinite loop in the static-call retarget: the arg-scan
+   increment was nested inside the "arg has an inferred type" guard; any
+   extern-call arg without a type spun `emit_call_expr` forever (gate
+   rc=124, even a trivial smoke file hung at 100% CPU). Found via gdb
+   SIGINT backtrace (`timeout -s INT 25 gdb -batch -ex run -ex "bt 25"` —
+   direct attach fails, yama ptrace_scope=1; run the binary UNDER gdb).
+
+### Validation method
+Cheap-first: every fix was validated by hand-patching the failing suite IR
+to exactly the shapes the new codegen emits, compiling and RUNNING it
+(Set & FrozenSet parity + tuple parity, rc=0) BEFORE spending a ~26–40 min
+whole-program rebuild. Two full chain runs were lost to bugs found this way
+(the hang) instead of shipping them into the suite.
+
+### Final state (Nov 4, 12:41)
+- Chain run: build OK -> sweep OK -> gate test_std PASS -> suite
+  **50 passed, 0 failed (of 50)** -> PROMOTED `nizam-new-fixed7` ->
+  `nizam-new` (suite resumed from the durable journal
+  `rt_nolink.state` after a server restart killed the first run mid-suite;
+  10 journaled PASSes skipped, 40 run fresh).
+- Acceptance PoCs against the PROMOTED binary:
+  - `set_min.nz` — minimal `Set[i32]` with NO `Dict` import (scope-fix
+    acceptance): has2=1, cnt=3, rc=0.
+  - `set_i32.nz` — the original segfault repro: has42=1, has99=0, cnt=2,
+    remove works, rc=0. Products: 0 runtime refs, 0 undefined mantiq
+    symbols (still fully self-contained).
+- IR sweep: `%Set_i32 = type` emitted alongside 25 specialised
+  `@Set_i32_*` defines; `@Set_i32_add` takes a real `i32` parameter.
+
+### Documented limitations (accepted, next-session candidates)
+- Dead erased copies still emitted: the erased `@Set_add`-family defs and
+  `%Set` type remain in products (16 erased-call refs in the set_i32 IR);
+  matches the Wrap behaviour. Cleanup candidate.
+- Diagnostics mis-map for generated snippets: mono re-lowering uses the
+  main file's path, so spans/errors from generated bodies point at the
+  main file with snippet-relative positions.
+- `check_source` (main.nz:1063) intentionally never runs mono — it is a
+  typecheck-only path.
+- Sub-pointer-width element subscripts (`Tuple[i32]`-style) still use the
+  erased ptr stride — pre-existing, unrelated to mono.
+- `Dict.has` still has no zeroed-dict guard (pre-existing gotcha).
