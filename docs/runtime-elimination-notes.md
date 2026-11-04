@@ -1015,3 +1015,50 @@ compiler — the next compiler self-build also passes through it. Porting
 the sweep into codegen.nz's final assembly remains open, as does the
 rest of the limitation list (generated-snippet span mapping,
 sub-ptr-width subscripts).
+
+## Milestone N — full self-hosting (Nov 5, 00:42)
+
+The self-hosted compiler now builds itself, end to end, validated across
+generations:
+
+- **nizam-new** (gen-1, built by the old 27-min builder) compiles
+  `src/main.nz` -> **nizam-self** in **~2.5 min** (rc=0).
+- **nizam-self** compiles the same source -> **nizam-self2**: nm sweep OK,
+  test_std gate PASS, **50-test suite 50 passed, 0 failed (of 50)**,
+  promoted to `nizam-self-promoted`.
+- **Fixed point**: nizam-self2 -> **nizam-self3** rc=0 in 3m14s
+  (user CPU only 42s). nizam-self2: 0 undefined mantiq symbols, 0 ldd
+  runtime refs — fully self-contained.
+- **Promoted nizam-self2 -> nizam-new** (previous saved as
+  `nizam-new-preSelfHost.bak`). `chain_stable.sh` is the going-forward
+  chain: builder = `nizam-self-promoted`, output -> nizam-new-fixed7 ->
+  gate -> suite -> promote to nizam-new; ~5-8x faster end-to-end than the
+  old-builder chain.
+
+### What blocked self-hosting, and the fixes
+1. **Borrowck memory explosion (`80b3a03`)**: `symbol_states` accumulated
+   every variable declared anywhere in the program (pop_scope only marked
+   entries Dropped), while `snapshot_symbol_states` copied the whole map
+   3x per IfStmt and snapshots were never freed — O(symbols x if-stmts)
+   allocation. Compiling the compiler's own source: 280MB -> 1.1GB in 40s,
+   SIGKILL. Fix: pop_scope removes the popped scope's entries; the map
+   stays function-scoped. Peak during the self-host build: **380MB**.
+   (Diagnosed via gdb SIGINT backtrace: the ramp sampled inside
+   BorrowChecker_snapshot_symbol_states <- walk_ast.)
+2. **tree_sitter/api.h missing in the bootstrap env** — the bootstrap
+   script lacked the CPATH export the chain script has.
+3. **Undefined compiler_lib_dir/set_compiler_lib_dir at ld (`e24abd2`)**:
+   the compiler TU declares them extern; runtime.c defines them, but
+   native product link lines dropped runtime.c in Milestone D. The old
+   builder's baked link line masked the gap until a self-hosted build
+   exposed it. Fix: weak-marked in runtime.c (same pattern as
+   mantiq_intern_string), strong TU-side defs copied verbatim into
+   tree_sitter_helper.c (on every native product link line); the shim DCE
+   sweep drops them from products that never reference them.
+
+### State of the toolchain after Milestone N
+- Canonical compiler `nizam-new`: gen-3 lineage (self-hosted since gen-2),
+  1.23 MB, self-contained, DCE'd.
+- Old builder `nizam-new-next` retained only as a bootstrap fallback.
+- Future compiler-source change cycles: edit -> chain_stable.sh -> ~3 min
+  build + ~15 min suite, promotion at 50/50.
