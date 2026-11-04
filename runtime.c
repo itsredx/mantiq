@@ -1259,14 +1259,14 @@ int system(const char *command) {
 #endif
 
 static char g_lib_dir_override[PATH_MAX] = {0};
-void set_compiler_lib_dir(const char* dir) {
+__attribute__((weak)) void set_compiler_lib_dir(const char* dir) {
     if (dir) {
         strncpy(g_lib_dir_override, dir, sizeof(g_lib_dir_override) - 1);
         g_lib_dir_override[sizeof(g_lib_dir_override) - 1] = '\0';
     }
 }
 
-const char* compiler_lib_dir(void) {
+__attribute__((weak)) const char* compiler_lib_dir(void) {
     if (g_lib_dir_override[0]) return g_lib_dir_override;
 #if defined(__wasi__)
     if (access("mantiq/runtime.c", 0) == 0) return "mantiq";
