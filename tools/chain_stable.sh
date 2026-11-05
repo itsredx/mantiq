@@ -106,66 +106,38 @@ TEST_FILES=(
     "src/tests/test_bytes_methods.nz" "src/tests/test_allocator_suite.nz"
 )
 
-# Two-way parallel suite. Worker 2 passes --cache-dir (an isolated cache
-# location), staying in $ROOT so cwd-relative module resolution (bare-name
-# imports in .mq tests) is unaffected -- a scratch-cwd worker broke
-# "from string import String" with E0103 (43/50 run). Both caches wiped
-# every run like the main one (fake-pass trap: a persisted cache would
-# serve stale binaries without invoking clang).
-rm -rf "$TOOLS/w2_cache"
-mkdir -p "$TOOLS/w2_cache"
-
-run_test() {
-    test_file="$1"
+PASSED=0; FAILED=0
+for test_file in "${TEST_FILES[@]}"; do
     test_path="$ROOT/$test_file"
     test_name="$(basename "$test_file" | sed 's/\.[^.]*$//')"
     bin_path="/tmp/rtu_${test_name}"
     if grep -qx "PASS  $test_file" "$STATE"; then
         echo "[SKIP-PASSED] $test_file" >> "$BIGLOG"
-        echo "PASS $test_file" >> "$TOOLS/rtu_worker_$2.res"
-        return
+        PASSED=$((PASSED+1)); continue
     fi
     echo "[BUILDING] $test_file" >> "$BIGLOG"
-    log "w$2 building $test_file"
-    CACHE_ARGS=()
-    [ "$2" = "2" ] && CACHE_ARGS=( --cache-dir "$TOOLS/w2_cache" )
-    if timeout 600 "$WRAP" build "$test_path" -o "$bin_path" --lib-dir "$ROOT" "${CACHE_ARGS[@]}" \
+    log "building $test_file"  # serial: parallel attempt thrashed the HDD (PSI io full ~40%)
+    if timeout 600 "$WRAP" build "$test_path" -o "$bin_path" --lib-dir "$ROOT" \
         > "$TOOLS/rtu_${test_name}.build" 2>&1; then
         echo "[RUNNING] $bin_path" >> "$BIGLOG"
         if timeout 120 "$bin_path" > "$TOOLS/rtu_${test_name}.run" 2>&1; then
             echo "[SUCCESS] $test_file PASSED!" >> "$BIGLOG"
             echo "PASS  $test_file" >> "$STATE"
-            echo "PASS $test_file" >> "$TOOLS/rtu_worker_$2.res"
+            PASSED=$((PASSED+1))
         else
             echo "[FAILED] Execution failed for $test_file!" >> "$BIGLOG"
             tail -3 "$TOOLS/rtu_${test_name}.run" >> "$BIGLOG"
             echo "FAIL  $test_file" >> "$STATE"
-            echo "FAIL $test_file" >> "$TOOLS/rtu_worker_$2.res"
+            FAILED=$((FAILED+1))
         fi
     else
         echo "[FAILED] Compilation failed for $test_file!" >> "$BIGLOG"
         sed 's/\x1b\[[0-9;]*m//g' "$TOOLS/rtu_${test_name}.build" | tail -6 >> "$BIGLOG"
         echo "FAIL  $test_file" >> "$STATE"
-        echo "FAIL $test_file" >> "$TOOLS/rtu_worker_$2.res"
+        FAILED=$((FAILED+1))
     fi
     echo "" >> "$BIGLOG"
-}
-
-run_half() {
-    wid="$1"; shift
-    : > "$TOOLS/rtu_worker_${wid}.res"
-    for t in "$@"; do
-        run_test "$t" "$wid"
-    done
-}
-
-run_half 1 "${TEST_FILES[@]:0:25}" &
-run_half 2 "${TEST_FILES[@]:25}" &
-wait
-
-PASSED=$(cat "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res | grep -c "^PASS")
-FAILED=$(cat "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res | grep -c "^FAIL")
-rm -f "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res
+done
 log "suite tally: $PASSED passed, $FAILED failed (of ${#TEST_FILES[@]})"
 grep -a "\[FAILED\]" "$BIGLOG" | head -10 | while read -r l; do log "$l"; done
 
