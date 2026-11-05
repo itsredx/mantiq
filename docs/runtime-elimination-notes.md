@@ -1160,8 +1160,13 @@ for 568 lines.
    Boolean = i8), emitting `xor i1` instead of an invalid
    `icmp eq i8` on an i1 value. fmt.nz keeps its i64-cast form —
    equivalent and already validated. Match-statement `..` range
-   patterns (icmp sge/sle in the match emitter) still use signed
-   predicates on unsigned subjects — known follow-up.
+   patterns had the same defect — RESOLVED in the same session: the
+   match emitter now derives the subject's signedness via
+   `__cg_left_unsigned(subject_node)` and picks `icmp uge/ule` for
+   unsigned subjects, `sge/sle` otherwise. Two-stage PoC (rebuilt
+   compiler, then compiled PoC with it): u8 subject 200 matches
+   `case 100..250`, 50 does not, signed i32 −5 still matches
+   `case -10..-1`.
 4. `check src/main.nz` reports a pre-existing E0404 (borrowck) in
    `lower.nz:3418` with or without fmt — unchanged files only; the
    build pipeline itself is clean. The chain remains the gate.
