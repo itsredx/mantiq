@@ -106,14 +106,14 @@ TEST_FILES=(
     "src/tests/test_bytes_methods.nz" "src/tests/test_allocator_suite.nz"
 )
 
-# Two-way parallel suite. .mantiq_cache is cwd-relative, so worker 2 runs
-# from a scratch cwd with its OWN cache, wiped every run like the main one
-# (the fake-pass trap: a persisted cache would serve stale binaries without
-# invoking clang). Per-entry cache files have no shared index, but a torn
-# concurrent write of the SAME entry is still possible if two workers shared
-# a cache dir -- isolation sidesteps it entirely.
-rm -rf "$TOOLS/w2_cwd"
-mkdir -p "$TOOLS/w2_cwd"
+# Two-way parallel suite. Worker 2 passes --cache-dir (an isolated cache
+# location), staying in $ROOT so cwd-relative module resolution (bare-name
+# imports in .mq tests) is unaffected -- a scratch-cwd worker broke
+# "from string import String" with E0103 (43/50 run). Both caches wiped
+# every run like the main one (fake-pass trap: a persisted cache would
+# serve stale binaries without invoking clang).
+rm -rf "$TOOLS/w2_cache"
+mkdir -p "$TOOLS/w2_cache"
 
 run_test() {
     test_file="$1"
@@ -127,7 +127,9 @@ run_test() {
     fi
     echo "[BUILDING] $test_file" >> "$BIGLOG"
     log "w$2 building $test_file"
-    if timeout 600 "$WRAP" build "$test_path" -o "$bin_path" --lib-dir "$ROOT" \
+    CACHE_ARGS=()
+    [ "$2" = "2" ] && CACHE_ARGS=( --cache-dir "$TOOLS/w2_cache" )
+    if timeout 600 "$WRAP" build "$test_path" -o "$bin_path" --lib-dir "$ROOT" "${CACHE_ARGS[@]}" \
         > "$TOOLS/rtu_${test_name}.build" 2>&1; then
         echo "[RUNNING] $bin_path" >> "$BIGLOG"
         if timeout 120 "$bin_path" > "$TOOLS/rtu_${test_name}.run" 2>&1; then
@@ -157,8 +159,8 @@ run_half() {
     done
 }
 
-( cd "$ROOT" && run_half 1 "${TEST_FILES[@]:0:25}" ) &
-( cd "$TOOLS/w2_cwd" && run_half 2 "${TEST_FILES[@]:25}" ) &
+run_half 1 "${TEST_FILES[@]:0:25}" &
+run_half 2 "${TEST_FILES[@]:25}" &
 wait
 
 PASSED=$(cat "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res | grep -c "^PASS")
