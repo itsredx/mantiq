@@ -106,38 +106,64 @@ TEST_FILES=(
     "src/tests/test_bytes_methods.nz" "src/tests/test_allocator_suite.nz"
 )
 
-PASSED=0; FAILED=0
-for test_file in "${TEST_FILES[@]}"; do
+# Two-way parallel suite. .mantiq_cache is cwd-relative, so worker 2 runs
+# from a scratch cwd with its OWN cache, wiped every run like the main one
+# (the fake-pass trap: a persisted cache would serve stale binaries without
+# invoking clang). Per-entry cache files have no shared index, but a torn
+# concurrent write of the SAME entry is still possible if two workers shared
+# a cache dir -- isolation sidesteps it entirely.
+rm -rf "$TOOLS/w2_cwd"
+mkdir -p "$TOOLS/w2_cwd"
+
+run_test() {
+    test_file="$1"
     test_path="$ROOT/$test_file"
     test_name="$(basename "$test_file" | sed 's/\.[^.]*$//')"
     bin_path="/tmp/rtu_${test_name}"
     if grep -qx "PASS  $test_file" "$STATE"; then
         echo "[SKIP-PASSED] $test_file" >> "$BIGLOG"
-        PASSED=$((PASSED+1)); continue
+        echo "PASS $test_file" >> "$TOOLS/rtu_worker_$2.res"
+        return
     fi
     echo "[BUILDING] $test_file" >> "$BIGLOG"
-    log "building $test_file"
+    log "w$2 building $test_file"
     if timeout 600 "$WRAP" build "$test_path" -o "$bin_path" --lib-dir "$ROOT" \
         > "$TOOLS/rtu_${test_name}.build" 2>&1; then
         echo "[RUNNING] $bin_path" >> "$BIGLOG"
         if timeout 120 "$bin_path" > "$TOOLS/rtu_${test_name}.run" 2>&1; then
             echo "[SUCCESS] $test_file PASSED!" >> "$BIGLOG"
             echo "PASS  $test_file" >> "$STATE"
-            PASSED=$((PASSED+1))
+            echo "PASS $test_file" >> "$TOOLS/rtu_worker_$2.res"
         else
             echo "[FAILED] Execution failed for $test_file!" >> "$BIGLOG"
             tail -3 "$TOOLS/rtu_${test_name}.run" >> "$BIGLOG"
             echo "FAIL  $test_file" >> "$STATE"
-            FAILED=$((FAILED+1))
+            echo "FAIL $test_file" >> "$TOOLS/rtu_worker_$2.res"
         fi
     else
         echo "[FAILED] Compilation failed for $test_file!" >> "$BIGLOG"
         sed 's/\x1b\[[0-9;]*m//g' "$TOOLS/rtu_${test_name}.build" | tail -6 >> "$BIGLOG"
         echo "FAIL  $test_file" >> "$STATE"
-        FAILED=$((FAILED+1))
+        echo "FAIL $test_file" >> "$TOOLS/rtu_worker_$2.res"
     fi
     echo "" >> "$BIGLOG"
-done
+}
+
+run_half() {
+    wid="$1"; shift
+    : > "$TOOLS/rtu_worker_${wid}.res"
+    for t in "$@"; do
+        run_test "$t" "$wid"
+    done
+}
+
+( cd "$ROOT" && run_half 1 "${TEST_FILES[@]:0:25}" ) &
+( cd "$TOOLS/w2_cwd" && run_half 2 "${TEST_FILES[@]:25}" ) &
+wait
+
+PASSED=$(cat "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res | grep -c "^PASS")
+FAILED=$(cat "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res | grep -c "^FAIL")
+rm -f "$TOOLS"/rtu_worker_1.res "$TOOLS"/rtu_worker_2.res
 log "suite tally: $PASSED passed, $FAILED failed (of ${#TEST_FILES[@]})"
 grep -a "\[FAILED\]" "$BIGLOG" | head -10 | while read -r l; do log "$l"; done
 
