@@ -3811,7 +3811,7 @@ struct MonoState:
         let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
         let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
         if option_has_value(else_opt):
-            self.mono_shift_spans(option_value(else_opt) to ptr[Node], off)
+            self.mono_shift_spans(option_unwrap_ptr(else_opt) to ptr[Node], off)
         let sh_decls as List[ptr[Node]] = node_declarations(node)
         var di as i64 = 0 to i64
         while di < sh_decls.length():
