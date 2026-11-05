@@ -44,6 +44,20 @@ fn append_str(sb as ptr[StringBuilder], s as String):
 fn append_cstr(sb as ptr[StringBuilder], s as cstr):
     (deref sb).append(s)
 
+// ordering comparisons on UNSIGNED operand types must lower to the
+// unsigned icmp predicates: values >= 2^(bits-1) wrap negative under
+// signed semantics (u8: 128..255). Mirrors the >>/lshr type check.
+fn __cg_left_unsigned(n as ptr[Node]) as bool:
+    if n == None to ptr[Node]:
+        return False
+    let lt as ptr[Type] = node_inferred_type(n)
+    if lt == None to ptr[Type]:
+        return False
+    let lk as TypeKind = (deref lt).kind
+    if lk == TypeKind.U8 or lk == TypeKind.U16 or lk == TypeKind.U32 or lk == TypeKind.U64 or lk == TypeKind.U128 or lk == TypeKind.U256 or lk == TypeKind.U512 or lk == TypeKind.U1024 or lk == TypeKind.USize or lk == TypeKind.Color:
+        return True
+    return False
+
 fn __cg_is_word(b as u8) as i32:
     if (b >= 48 to u8 and b <= 57 to u8) or (b >= 65 to u8 and b <= 90 to u8) or (b >= 97 to u8 and b <= 122 to u8) or b == 95 to u8:
         return 1 to i32
@@ -5941,21 +5955,29 @@ struct LLVMCodegen:
         elif strcmp(op.data to cstr, "<" to cstr) == 0:
             if is_fop:
                 append_cstr(ref (deref self).main_out, " = fcmp olt ")
+            elif __cg_left_unsigned(actual_left):
+                append_cstr(ref (deref self).main_out, " = icmp ult ")
             else:
                 append_cstr(ref (deref self).main_out, " = icmp slt ")
         elif strcmp(op.data to cstr, ">" to cstr) == 0:
             if is_fop:
                 append_cstr(ref (deref self).main_out, " = fcmp ogt ")
+            elif __cg_left_unsigned(actual_left):
+                append_cstr(ref (deref self).main_out, " = icmp ugt ")
             else:
                 append_cstr(ref (deref self).main_out, " = icmp sgt ")
         elif strcmp(op.data to cstr, "<=" to cstr) == 0:
             if is_fop:
                 append_cstr(ref (deref self).main_out, " = fcmp ole ")
+            elif __cg_left_unsigned(actual_left):
+                append_cstr(ref (deref self).main_out, " = icmp ule ")
             else:
                 append_cstr(ref (deref self).main_out, " = icmp sle ")
         elif strcmp(op.data to cstr, ">=" to cstr) == 0:
             if is_fop:
                 append_cstr(ref (deref self).main_out, " = fcmp oge ")
+            elif __cg_left_unsigned(actual_left):
+                append_cstr(ref (deref self).main_out, " = icmp uge ")
             else:
                 append_cstr(ref (deref self).main_out, " = icmp sge ")
         elif strcmp(op.data to cstr, "==" to cstr) == 0:
@@ -12516,6 +12538,15 @@ struct LLVMCodegen:
 
         if strcmp(op.data to cstr, "not" to cstr) == 0:
             var cmp_t as String = t
+            // comparisons, and/or chains, nested nots and boolean literals
+            // produce i1 REGISTERS even though their inferred type names
+            // Boolean (i8). Trust cond_llvm_type, which knows the i1
+            // producers; otherwise the emitted icmp/xor mismatches the
+            // operand register type and clang rejects the module.
+            if operand != None to ptr[Node]:
+                let ct as String = cond_llvm_type(operand)
+                if ct.data != None to ptr[u8] and ct.len > 0 to usize:
+                    cmp_t = ct
             if cmp_t.len == 0 to usize or strcmp(cmp_t.data to cstr, "{ ptr, ptr }" to cstr) == 0:
                 cmp_t = String.make("i8" to cstr)
             if strcmp(cmp_t.data to cstr, "i1" to cstr) != 0:

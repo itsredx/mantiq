@@ -1145,15 +1145,23 @@ for 568 lines.
    site. fmt.nz was reordered into dependency order (byte helpers →
    banner matcher → import classifier → emitters → scanner →
    `fmt_transform`).
-3. **Signed u8 ordering comparisons (compiler quirk, documented, worked
-   around).** `b >= 128 to u8` lowers to `icmp sge i8` with the constant
-   truncated to −128, so EVERY u8 satisfies it. Existing sources only
-   compare u8 inside the ASCII range, so the suite never noticed.
-   Workaround in fmt: order-compare through i64 (`(b to i64) >= 128 to
-   i64`), verified by a debug-build PoC that printed the branch taken.
-   A related untested path — `not (and-chain …)` (unary `not` lowering
-   assumes an i8 operand while and-chains carry i1) — was avoided by
-   De Morgan; a follow-up to fix both properly in codegen.nz.
+3. **Signed u8 ordering comparisons in codegen (RESOLVED 2026-11-05,
+   chain 50/50 promoted).** `b >= 128 to u8` used to lower to
+   `icmp sge i8` with the constant truncated to −128, so EVERY u8
+   satisfied it. Fixed in `src/codegen.nz`: the main binary-comparison
+   emitter now picks `icmp u*` predicates when the LEFT operand's
+   inferred TypeKind is unsigned (U8..U1024, USize, Color) — the same
+   check the `>>`/lshr path already used. Runtime PoC: u8 200>=100 →
+   true, 50>=100 → false, signed i32 negatives unchanged; suite 50/50.
+   The related untested `not (and-chain …)` path is also fixed: the
+   unary-not lowering now takes its operand type from
+   `cond_llvm_type(operand)` (comparisons/and-or/nested-not/bool
+   literals carry i1 registers even though the inferred type says
+   Boolean = i8), emitting `xor i1` instead of an invalid
+   `icmp eq i8` on an i1 value. fmt.nz keeps its i64-cast form —
+   equivalent and already validated. Match-statement `..` range
+   patterns (icmp sge/sle in the match emitter) still use signed
+   predicates on unsigned subjects — known follow-up.
 4. `check src/main.nz` reports a pre-existing E0404 (borrowck) in
    `lower.nz:3418` with or without fmt — unchanged files only; the
    build pipeline itself is clean. The chain remains the gate.
