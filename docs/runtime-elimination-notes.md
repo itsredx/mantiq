@@ -979,12 +979,41 @@ whole-program rebuild. Two full chain runs were lost to bugs found this way
 - Sub-pointer-width element subscripts (`Tuple[i32]`-style) still use the
   erased ptr stride — pre-existing, unrelated to mono (wasteful, not
   incorrect: erased slots are ptr-width for all element types).
-- `Dict.has` still has no zeroed-dict guard (pre-existing gotcha).
+- `Dict.has` zeroed-dict guard **RESOLVED Nov 5 (`828961c`)**:
+  `__mantiq_dict_get` now returns null for a null dict handle, so
+  `has()` answers false and `get()` returns its default (PoC: pre-fix
+  SIGSEGV rc=139, post-fix clean). `set`/index-assign keep crash
+  semantics by design.
 - `tc.clone_and_substitute`/`tc.monomorphize` retained (Nov 5): NOT dead —
   `src/tests/test_sema.nz` calls `tc.monomorphize` directly (the 49/50
   chain run caught my mistaken removal; a caller search scoped to
   `src/*.nz` misses `src/tests/`). In-program generics still flow
   through the lowerer's mono pass.
+
+### Open-item decisions (Nov 5) — closed analysis, no code changes
+
+- **DCE-sweep port into codegen.nz: NOT doing it now.** The sweep stays
+  in the shim. Rationale: the shim is mandatory for every product build
+  regardless (it repairs bracketed drop-glue names that TU-side codegen
+  cannot emit), so DCE already runs on every real build. A codegen port
+  only helps shim-less builds — which fail anyway on drop-glue names.
+  Revisit only if/when the drop-glue repair itself moves into codegen;
+  then both should move together.
+- **Parallel suite: rejected for this box** (`536476b`). The disk is
+  rotational (ROTA=1); two concurrent builds thrash the head (PSI
+  `io full` ~40%), each build slows 4-8x (test_types 26s -> 102s), net
+  loss 13.8 min vs 12.4 min serial. Lesson: this machine has 4 CPUs
+  but one HDD — parallelism buys nothing here. Attempt details in
+  a249d36/39a60ec.
+- **Borrowck snapshot hygiene: accepted as-is.** After the pop_scope
+  fix the snapshots are function-scoped and small (~2 MB bounded leak
+  across the whole compiler build; 3 Dicts per IfStmt, never freed).
+  Proper free would need a Dict `deinit` builtin (none exists — builtin
+  dict method table has no deinit and struct drop glue would not free
+  the internal arrays). Not worth new builtins for ~2 MB in a
+  short-lived process.
+- `check_source` mono wiring and `Tuple[i32]` stride stay documented
+  as-is (typecheck-only path by design; wasteful-not-incorrect stride).
 
 ### Milestone M follow-up: dead-code sweep in the clang shim (Nov 4, 20:35)
 
