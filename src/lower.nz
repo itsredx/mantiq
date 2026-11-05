@@ -3575,6 +3575,9 @@ struct MonoState:
     // into their own module file, not the program's source; sema seeds this
     // dict (generic base name -> module source) before the re-run.
     public var tmpl_source as Dict[String, String]
+    // Milestone M diagnostics: per-template module path — generated bodies
+    // report errors in their own module file.
+    public var tmpl_path as Dict[String, String]
 
     public fn init_mono(self as ptr[MonoState], source as String, file_path as String):
         (deref self).source = source
@@ -3586,6 +3589,7 @@ struct MonoState:
         (deref self).param_list = List[String]()
         (deref self).fun_names = Dict[String, bool]()
         (deref self).tmpl_source = Dict[String, String]()
+        (deref self).tmpl_path = Dict[String, String]()
 
     public fn collect_one(self as ptr[MonoState], d as ptr[Node], generics as Dict[String, List[String]]):
         let nm as String = node_name(d)
@@ -3737,9 +3741,27 @@ struct MonoState:
         if (deref self).tmpl_source.has(base):
             mono_src = (deref self).tmpl_source[base]
         let snip as ptr[String] = slice_string((deref mono_src).data, (deref mono_src).len, start, end) to ptr[String]
-        let low2 as ptr[Lowerer] = make_lowerer_from_cstr((deref snip).data to cstr, (deref self).file_path.data to cstr)
+        // Milestone M diagnostics: lower the snippet under the TEMPLATE's
+        // module path (not the main file's), and shift every generated
+        // node's span down by the template's row in that module, so
+        // errors in generated bodies point at the real template lines.
+        var mono_file as String = (deref self).file_path
+        if (deref self).tmpl_path.has(base):
+            mono_file = (deref self).tmpl_path[base]
+        let low2 as ptr[Lowerer] = make_lowerer_from_cstr((deref snip).data to cstr, mono_file.data to cstr)
         let root2 as ptr[Node] = (deref low2).lower_source()
         drop(snip to ptr)
+        if root2 == None to ptr[Node]:
+            return
+        // row offset: newlines in the module source before the template
+        var row_off as u32 = 0 to u32
+        var rb as i64 = 0 to i64
+        while rb < start to i64:
+            if deref ((mono_src.data to usize + rb) to ptr[u8]) == 10 to u8:
+                row_off = row_off + 1 to u32
+            rb = rb + 1 to i64
+        if row_off > 0 to u32:
+            self.mono_shift_spans(root2, row_off)
         if root2 == None to ptr[Node]:
             return
         let decls2 as List[ptr[Node]] = node_declarations(root2)
@@ -3769,6 +3791,37 @@ struct MonoState:
             bi = bi + 1 to i64
         self.fixup_calls((deref low2).generic_calls)
         (deref self).generated.append(struct_node)
+
+    // Milestone M diagnostics: shift every node span in a generated
+    // subtree down by `off` rows (snippet-relative rows -> module-file
+    // rows). Mirrors the child enumeration of tc.clone_and_substitute,
+    // plus else_branch.
+    public fn mono_shift_spans(self as ptr[MonoState], node as ptr[Node], off as u32):
+        if node == None to ptr[Node]:
+            return
+        var sp as Span = node_span(node)
+        sp.start_row = sp.start_row + off
+        sp.end_row = sp.end_row + off
+        (deref node).span = sp
+        self.mono_shift_spans(node_left(node), off)
+        self.mono_shift_spans(node_right(node), off)
+        self.mono_shift_spans(node_body(node), off)
+        self.mono_shift_spans(node_cond(node), off)
+        self.mono_shift_spans(node_then_branch(node), off)
+        let else_opt_raw as Option[ptr[Node]] = node_else_branch(node)
+        let else_opt as ptr[u8] = (ref else_opt_raw) to ptr[u8]
+        if option_has_value(else_opt):
+            self.mono_shift_spans(option_value(else_opt) to ptr[Node], off)
+        let sh_decls as List[ptr[Node]] = node_declarations(node)
+        var di as i64 = 0 to i64
+        while di < sh_decls.length():
+            self.mono_shift_spans(sh_decls[di], off)
+            di = di + 1 to i64
+        let sh_params as List[ptr[Node]] = node_params(node)
+        var pi2 as i64 = 0 to i64
+        while pi2 < sh_params.length():
+            self.mono_shift_spans(sh_params[pi2], off)
+            pi2 = pi2 + 1 to i64
 
     public fn fixup_calls(self as ptr[MonoState], calls as List[ptr[Node]]):
         var i as i64 = 0 to i64
@@ -3839,7 +3892,7 @@ fn monomorphize_program(lowerer as ptr[Lowerer], root as ptr[Node]) as i64:
 // with those seeds. Returns the generated declarations (already appended to
 // root) so the caller can run sema's declare_pass over them before
 // resolve/typecheck.
-fn monomorphize_with_sources(lowerer as ptr[Lowerer], mod_struct_g as Dict[String, List[String]], mod_fun_g as Dict[String, List[String]], mod_srcs as Dict[String, String], root as ptr[Node]) as List[ptr[Node]]:
+fn monomorphize_with_sources(lowerer as ptr[Lowerer], mod_struct_g as Dict[String, List[String]], mod_fun_g as Dict[String, List[String]], mod_srcs as Dict[String, String], mod_paths as Dict[String, String], root as ptr[Node]) as List[ptr[Node]]:
     let msg_keys as List[String] = mod_struct_g.keys()
     var i as i64 = 0 to i64
     while i < msg_keys.length():
@@ -3861,6 +3914,8 @@ fn monomorphize_with_sources(lowerer as ptr[Lowerer], mod_struct_g as Dict[Strin
     while i < mgs_keys.length():
         let k3 as String = mgs_keys[i]
         (deref st).tmpl_source[k3] = mod_srcs[k3]
+        if mod_paths.has(k3):
+            (deref st).tmpl_path[k3] = mod_paths[k3]
         i = i + 1 to i64
     st.collect(root, (deref lowerer).struct_generics, (deref lowerer).fun_generics)
     let annots as List[ptr[TypeAnnotation]] = (deref lowerer).all_annotations

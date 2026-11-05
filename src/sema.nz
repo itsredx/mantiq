@@ -261,6 +261,9 @@ struct Sema:
     public var mod_struct_generics as Dict[String, List[String]]
     public var mod_fun_generics as Dict[String, List[String]]
     public var mod_generic_source as Dict[String, String]
+    // Milestone M diagnostics: per-template module path, so generated
+    // bodies report errors in their OWN module file, not the main file.
+    public var mod_generic_path as Dict[String, String]
     public var fn_scopes as Dict[usize, ptr[Scope]]
     public var errors as List[String]
     public var current_file as String
@@ -284,6 +287,7 @@ struct Sema:
         (deref self).mod_struct_generics = Dict[String, List[String]]()
         (deref self).mod_fun_generics = Dict[String, List[String]]()
         (deref self).mod_generic_source = Dict[String, String]()
+        (deref self).mod_generic_path = Dict[String, String]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
         (deref self).root_ast = None to ptr[Node]
         (deref self).engine = None to ptr[DiagnosticEngine]
@@ -846,6 +850,7 @@ struct Sema:
             let mg_k as String = msg_keys[mg_i]
             (deref self).mod_struct_generics[mg_k] = msg_snap[mg_k]
             (deref self).mod_generic_source[mg_k] = String.make(content.data to cstr)
+            (deref self).mod_generic_path[mg_k] = resolved_path
             mg_i = mg_i + 1 to i64
         let mfg_keys as List[String] = mfg_snap.keys()
         mg_i = 0 to i64
@@ -853,6 +858,7 @@ struct Sema:
             let mf_k as String = mfg_keys[mg_i]
             (deref self).mod_fun_generics[mf_k] = mfg_snap[mf_k]
             (deref self).mod_generic_source[mf_k] = String.make(content.data to cstr)
+            (deref self).mod_generic_path[mf_k] = resolved_path
             mg_i = mg_i + 1 to i64
             
         let saved_scope as ptr[Scope] = (deref self).current_scope

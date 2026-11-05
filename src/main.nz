@@ -699,7 +699,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     // generics (Set[i32] etc.) get real specialized defs and the program's
     // annotations/calls are rewritten to the mangled names. Declare the
     // generated defs so resolve/typecheck see them.
-    let gen_mods as List[ptr[Node]] = monomorphize_with_sources(lowerer, (deref sema).mod_struct_generics, (deref sema).mod_fun_generics, (deref sema).mod_generic_source, root)
+    let gen_mods as List[ptr[Node]] = monomorphize_with_sources(lowerer, (deref sema).mod_struct_generics, (deref sema).mod_fun_generics, (deref sema).mod_generic_source, (deref sema).mod_generic_path, root)
     var gm_i as i64 = 0 to i64
     while gm_i < gen_mods.length():
         sema.declare_pass(gen_mods[gm_i])
