@@ -11351,10 +11351,21 @@ struct LLVMCodegen:
                     let low_reg as ptr[u8] = self.emit_expr(low_node)
                     let high_reg as ptr[u8] = self.emit_expr(high_node)
 
+                    // unsigned subjects compare with unsigned predicates;
+                    // signed comparison misclassifies values >= 2^(bits-1)
+                    let subj_unsigned as bool = __cg_left_unsigned(subject_node)
+                    let ge_pred as cstr = "sge" to cstr
+                    let le_pred as cstr = "sle" to cstr
+                    if subj_unsigned:
+                        ge_pred = "uge" to cstr
+                        le_pred = "ule" to cstr
+
                     let cmp1 as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cmp1 to cstr)
-                    append_cstr(ref (deref self).main_out, " = icmp sge ")
+                    append_cstr(ref (deref self).main_out, " = icmp ")
+                    append_cstr(ref (deref self).main_out, ge_pred)
+                    append_cstr(ref (deref self).main_out, " ")
                     append_str(ref (deref self).main_out, subject_type)
                     append_cstr(ref (deref self).main_out, " ")
                     append_cstr(ref (deref self).main_out, subject_reg to cstr)
@@ -11365,7 +11376,9 @@ struct LLVMCodegen:
                     let cmp2 as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, cmp2 to cstr)
-                    append_cstr(ref (deref self).main_out, " = icmp sle ")
+                    append_cstr(ref (deref self).main_out, " = icmp ")
+                    append_cstr(ref (deref self).main_out, le_pred)
+                    append_cstr(ref (deref self).main_out, " ")
                     append_str(ref (deref self).main_out, subject_type)
                     append_cstr(ref (deref self).main_out, " ")
                     append_cstr(ref (deref self).main_out, subject_reg to cstr)
