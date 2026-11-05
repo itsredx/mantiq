@@ -24,6 +24,8 @@ import cfg
 from cfg import CFGAnalyzer
 import error
 from error import DiagnosticEngine
+import fmt
+from fmt import fmt_transform
 
 // ── Program-local allocator surface (leak-mode) ─────────────────────────
 // Defining these in the TU is the ONLY reliable override: the compiler
@@ -1217,6 +1219,79 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p_chk_fail as i32 = printf("Check failed for %s\n" to cstr, input_path)
             let _ff_chk2 as i32 = fflush(None to ptr)
             return 1 to i32
+
+    // ── Milestone F: fmt — deterministic line canonicalizer ─────────────
+    // Usage: nizam fmt [paths...] [-w|--write] [-c|--check]
+    //   default: print formatted text to stdout
+    //   -w: overwrite in place; -c: exit 1 if any file needs formatting
+    if strcmp(cmd, "fmt" to cstr) == 0:
+        if argc < 3:
+            let _p_fmt_err as i32 = printf("Error: 'fmt' requires file paths\nUsage: %s fmt <file.nz|file.mq>... [-w|--write] [-c|--check]\n" to cstr, bin_name)
+            return 1 to i32
+        var write_mode as bool = False
+        var check_mode as bool = False
+        var fmt_dirty as i32 = 0 to i32
+        var fmt_missing as bool = False
+        var fmt_i as i32 = 2 to i32
+        while fmt_i < argc:
+            let fmt_arg as cstr = get_arg(argv, fmt_i)
+            if strcmp(fmt_arg, "-w" to cstr) == 0 or strcmp(fmt_arg, "--write" to cstr) == 0:
+                write_mode = True
+            elif strcmp(fmt_arg, "-c" to cstr) == 0 or strcmp(fmt_arg, "--check" to cstr) == 0:
+                check_mode = True
+            elif strcmp(fmt_arg, "--lib-dir" to cstr) == 0 and fmt_i + 1 to i32 < argc:
+                extern fn set_compiler_lib_dir(dir as cstr)
+                set_compiler_lib_dir(get_arg(argv, fmt_i + 1 to i32))
+                fmt_i = fmt_i + 1 to i32
+            else:
+                let fmt_path as cstr = fmt_arg
+                let fmt_cstr as cstr = read_file_to_cstr(fmt_path)
+                if fmt_cstr == None to cstr:
+                    let _p_fmt_missing as i32 = printf("Error: Could not read file '%s'\n" to cstr, fmt_path)
+                    fmt_missing = True
+                else:
+                    let fmt_src as String = String.make(fmt_cstr)
+                    let fmt_out as String = fmt_transform(fmt_src)
+                    var changed as bool = False
+                    if (deref fmt_src).len != (deref fmt_out).len:
+                        changed = True
+                    else:
+                        extern fn memcmp(a as ptr, b as ptr, n as usize) as i32
+                        let cmp as i32 = memcmp((deref fmt_src).data to ptr, (deref fmt_out).data to ptr, (deref fmt_src).len)
+                        if cmp != 0 to i32:
+                            changed = True
+                    if check_mode:
+                        if changed:
+                            let _p_fmt_dirty as i32 = printf("%s: needs formatting\n" to cstr, fmt_path)
+                            fmt_dirty = 1 to i32
+                        else:
+                            let _p_fmt_clean as i32 = printf("%s: formatted\n" to cstr, fmt_path)
+                    elif write_mode:
+                        if changed:
+                            let f as ptr = fopen(fmt_path, "wb" to cstr)
+                            if f == None to ptr:
+                                let _p_fmt_nof as i32 = printf("Error: could not write '%s'\n" to cstr, fmt_path)
+                                fmt_dirty = 2 to i32
+                            else:
+                                let _fw as usize = fwrite((deref fmt_out).data to ptr, 1 to usize, (deref fmt_out).len, f)
+                                let _fc as i32 = fclose(f)
+                                let _p_fmt_w as i32 = printf("formatted %s\n" to cstr, fmt_path)
+                        else:
+                            let _p_fmt_keep as i32 = printf("%s: already formatted\n" to cstr, fmt_path)
+                    else:
+                        // default: formatted text to stdout
+                        let _p_fmt_out as i32 = printf("%s" to cstr, (deref fmt_out).data to cstr)
+                    fmt_src.deinit()
+                    fmt_out.deinit()
+            fmt_i = fmt_i + 1 to i32
+        if fmt_missing or fmt_dirty == 2 to i32:
+            let _ff_fmt_e as i32 = fflush(None to ptr)
+            return 1 to i32
+        if check_mode and fmt_dirty != 0 to i32:
+            let _ff_fmt_c as i32 = fflush(None to ptr)
+            return 1 to i32
+        let _ff_fmt_ok as i32 = fflush(None to ptr)
+        return 0 to i32
 
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:

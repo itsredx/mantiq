@@ -1,0 +1,570 @@
+// ── fmt: deterministic line canonicalizer ──────────────────────────────
+// Milestone F1 (spec: research/formatter-spec.md §3.1, §4.4, §5).
+//
+// Transforms (all AST-safe, idempotent by construction):
+//   CRLF -> LF, exactly one trailing newline
+//   leading tabs -> 4 spaces (never inside string literals)
+//   trailing whitespace stripped (never inside string literals)
+//   3+ consecutive blank lines collapsed to 2
+//   `// ── Name ───...` banner lines re-padded to exactly column 80
+//   contiguous runs of import/from lines stably sorted by module path;
+//   from-lists rebuilt comma-space sorted (exotic forms passthrough)
+//
+// Deliberately NOT in F1: full pretty-printing (Wadler-Lindig doc IR),
+// vertical blank-line rhythm (2-between top-levels etc.), operator
+// spacing, wrapping. Those need the CST doc-IR engine (F2).
+//
+// Columns count CODEPOINTS: the box-drawing dash ─ is 3 bytes but one
+// column. Line byte ranges exclude the newline.
+
+from std.string import String, StringBuilder
+
+// ── ASCII key ordering (shorter-is-less on equal prefix) ───────────────
+fn __fmt_key_lt(data as ptr[u8], a_off as i64, a_len as i64, b_off as i64, b_len as i64) as bool:
+    var i as i64 = 0 to i64
+    let m as i64 = if a_len < b_len: a_len else: b_len
+    while i < m:
+        let ca as u8 = deref ((data to usize + (a_off + i)) to ptr[u8])
+        let cb as u8 = deref ((data to usize + (b_off + i)) to ptr[u8])
+        if ca != cb:
+            if (ca to i64) < (cb to i64):
+                return True
+            return False
+        i = i + 1 to i64
+    if a_len < b_len:
+        return True
+    return False
+
+// append the byte range [off, off+len) of data
+
+fn __fmt_out_range(out as ptr[StringBuilder], data as ptr[u8], off as i64, len as i64):
+    (deref out).append_slice(((data to usize + off) to ptr[u8]), len to usize)
+
+// append P spaces (indent emission, tabs already expanded by callers)
+
+fn __fmt_out_spaces(out as ptr[StringBuilder], count as i64):
+    var k as i64 = 0 to i64
+    while k < count:
+        (deref out).append_char(32 to u8)
+        k = k + 1 to i64
+
+// visible codepoint count of the byte range [off, off+len)
+
+fn __fmt_cp_len(data as ptr[u8], off as i64, len as i64) as i64:
+    var cnt as i64 = 0 to i64
+    var i as i64 = 0 to i64
+    while i < len:
+        let b as u8 = deref ((data to usize + (off + i)) to ptr[u8])
+        let bc as i64 = b to i64
+        if bc < 128 to i64:
+            cnt = cnt + 1 to i64
+            i = i + 1 to i64
+        elif bc >= 240 to i64:
+            cnt = cnt + 1 to i64
+            i = i + 4 to i64
+        elif bc >= 224 to i64:
+            cnt = cnt + 1 to i64
+            i = i + 3 to i64
+        elif bc >= 192 to i64:
+            cnt = cnt + 1 to i64
+            i = i + 2 to i64
+        else:
+            i = i + 1 to i64
+    return cnt
+
+// ── banner matcher ─────────────────────────────────────────────────────
+// True and sets name_len (bytes) when the line matches:
+//   literal prefix "// ── "            (10 bytes / 6 columns)
+//   a name with no dash bytes and no tab
+//   a tail of dash bytes / spaces only, to end of line
+// Regular comments like "// ── notes: x ends here ──" fail the tail
+// check (non-dash bytes in the remainder) and stay untouched.
+
+fn __fmt_rtrim_len(data as ptr[u8], s as i64, e as i64) as i64:
+    var q as i64 = e
+    while q > s:
+        let b as u8 = deref ((data to usize + (q - 1 to i64)) to ptr[u8])
+        if b == 32 to u8 or b == 9 to u8:
+            q = q - 1 to i64
+        else:
+            break
+    return q - s
+
+// left-trimmed offset of [s, e)
+
+fn __fmt_ltrim_off(data as ptr[u8], s as i64, e as i64) as i64:
+    var p as i64 = s
+    while p < e:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if b == 32 to u8 or b == 9 to u8:
+            p = p + 1 to i64
+        else:
+            break
+    return p
+
+// ── from-list parser: explode "N1 , N2" into trimmed (off,len) items ───
+// False and empty lists on anything exotic (quotes, parens, stars,
+// trailing commas, non-ASCII).
+
+fn __fmt_banner_match(data as ptr[u8], lws as i64, e as i64, name_len as ptr[i64]) as bool:
+    if e - lws < 11 to i64:
+        return False
+    let b0 as u8 = deref ((data to usize + lws) to ptr[u8])
+    let b1 as u8 = deref ((data to usize + (lws + 1 to i64)) to ptr[u8])
+    let b2 as u8 = deref ((data to usize + (lws + 2 to i64)) to ptr[u8])
+    let b3 as u8 = deref ((data to usize + (lws + 3 to i64)) to ptr[u8])
+    let b4 as u8 = deref ((data to usize + (lws + 4 to i64)) to ptr[u8])
+    let b5 as u8 = deref ((data to usize + (lws + 5 to i64)) to ptr[u8])
+    let b6 as u8 = deref ((data to usize + (lws + 6 to i64)) to ptr[u8])
+    let b7 as u8 = deref ((data to usize + (lws + 7 to i64)) to ptr[u8])
+    let b8 as u8 = deref ((data to usize + (lws + 8 to i64)) to ptr[u8])
+    let b9 as u8 = deref ((data to usize + (lws + 9 to i64)) to ptr[u8])
+    if b0 != 47 to u8 or b1 != 47 to u8 or b2 != 32 to u8:
+        return False
+    if b3 != 226 to u8 or b4 != 148 to u8 or b5 != 128 to u8:
+        return False
+    if b6 != 226 to u8 or b7 != 148 to u8 or b8 != 128 to u8 or b9 != 32 to u8:
+        return False
+    // name: bytes until the start of a dash (226 ...) or a tab
+    var nlen as i64 = 0 to i64
+    var p as i64 = lws + 10 to i64
+    while p < e:
+        let nb as u8 = deref ((data to usize + p) to ptr[u8])
+        if nb == 226 to u8 or nb == 9 to u8:
+            break
+        nlen = nlen + 1 to i64
+        p = p + 1 to i64
+    while nlen > 0 to i64:
+        let nb2 as u8 = deref ((data to usize + (lws + 10 to i64 + (nlen - 1 to i64))) to ptr[u8])
+        if nb2 == 32 to u8:
+            nlen = nlen - 1 to i64
+        else:
+            break
+    if nlen == 0 to i64:
+        return False
+    // tail: every remaining byte must be a dash part or a space
+    var q as i64 = lws + 10 to i64 + nlen
+    while q < e:
+        let tb as u8 = deref ((data to usize + q) to ptr[u8])
+        if tb != 226 to u8 and tb != 148 to u8 and tb != 128 to u8 and tb != 32 to u8 and tb != 13 to u8:
+            return False
+        q = q + 1 to i64
+    (deref name_len) = nlen
+    return True
+
+// ── import classification ──────────────────────────────────────────────
+// kind: 0 none, 1 `import MOD`, 2 `from MOD import ...`
+// Lines containing a slash (comments, paths) are kind 0. mod is
+// right-trimmed. list_off points at the first name for kind 2.
+
+fn __fmt_parse_names(data as ptr[u8], s as i64, e as i64, starts as ptr[List[i64]], lens as ptr[List[i64]]) as bool:
+    var item_s as i64 = s
+    var p as i64 = s
+    while p < e:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if b == 44 to u8:
+            let lo as i64 = __fmt_ltrim_off(data, item_s, p)
+            let ll as i64 = __fmt_rtrim_len(data, lo, p)
+            if ll == 0 to i64:
+                return False
+            (deref starts).append(lo)
+            (deref lens).append(ll)
+            item_s = p + 1 to i64
+        elif b == 34 to u8 or b == 39 to u8 or b == 40 to u8 or b == 41 to u8 or b == 42 to u8:
+            return False
+        elif (b to i64) >= 128 to i64:
+            return False
+        p = p + 1 to i64
+    let lo2 as i64 = __fmt_ltrim_off(data, item_s, e)
+    let ll2 as i64 = __fmt_rtrim_len(data, lo2, e)
+    if ll2 == 0 to i64:
+        return False
+    (deref starts).append(lo2)
+    (deref lens).append(ll2)
+    return True
+
+// ── run machinery ──────────────────────────────────────────────────────
+// A run is a maximal sequence of contiguous import/from lines. Runs are
+// buffered (indices + module keys) and flushed with a stable insertion
+// sort by module key: equality keeps the original relative order.
+
+fn __fmt_import_kind(data as ptr[u8], lws as i64, e as i64, mod_off as ptr[i64], mod_len as ptr[i64], list_off as ptr[i64]) as i64:
+    if e - lws < 7 to i64:
+        return 0 to i64
+    var q as i64 = lws
+    while q < e:
+        let rb as u8 = deref ((data to usize + q) to ptr[u8])
+        if rb == 47 to u8:
+            return 0 to i64
+        q = q + 1 to i64
+    let b0 as u8 = deref ((data to usize + lws) to ptr[u8])
+    if b0 == 105 to u8:
+        let b1 as u8 = deref ((data to usize + (lws + 1 to i64)) to ptr[u8])
+        let b2 as u8 = deref ((data to usize + (lws + 2 to i64)) to ptr[u8])
+        let b3 as u8 = deref ((data to usize + (lws + 3 to i64)) to ptr[u8])
+        let b4 as u8 = deref ((data to usize + (lws + 4 to i64)) to ptr[u8])
+        let b5 as u8 = deref ((data to usize + (lws + 5 to i64)) to ptr[u8])
+        let b6 as u8 = deref ((data to usize + (lws + 6 to i64)) to ptr[u8])
+        if b1 == 109 to u8 and b2 == 112 to u8 and b3 == 111 to u8 and b4 == 114 to u8 and b5 == 116 to u8 and b6 == 32 to u8:
+            let mo as i64 = __fmt_ltrim_off(data, lws + 7 to i64, e)
+            let ml as i64 = __fmt_rtrim_len(data, mo, e)
+            if ml == 0 to i64:
+                return 0 to i64
+            (deref mod_off) = mo
+            (deref mod_len) = ml
+            (deref list_off) = -1 to i64
+            return 1 to i64
+        return 0 to i64
+    if b0 == 102 to u8:
+        let b1 as u8 = deref ((data to usize + (lws + 1 to i64)) to ptr[u8])
+        let b2 as u8 = deref ((data to usize + (lws + 2 to i64)) to ptr[u8])
+        let b3 as u8 = deref ((data to usize + (lws + 3 to i64)) to ptr[u8])
+        let b4 as u8 = deref ((data to usize + (lws + 4 to i64)) to ptr[u8])
+        if b1 != 114 to u8 or b2 != 111 to u8 or b3 != 109 to u8 or b4 != 32 to u8:
+            return 0 to i64
+        // locate " import " after the module
+        var p as i64 = lws + 5 to i64
+        while p + 7 to i64 <= e:
+            let x0 as u8 = deref ((data to usize + p) to ptr[u8])
+            if x0 == 32 to u8:
+                let x1 as u8 = deref ((data to usize + (p + 1 to i64)) to ptr[u8])
+                let x2 as u8 = deref ((data to usize + (p + 2 to i64)) to ptr[u8])
+                let x3 as u8 = deref ((data to usize + (p + 3 to i64)) to ptr[u8])
+                let x4 as u8 = deref ((data to usize + (p + 4 to i64)) to ptr[u8])
+                let x5 as u8 = deref ((data to usize + (p + 5 to i64)) to ptr[u8])
+                let x6 as u8 = deref ((data to usize + (p + 6 to i64)) to ptr[u8])
+                if x1 == 105 to u8 and x2 == 109 to u8 and x3 == 112 to u8 and x4 == 111 to u8 and x5 == 114 to u8 and x6 == 116 to u8:
+                    let mo2 as i64 = __fmt_ltrim_off(data, lws + 5 to i64, p)
+                    let ml as i64 = __fmt_rtrim_len(data, mo2, p)
+                    if ml == 0 to i64:
+                        return 0 to i64
+                    (deref mod_off) = mo2
+                    (deref mod_len) = ml
+                    (deref list_off) = p + 7 to i64
+                    return 2 to i64
+            p = p + 1 to i64
+        return 0 to i64
+    return 0 to i64
+
+// right-trimmed length of [s, e)
+
+fn __fmt_emit_from_line(data as ptr[u8], lw as i64, ce as i64, mod_off as i64, mod_len as i64, list_off as i64, out as ptr[StringBuilder]):
+    var n_starts as List[i64] = List[i64]()
+    var n_lens as List[i64] = List[i64]()
+    if not __fmt_parse_names(data, list_off, ce, ref n_starts, ref n_lens):
+        __fmt_out_range(out, data, lw, ce - lw)
+        (deref out).append_char(10 to u8)
+        return
+    let ncnt as i64 = n_starts.length() to i64
+    var order as List[i64] = List[i64]()
+    var oi as i64 = 0 to i64
+    while oi < ncnt:
+        order.append(oi)
+        oi = oi + 1 to i64
+    var i as i64 = 1 to i64
+    while i < ncnt:
+        var j as i64 = i
+        while j > 0 to i64:
+            if __fmt_key_lt(data, n_starts[order[j]], n_lens[order[j]], n_starts[order[j - 1]], n_lens[order[j - 1]]):
+                let tmp as i64 = order[j]
+                order[j] = order[j - 1]
+                order[j - 1] = tmp
+                j = j - 1 to i64
+            else:
+                break
+        i = i + 1 to i64
+    (deref out).append_slice("from " to ptr[u8], 5 to usize)
+    __fmt_out_range(out, data, mod_off, mod_len)
+    (deref out).append_slice(" import " to ptr[u8], 8 to usize)
+    var k as i64 = 0 to i64
+    while k < ncnt:
+        if k > 0 to i64:
+            (deref out).append_slice(", " to ptr[u8], 2 to usize)
+        __fmt_out_range(out, data, n_starts[order[k]], n_lens[order[k]])
+        k = k + 1 to i64
+    (deref out).append_char(10 to u8)
+
+// ── byte scan: split lines, track string/comment context ───────────────
+
+fn __fmt_emit_import_line(data as ptr[u8], li as i64, line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder]):
+    let s as i64 = line_starts[li]
+    let e as i64 = line_ends[li]
+    let lw as i64 = line_lws[li]
+    var mod_off as i64 = 0 to i64
+    var mod_len as i64 = 0 to i64
+    var list_off as i64 = 0 to i64
+    let kind as i64 = __fmt_import_kind(data, lw, e, ref mod_off, ref mod_len, ref list_off)
+    var ce as i64 = e
+    while ce > lw:
+        let tb as u8 = deref ((data to usize + (ce - 1 to i64)) to ptr[u8])
+        if tb == 32 to u8 or tb == 9 to u8 or tb == 13 to u8:
+            ce = ce - 1 to i64
+        else:
+            break
+    if kind == 1 to i64:
+        __fmt_out_range(out, data, lw, ce - lw)
+        (deref out).append_char(10 to u8)
+        return
+    // kind == 2: rebuilt below
+    __fmt_emit_from_line(data, lw, ce, mod_off, mod_len, list_off, out)
+
+fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[List[i64]], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder], first_li as i64):
+    let cnt as i64 = (deref run_koff).length() to i64
+    if cnt <= 0 to i64:
+        return
+    var order as List[i64] = List[i64]()
+    var oi as i64 = 0 to i64
+    while oi < cnt:
+        order.append(first_li + oi)
+        oi = oi + 1 to i64
+    var i as i64 = 1 to i64
+    while i < cnt:
+        var j as i64 = i
+        while j > 0 to i64:
+            let idx_a as i64 = order[j]
+            let idx_b as i64 = order[j - 1]
+            if __fmt_key_lt(data, (deref run_koff)[idx_a - first_li], (deref run_klen)[idx_a - first_li], (deref run_koff)[idx_b - first_li], (deref run_klen)[idx_b - first_li]):
+                order[j] = idx_b
+                order[j - 1] = idx_a
+                j = j - 1 to i64
+            else:
+                break
+        i = i + 1 to i64
+    var k as i64 = 0 to i64
+    while k < cnt:
+        __fmt_emit_import_line(data, order[k], line_starts, line_ends, line_lws, out)
+        k = k + 1 to i64
+
+// one import line: kind 1 emitted verbatim (trailing ws stripped),
+// kind 2 rebuilt as `from MOD import N1, N2` with sorted comma-space
+// names; parse failures passthrough.
+
+fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], line_ends as ptr[List[i64]], line_vis as ptr[List[i64]], line_banner as ptr[List[i64]], line_lws as ptr[List[i64]]):
+    var i as usize = 0 to usize
+    var st as i64 = 0 to i64
+    var line_start_st as i64 = 0 to i64
+    var line_start as i64 = 0 to i64
+    var cur_lws as i64 = -1 to i64
+    var lws_only as bool = True
+    var in_comment as bool = False
+    var banner_hit as i64 = 0 to i64
+    while i < n:
+        let b as u8 = deref ((data to usize + i) to ptr[u8])
+        if b == 10 to u8:
+            // \r lives on the CONTENT side (stripped later by callers)
+            (deref line_starts).append(line_start)
+            (deref line_ends).append(i to i64)
+            if line_start_st != 0 to i64:
+                (deref line_vis).append(1 to i64)
+            else:
+                (deref line_vis).append(0 to i64)
+            (deref line_banner).append(banner_hit)
+            if cur_lws < 0 to i64 or lws_only:
+                (deref line_lws).append(i to i64)
+            else:
+                (deref line_lws).append(cur_lws)
+            in_comment = False
+            i = i + 1 to usize
+            line_start = i to i64
+            line_start_st = st
+            cur_lws = -1 to i64
+            lws_only = True
+            banner_hit = 0 to i64
+            continue
+        if st != 0 to i64:
+            if b == 92 to u8 and i + 1 to usize < n and deref ((data to usize + (i + 1 to usize)) to ptr[u8]) != 10 to u8:
+                i = i + 2 to usize
+                continue
+            if b == st to u8:
+                st = 0 to i64
+            i = i + 1 to usize
+            continue
+        if in_comment:
+            i = i + 1 to usize
+            continue
+        if b == 32 to u8 or b == 9 to u8 or b == 13 to u8:
+            i = i + 1 to usize
+            continue
+        if lws_only:
+            cur_lws = i to i64
+            lws_only = False
+            if b == 47 to u8 and i + 5 to usize < n:
+                let c1 as u8 = deref ((data to usize + (i + 1 to usize)) to ptr[u8])
+                let c3 as u8 = deref ((data to usize + (i + 3 to usize)) to ptr[u8])
+                let c4 as u8 = deref ((data to usize + (i + 4 to usize)) to ptr[u8])
+                if c1 == 47 to u8:
+                    in_comment = True
+                    if c3 == 226 to u8 and c4 == 148 to u8:
+                        banner_hit = 1 to i64
+            if b == 34 to u8 or b == 39 to u8:
+                st = b to i64
+            i = i + 1 to usize
+            continue
+        if b == 34 to u8 or b == 39 to u8:
+            st = b to i64
+        elif b == 47 to u8 and i + 1 to usize < n and deref ((data to usize + (i + 1 to usize)) to ptr[u8]) == 47 to u8:
+            in_comment = True
+        i = i + 1 to usize
+    if line_start < n to i64 and n > 0 to usize:
+        (deref line_starts).append(line_start)
+        (deref line_ends).append(n to i64)
+        if line_start_st != 0 to i64:
+            (deref line_vis).append(1 to i64)
+        else:
+            (deref line_vis).append(0 to i64)
+        (deref line_banner).append(banner_hit)
+        if cur_lws < 0 to i64 or lws_only:
+            (deref line_lws).append(n to i64)
+        else:
+            (deref line_lws).append(cur_lws)
+
+// the transform
+
+fn fmt_transform(src as String) as String:
+    extern fn memcpy(dst as ptr, src_p as ptr, n as i64) as ptr
+    let data as ptr[u8] = (deref src).data
+    if data == None to ptr[u8]:
+        return src
+    let n as usize = (deref src).len
+
+    var line_starts as List[i64] = List[i64]()
+    var line_ends as List[i64] = List[i64]()
+    var line_vis as List[i64] = List[i64]()
+    var line_banner as List[i64] = List[i64]()
+    var line_lws as List[i64] = List[i64]()
+    __fmt_scan_lines(data, n, ref line_starts, ref line_ends, ref line_vis, ref line_banner, ref line_lws)
+
+    var out as StringBuilder = StringBuilder.make()
+
+    var blanks_out as i64 = 0 to i64
+    var run_first as i64 = -1 to i64
+    var run_koff as List[i64] = List[i64]()
+    var run_klen as List[i64] = List[i64]()
+
+    let line_count as i64 = line_starts.length() to i64
+    var li as i64 = 0 to i64
+    while li < line_count:
+        let s as i64 = line_starts[li]
+        let e as i64 = line_ends[li]
+        let lw as i64 = line_lws[li]
+        let is_vis as bool = line_vis[li] == 1 to i64
+        let is_blank as bool = lw >= e
+
+        var ikind as i64 = 0 to i64
+        var mod_off as i64 = 0 to i64
+        var mod_len as i64 = 0 to i64
+        var list_off as i64 = 0 to i64
+        if not is_vis:
+            ikind = __fmt_import_kind(data, lw, e, ref mod_off, ref mod_len, ref list_off)
+
+        if run_first >= 0 to i64 and ikind == 0 to i64:
+            __fmt_run_flush(data, ref run_koff, ref run_klen, line_starts, line_ends, line_lws, ref out, run_first)
+            run_first = -1 to i64
+            run_koff = List[i64]()
+            run_klen = List[i64]()
+
+        if ikind != 0 to i64:
+            if run_first < 0 to i64:
+                run_first = li
+            run_koff.append(mod_off)
+            run_klen.append(mod_len)
+            li = li + 1 to i64
+            continue
+
+        if not is_vis and not is_blank and line_banner[li] == 1 to i64:
+            var name_len as i64 = 0 to i64
+            if __fmt_banner_match(data, lw, e, ref name_len):
+                // emit the original indent ([s, lw)) — tabs expand to 4sp
+                var hp as i64 = 0 to i64
+                while s + hp < lw:
+                    let hb as u8 = deref ((data to usize + (s + hp)) to ptr[u8])
+                    if hb == 9 to u8:
+                        __fmt_out_spaces(ref out, 4 to i64)
+                    else:
+                        (deref out).append_char(32 to u8)
+                    hp = hp + 1 to i64
+                (deref out).append_slice("// ── " to ptr[u8], 10 to usize)
+                __fmt_out_range(ref out, data, lw + 10 to i64, name_len)
+                var col as i64 = 6 to i64
+                col = col + __fmt_cp_len(data, lw + 10 to i64, name_len)
+                (deref out).append_char(32 to u8)
+                col = col + 1 to i64
+                while col < 80 to i64:
+                    (deref out).append_slice("─" to ptr[u8], 3 to usize)
+                    col = col + 1 to i64
+                (deref out).append_char(10 to u8)
+                blanks_out = 0 to i64
+                li = li + 1 to i64
+                continue
+
+        if is_blank:
+            if is_vis:
+                (deref out).append_char(10 to u8)
+            elif blanks_out < 2 to i64:
+                (deref out).append_char(10 to u8)
+                blanks_out = blanks_out + 1 to i64
+            li = li + 1 to i64
+            continue
+
+        blanks_out = 0 to i64
+
+        if is_vis:
+            __fmt_out_range(ref out, data, s, e - s)
+            (deref out).append_char(10 to u8)
+            li = li + 1 to i64
+            continue
+
+        var hp2 as i64 = s
+        while hp2 < lw:
+            let hb2 as u8 = deref ((data to usize + hp2) to ptr[u8])
+            if hb2 == 9 to u8:
+                __fmt_out_spaces(ref out, 4 to i64)
+            else:
+                (deref out).append_char(32 to u8)
+            hp2 = hp2 + 1 to i64
+        var ce as i64 = e
+        if ce > lw:
+            let rb as u8 = deref ((data to usize + (ce - 1 to i64)) to ptr[u8])
+            if rb == 13 to u8:
+                ce = ce - 1 to i64
+        while ce > lw:
+            let tb as u8 = deref ((data to usize + (ce - 1 to i64)) to ptr[u8])
+            if tb == 32 to u8 or tb == 9 to u8:
+                ce = ce - 1 to i64
+            else:
+                break
+        if ce > lw:
+            __fmt_out_range(ref out, data, lw, ce - lw)
+        (deref out).append_char(10 to u8)
+        li = li + 1 to i64
+
+    if run_first >= 0 to i64:
+        __fmt_run_flush(data, ref run_koff, ref run_klen, line_starts, line_ends, line_lws, ref out, run_first)
+        run_koff = List[i64]()
+        run_klen = List[i64]()
+
+    let res as String = (deref out).to_string()
+    (deref out).deinit()
+
+    // exactly one trailing newline
+    let rlen as i64 = res.len to i64
+    if rlen > 1 to i64:
+        var trim_to as i64 = rlen
+        while trim_to > 0 to i64:
+            let cb as u8 = deref ((res.data to usize + (trim_to - 1 to i64)) to ptr[u8])
+            if cb == 10 to u8:
+                trim_to = trim_to - 1 to i64
+            else:
+                break
+        if rlen - trim_to > 1 to i64:
+            let rdata as ptr[u8] = res.data
+            let newlen as i64 = trim_to + 1 to i64
+            let buf as ptr[u8] = make[u8](newlen + 1 to usize) to ptr[u8]
+            memcpy(buf to ptr, rdata to ptr, trim_to)
+            deref ((buf to usize + trim_to) to ptr[u8]) = 10 to u8
+            deref ((buf to usize + newlen) to ptr[u8]) = 0 to u8
+            let res2 as String = String.make(buf to cstr)
+            res.deinit()
+            return res2
+    return res
+

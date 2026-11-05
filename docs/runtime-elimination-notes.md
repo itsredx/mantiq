@@ -1097,3 +1097,77 @@ generations:
 - Old builder `nizam-new-next` retained only as a bootstrap fallback.
 - Future compiler-source change cycles: edit -> chain_stable.sh -> ~3 min
   build + ~15 min suite, promotion at 50/50.
+
+---
+
+## Milestone F (F1) — self-hosted formatter MVP: `nizam fmt` (Nov 5)
+
+### Scope: F1 = deterministic line canonicalizer
+The full spec (`research/formatter-spec.md`, 417 lines) describes the
+complete formatter: a CST pretty-printer over a Wadler-Lindig doc IR
+(§2.2), vertical rhythm (§4), banners (§5), wrapping heuristics (§7),
+CLI surface (§8). F1 deliberately ships only the subset that is both
+deterministic and idempotent without a CST pretty-printer:
+
+- CRLF → LF, exactly one trailing newline guaranteed
+- leading tabs → 4 spaces
+- trailing whitespace stripped
+- 3+ consecutive blank lines collapsed to 2
+- `// ── Name ───…` banner lines re-padded to exactly column 80
+  (columns count codepoints: the box dash is 3 bytes / 1 column)
+- contiguous runs of `import`/`from` lines sorted stably by module path
+  (key = left+right-trimmed module slice); `from` lists rebuilt as
+  comma-space sorted; exotic forms (quotes/parens/trailing commas) and
+  bare `import` lines pass through verbatim
+- string-literal safety: a per-byte scanner tracks quote state, so
+  string content (including embedded CR/TAB escapes) is byte-exact
+
+Deferred to F2: doc-IR pretty printing, vertical blank-line rhythm,
+operator spacing, wrapping.
+
+### CLI
+`nizam fmt <paths...> [-w|--write] [-c|--check]` — default prints the
+formatted text to stdout; `-w` overwrites only on change; `-c` exits 1
+if any file still needs formatting. Dispatch sits between the `check`
+and `build` blocks in `src/main.nz`; the engine is the new
+`src/fmt.nz` (~570 lines, TU-local `memcpy` extern only). Runtime: 87 ms
+for 568 lines.
+
+### Bugs hit while landing it (all around the new code, none in codegen)
+1. **Top-level `public fn` is not in the grammar.** `public` is only
+   valid for methods inside structs; at top level the parser consumes
+   `public` as an identifier → E0101 "undeclared variable" reported at
+   the *function header* with a caret under `public` (6-char span).
+   Found by boundary-bisecting `check`: a non-public stub at the same
+   line passed while the public one failed. Fix: drop `public`.
+2. **Definition-before-use inside a file.** Modules merge in file
+   order; calling a function defined later yields E0101 at the call
+   site. fmt.nz was reordered into dependency order (byte helpers →
+   banner matcher → import classifier → emitters → scanner →
+   `fmt_transform`).
+3. **Signed u8 ordering comparisons (compiler quirk, documented, worked
+   around).** `b >= 128 to u8` lowers to `icmp sge i8` with the constant
+   truncated to −128, so EVERY u8 satisfies it. Existing sources only
+   compare u8 inside the ASCII range, so the suite never noticed.
+   Workaround in fmt: order-compare through i64 (`(b to i64) >= 128 to
+   i64`), verified by a debug-build PoC that printed the branch taken.
+   A related untested path — `not (and-chain …)` (unary `not` lowering
+   assumes an i8 operand while and-chains carry i1) — was avoided by
+   De Morgan; a follow-up to fix both properly in codegen.nz.
+4. `check src/main.nz` reports a pre-existing E0404 (borrowck) in
+   `lower.nz:3418` with or without fmt — unchanged files only; the
+   build pipeline itself is clean. The chain remains the gate.
+
+### Validation (PoC binary)
+Dirty-file battery (section-mangled imports, CRLF, tabs, trailing WS,
+blank runs, off-width banner with trailing spaces, embedded
+CR/TAB in string literals), idempotency `fmt(fmt(x)) == fmt(x)` on the
+dirty PoC and on `research/formatter_example.nz`, `src/fmt.nz` and
+`src/main.nz`; `-w` result byte-equal to stdout mode; `-c` exit codes;
+missing-file error; multi-path invocation. All pass.
+
+### State after F1
+- Awaiting `chain_stable.sh` 50/50 → promotion (fmt module is now part
+  of the compiler TU).
+- F2 (Wadler-Lindig doc IR) tracked separately in
+  `research/formatter-spec.md` §2.2/§4/§6/§7.
