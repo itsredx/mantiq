@@ -968,17 +968,20 @@ whole-program rebuild. Two full chain runs were lost to bugs found this way
   `@Set_i32_*` defines; `@Set_i32_add` takes a real `i32` parameter.
 
 ### Documented limitations (accepted, next-session candidates)
-- Dead erased copies still emitted: the erased `@Set_add`-family defs and
-  `%Set` type remain in products (16 erased-call refs in the set_i32 IR);
-  matches the Wrap behaviour. Cleanup candidate.
-- Diagnostics mis-map for generated snippets: mono re-lowering uses the
-  main file's path, so spans/errors from generated bodies point at the
-  main file with snippet-relative positions.
-- `check_source` (main.nz:1063) intentionally never runs mono — it is a
+- ~~Dead erased copies still emitted~~ **RESOLVED Nov 4**: the shim's
+  dead-code sweep (`tools/clangshim/filter.py`) drops all unreachable
+  defines from executable products; products 82% smaller.
+- ~~Diagnostics mis-map for generated snippets~~ **RESOLVED Nov 5
+  (`5d778b7`)**: generated bodies lower under the template's own module
+  path with row-shifted spans; errors point at the real template lines.
+- `check_source` (main.nz) intentionally never runs mono — it is a
   typecheck-only path.
 - Sub-pointer-width element subscripts (`Tuple[i32]`-style) still use the
-  erased ptr stride — pre-existing, unrelated to mono.
+  erased ptr stride — pre-existing, unrelated to mono (wasteful, not
+  incorrect: erased slots are ptr-width for all element types).
 - `Dict.has` still has no zeroed-dict guard (pre-existing gotcha).
+- Dead `tc.clone_and_substitute`/`tc.monomorphize` removed (Nov 5) —
+  in-program generics were always the lowerer's mono pass.
 
 ### Milestone M follow-up: dead-code sweep in the clang shim (Nov 4, 20:35)
 
