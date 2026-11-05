@@ -980,8 +980,11 @@ whole-program rebuild. Two full chain runs were lost to bugs found this way
   erased ptr stride — pre-existing, unrelated to mono (wasteful, not
   incorrect: erased slots are ptr-width for all element types).
 - `Dict.has` still has no zeroed-dict guard (pre-existing gotcha).
-- Dead `tc.clone_and_substitute`/`tc.monomorphize` removed (Nov 5) —
-  in-program generics were always the lowerer's mono pass.
+- `tc.clone_and_substitute`/`tc.monomorphize` retained (Nov 5): NOT dead —
+  `src/tests/test_sema.nz` calls `tc.monomorphize` directly (the 49/50
+  chain run caught my mistaken removal; a caller search scoped to
+  `src/*.nz` misses `src/tests/`). In-program generics still flow
+  through the lowerer's mono pass.
 
 ### Milestone M follow-up: dead-code sweep in the clang shim (Nov 4, 20:35)
 
