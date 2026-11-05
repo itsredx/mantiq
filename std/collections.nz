@@ -1500,6 +1500,12 @@ fn __mantiq_dict_set(dict_addr as ptr, key as ptr, val as ptr, hash as i32):
     (deref d).count = (deref d).count + 1 to i32
 
 fn __mantiq_dict_get(dict_addr as ptr, key as ptr, hash as i32) as ptr:
+    // Zeroed-dict guard: a never-initialized Dict has a null table ptr
+    // (codegen extracts dict field 0 as the handle). has()/get() on it
+    // must answer false/default instead of dereferencing null — same
+    // contract as the setdefault/pop/popitem guards below.
+    if dict_addr == None to ptr:
+        return None to ptr
     let d as ptr[MDictRaw] = dict_addr to ptr[MDictRaw]
     let cap as i64 = (deref d).capacity to i64
     let mask as i64 = cap - 1
