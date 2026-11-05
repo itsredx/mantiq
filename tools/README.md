@@ -14,8 +14,10 @@ Binary roles (living copies in `~/.local/share/nizam-tools/`):
 
 - **`chain_stable.sh`** — going-forward flow: `nizam-self-promoted` builds
   `src/main.nz` (~3 min) -> `nizam-new-fixed7` -> nm sweep -> `test_std`
-  gate -> full 50-test suite (2-way parallel: worker 2 gets an isolated
-  cwd-relative cache, wiped every run; journal-resumable) -> promote
+  gate -> full 50-test suite (serial; a 2-way parallel attempt was a
+  net loss on this box — the disk is rotational (ROTA=1), parallel
+  builds thrash I/O (PSI io full ~40%) and each slows 4-8x, 13.8 min
+  vs 12.4 serial) -> promote
   to `nizam-new` at 50/50. Run after any compiler-source change.
 - **`selfhost_bootstrap.sh`** — recovery flow: canonical compiler builds
   itself into `nizam-self` (supervised, 3 attempts, RSS circuit-breaker at
