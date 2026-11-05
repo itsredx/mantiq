@@ -1167,7 +1167,10 @@ dirty PoC and on `research/formatter_example.nz`, `src/fmt.nz` and
 missing-file error; multi-path invocation. All pass.
 
 ### State after F1
-- Awaiting `chain_stable.sh` 50/50 → promotion (fmt module is now part
-  of the compiler TU).
+- `chain_stable.sh` run 2026-11-05 ~22:03: fixed7 (with the fmt module in
+  the compiler TU) → nm sweep clean → test_std gate PASS → serial
+  50-test suite **50 passed, 0 failed (of 50)** → **promoted to
+  `nizam-new`** (prev saved as `nizam-new-prev.bak`). Canonical binary
+  1.25 MB; fmt verified live (`nizam-new fmt -c` / stdout modes).
 - F2 (Wadler-Lindig doc IR) tracked separately in
   `research/formatter-spec.md` §2.2/§4/§6/§7.
