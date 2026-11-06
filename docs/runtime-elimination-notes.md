@@ -1187,3 +1187,99 @@ missing-file error; multi-path invocation. All pass.
   1.25 MB; fmt verified live (`nizam-new fmt -c` / stdout modes).
 - F2 (Wadler-Lindig doc IR) tracked separately in
   `research/formatter-spec.md` §2.2/§4/§6/§7.
+
+## Milestone F2 — line-transformation phases of the formatter (Nov 6)
+
+F2 ships the non-CST parts of the spec as incremental passes inside
+`fmt_transform`, each one validated against the 50-test chain before
+landing: `65508be` (fix), `9536b71` (§4 rhythm), `9542afc` (§3.3
+spacing), `a3034fd` (§7.1 wrapping). All pass idempotency rules
+(format(format(x)) == format(x)), and every commit was promoted on a
+50/50 chain run of the day.
+
+### fix: multi-line string preservation (`65508be`)
+F1's blank-repair path blanked the content of lines inside
+triple-quoted strings: in-string lines had no valid `line_lws`, so
+they fell into the blank-collapse branch and lost their bytes. The
+scanner now records `line_lws = line start` for vis (in-string)
+lines; content then flows through the verbatim-emit path untouched.
+
+### Phase A: vertical rhythm (§4) (`9536b71`)
+Blank-run policymaking at the line level. Caps are computed from the
+input context (what follows/precedees the run), so the phase is
+deterministic and idempotent by construction:
+
+- exactly 2 blanks before top-level code lines (never more, even if
+  the source had 10)
+- 1 blank at the import-tier boundary (plain imports / titled tiers)
+  and 1 after a banner comment line
+- 0 blanks across dedents and into block headers (`if`/`match`/case
+  bodies), ≤1 inside bodies
+- the engine never INSERTS a missing blank run to reach a cap (runs
+  are only compressed); documented limitation
+- helpers: `__fmt_blank_cap`, `__fmt_line_linkish`,
+  `__fmt_line_ends_colon`, `__fmt_word_at`, `__fmt_next_starts_def`
+
+### Phase B: operator & keyword spacing (§3.3) (`9542afc`)
+`__fmt_space_emit` re-emits each non-vis code line's content with
+canonical separators, tokenized string/comment-safe:
+
+- default 1 space between tokens; tight sets `,` `)` `]` `:` `?` `@`
+  and `.`/`..`/`...`, with dot-runs keeping 1 space after a comma for
+  C variadics (`cstr, ...)`) and list literals
+- call/index `(` `[` glue after non-keyword words, `)` `]` glue;
+  keyword words keep their space — EXCEPT `fn` (function types
+  `fn(i32)` stay glued) and `drop` (builtin fn call); `import`/`link`
+  + `[` stays glued so tagged C imports keep their kind-0 stability
+  for the import-sort pass (idempotency requirement)
+- unary `+`/`-` no space after (token after start/punct/keyword);
+  `not` keeps its space; f-string prefixes stay glued to their string
+  (word→string preserves the original had-gap); mantiq `#RRGGBB` hex
+  color literals scan as ONE token (`#` + glued hex suffix); `>>` and
+  `<<` are two-char tokens (shift ops appear in `.mq`) so they don't
+  split as `> >` comparisons
+- `//` comments pass through verbatim after exactly 1 space
+- rebuilt `from`-lines now keep their leading indent (indented
+  imports no longer dedent — a pre-existing F1 gap)
+
+### Phase C: fn-signature parameter wrapping (§7.1) (`a3034fd`)
+Every non-vis code line now renders through a scratch StringBuilder
+(the §3.3 pass) before emission. If indent + content > 100 columns
+AND the line parses as `modifiers* fn NAME [Generics]? (...)` with ≥2
+top-level parameters, the signature breaks one parameter per line at
+indent+4 with a trailing comma (grammar-verified: self-host parser
+accepts trailing commas) and `)` + return-type tail moves to its own
+line at the base indent. Split points are string-aware and track
+paren AND bracket depth, so `Map[i32, String]` commas never split a
+piece; `//` comments inside the parameter list bail out of wrapping
+(a comment after `)` flows with the paren tail). Already-wrapped
+headers, parameter lines and `)`-closer lines cannot re-qualify —
+fixed-point by construction. 25 signatures in the real compiler
+sources (codegen.nz, sema.nz) exercise the path.
+
+### Documented deviations from `research/formatter-spec.md`
+- §3.2: the 88-column soft target is NOT implemented; only the hard
+  100-column limit. Continuation pieces longer than 100 are emitted
+  as-is rather than re-broken; long `if`/binary lines are not wrapped
+  (§7.1 covers fn signatures only; §7.2 method-chain breaking is a
+  later phase).
+- §4: no blank run is EVER inserted to reach a cap; runs are only
+  compressed (2 from N≥2 pre-existing or absent; ≤1 in-body; 0 at
+  plated dedents/block intros).
+- F2 does not ship the Wadler-Lindig doc-IR pretty printer (§2.2);
+  all three phases are line-transformation passes over the existing
+  F1 scanner.
+
+### Validation (each phase before its commit)
+- check-status flip sweep: format every suite test file to a
+  same-dir sibling copy (module resolution requires the same tree —
+  /tmp copies give false flips), `check` original vs formatted,
+  compare statuses. Final totals across .nz AND .mq suites: 0 flips.
+- runtime equivalence: `nizam-new run` on original vs formatted
+  test_match.nz, test_std.nz, test_closures_lambdas.mq — byte-equal
+  output and exit codes.
+- idempotency: fmt(fmt(x)) == fmt(x) over the test corpus, compiler
+  sources, and wrap PoCs. (Probe gotcha: `codegen.nz` is 1.2 MB —
+  read it with a ≥16 MB probe buffer or the input truncates and
+  produces phantom non-idempotency.)
+- chain_stable.sh: 50/50 pass and promotion before each phase commit.
