@@ -248,13 +248,23 @@ fn __fmt_import_kind(data as ptr[u8], lws as i64, e as i64, mod_off as ptr[i64],
 
 // right-trimmed length of [s, e)
 
-fn __fmt_emit_from_line(data as ptr[u8], lw as i64, ce as i64, mod_off as i64, mod_len as i64, list_off as i64, out as ptr[StringBuilder]):
+fn __fmt_emit_from_line(data as ptr[u8], li_start as i64, lw as i64, ce as i64, mod_off as i64, mod_len as i64, list_off as i64, out as ptr[StringBuilder]):
     var n_starts as List[i64] = List[i64]()
     var n_lens as List[i64] = List[i64]()
     if not __fmt_parse_names(data, list_off, ce, ref n_starts, ref n_lens):
         __fmt_out_range(out, data, lw, ce - lw)
         (deref out).append_char(10 to u8)
         return
+    // preserve leading indent (indented from-imports must not dedent)
+    let line_s as i64 = li_start
+    var hp as i64 = 0 to i64
+    while line_s + hp < lw:
+        let hb as u8 = deref ((data to usize + (line_s + hp)) to ptr[u8])
+        if hb == 9 to u8:
+            __fmt_out_spaces(out, 4 to i64)
+        else:
+            (deref out).append_char(32 to u8)
+        hp = hp + 1 to i64
     let ncnt as i64 = n_starts.length() to i64
     var order as List[i64] = List[i64]()
     var oi as i64 = 0 to i64
@@ -302,11 +312,11 @@ fn __fmt_emit_import_line(data as ptr[u8], li as i64, line_starts as List[i64], 
         else:
             break
     if kind == 1 to i64:
-        __fmt_out_range(out, data, lw, ce - lw)
+        __fmt_space_emit(data, lw, ce, out)
         (deref out).append_char(10 to u8)
         return
     // kind == 2: rebuilt below
-    __fmt_emit_from_line(data, lw, ce, mod_off, mod_len, list_off, out)
+    __fmt_emit_from_line(data, line_starts[li], lw, ce, mod_off, mod_len, list_off, out)
 
 fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[List[i64]], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder], first_li as i64):
     let cnt as i64 = (deref run_koff).length() to i64
@@ -564,6 +574,218 @@ fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[
         lim = 1 to i64
     return lim
 
+// ── operator spacing (spec §3.3) ───────────────────────────────────────
+// Token rewriter: re-emit a line's content with canonical single-space
+// separators. String/char literals and `//` comments pass through
+// verbatim; idempotent because canonical output re-tokenizes to itself.
+
+fn __fmt_kw_eq(data as ptr[u8], off as i64, len as i64, w as cstr) as bool:
+    var q as i64 = 0 to i64
+    while q < len:
+        if deref ((w to usize + q) to ptr[u8]) == 0 to u8:
+            return False
+        q = q + 1 to i64
+    if q != len:
+        return False
+    var p as i64 = 0 to i64
+    while p < len:
+        if deref ((data to usize + (off + p)) to ptr[u8]) != deref ((w to usize + p) to ptr[u8]):
+            return False
+        p = p + 1 to i64
+    return True
+
+fn __fmt_is_kw(data as ptr[u8], off as i64, len as i64) as bool:
+    if len < 2 to i64 or len > 9 to i64:
+        return False
+    let b as u8 = deref ((data to usize + off) to ptr[u8])
+    if b == 105 to u8:
+        return __fmt_kw_eq(data, off, len, "if" to cstr) or __fmt_kw_eq(data, off, len, "in" to cstr) or __fmt_kw_eq(data, off, len, "is" to cstr) or __fmt_kw_eq(data, off, len, "impl" to cstr) or __fmt_kw_eq(data, off, len, "import" to cstr) or __fmt_kw_eq(data, off, len, "inline" to cstr) or __fmt_kw_eq(data, off, len, "interface" to cstr)
+    if b == 111 to u8:
+        return __fmt_kw_eq(data, off, len, "or" to cstr)
+    if b == 97 to u8:
+        return __fmt_kw_eq(data, off, len, "as" to cstr) or __fmt_kw_eq(data, off, len, "and" to cstr) or __fmt_kw_eq(data, off, len, "async" to cstr) or __fmt_kw_eq(data, off, len, "abstract" to cstr) or __fmt_kw_eq(data, off, len, "await" to cstr) or __fmt_kw_eq(data, off, len, "atomic" to cstr)
+    if b == 116 to u8:
+        return __fmt_kw_eq(data, off, len, "to" to cstr) or __fmt_kw_eq(data, off, len, "try" to cstr) or __fmt_kw_eq(data, off, len, "trait" to cstr) or __fmt_kw_eq(data, off, len, "type" to cstr)
+    if b == 114 to u8:
+        return __fmt_kw_eq(data, off, len, "ref" to cstr) or __fmt_kw_eq(data, off, len, "return" to cstr) or __fmt_kw_eq(data, off, len, "raise" to cstr)
+    if b == 102 to u8:
+        return __fmt_kw_eq(data, off, len, "for" to cstr) or __fmt_kw_eq(data, off, len, "from" to cstr) or __fmt_kw_eq(data, off, len, "finally" to cstr) or __fmt_kw_eq(data, off, len, "final" to cstr)
+    if b == 108 to u8:
+        return __fmt_kw_eq(data, off, len, "let" to cstr) or __fmt_kw_eq(data, off, len, "link" to cstr) or __fmt_kw_eq(data, off, len, "lock" to cstr)
+    if b == 118 to u8:
+        return __fmt_kw_eq(data, off, len, "var" to cstr) or __fmt_kw_eq(data, off, len, "void" to cstr) or __fmt_kw_eq(data, off, len, "volatile" to cstr)
+    if b == 110 to u8:
+        return __fmt_kw_eq(data, off, len, "not" to cstr)
+    if b == 117 to u8:
+        return __fmt_kw_eq(data, off, len, "union" to cstr)
+    return __fmt_kw_slow(data, off, len)
+
+fn __fmt_kw_slow(data as ptr[u8], off as i64, len as i64) as bool:
+    let b as u8 = deref ((data to usize + off) to ptr[u8])
+    if b == 109 to u8:
+        return __fmt_kw_eq(data, off, len, "mut" to cstr) or __fmt_kw_eq(data, off, len, "match" to cstr) or __fmt_kw_eq(data, off, len, "move" to cstr)
+    if b == 119 to u8:
+        return __fmt_kw_eq(data, off, len, "while" to cstr) or __fmt_kw_eq(data, off, len, "where" to cstr) or __fmt_kw_eq(data, off, len, "with" to cstr)
+    if b == 101 to u8:
+        return __fmt_kw_eq(data, off, len, "else" to cstr) or __fmt_kw_eq(data, off, len, "elif" to cstr) or __fmt_kw_eq(data, off, len, "enum" to cstr) or __fmt_kw_eq(data, off, len, "extern" to cstr) or __fmt_kw_eq(data, off, len, "emit" to cstr)
+    if b == 115 to u8:
+        return __fmt_kw_eq(data, off, len, "struct" to cstr) or __fmt_kw_eq(data, off, len, "static" to cstr) or __fmt_kw_eq(data, off, len, "switch" to cstr) or __fmt_kw_eq(data, off, len, "spawn" to cstr)
+    if b == 99 to u8:
+        return __fmt_kw_eq(data, off, len, "case" to cstr) or __fmt_kw_eq(data, off, len, "class" to cstr) or __fmt_kw_eq(data, off, len, "const" to cstr) or __fmt_kw_eq(data, off, len, "catch" to cstr) or __fmt_kw_eq(data, off, len, "continue" to cstr)
+    if b == 112 to u8:
+        return __fmt_kw_eq(data, off, len, "public" to cstr) or __fmt_kw_eq(data, off, len, "private" to cstr) or __fmt_kw_eq(data, off, len, "pass" to cstr)
+    if b == 98 to u8:
+        return __fmt_kw_eq(data, off, len, "break" to cstr)
+    if b == 100 to u8:
+        return __fmt_kw_eq(data, off, len, "defer" to cstr) or __fmt_kw_eq(data, off, len, "deref" to cstr)
+    if b == 121 to u8:
+        return __fmt_kw_eq(data, off, len, "yield" to cstr)
+    return False
+
+fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuilder]):
+    var p as i64 = lw
+    var prev_kind as i64 = 0 to i64
+    var prev_kw as bool = False
+    var prev_unary as bool = False
+    var prev_c as i64 = -1 to i64
+    var prev_close as bool = False
+    var prev_off as i64 = -1 to i64
+    var prev_len as i64 = 0 to i64
+    var emitted as bool = False
+    var had_gap as bool = False
+    while p < ce:
+        had_gap = False
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if b == 32 to u8 or b == 9 to u8 or b == 13 to u8:
+            p = p + 1 to i64
+            had_gap = True
+            continue
+        if b == 47 to u8 and p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 47 to u8:
+            if emitted:
+                (deref out).append_char(32 to u8)
+            __fmt_out_range(out, data, p, ce - p)
+            return
+        var k as i64 = 0 to i64
+        var ts as i64 = p
+        var kw as bool = False
+        var unary as bool = False
+        var c as i64 = b to i64
+        if b == 34 to u8 or b == 39 to u8:
+            k = 3 to i64
+            let q as u8 = b
+            p = p + 1 to i64
+            while p < ce:
+                let sb as u8 = deref ((data to usize + p) to ptr[u8])
+                if sb == 92 to u8 and p + 1 to i64 < ce:
+                    p = p + 2 to i64
+                elif sb == q:
+                    p = p + 1 to i64
+                    break
+                else:
+                    p = p + 1 to i64
+        elif (b >= 97 to u8 and b <= 122 to u8) or (b >= 65 to u8 and b <= 90 to u8) or b == 95 to u8:
+            k = 1 to i64
+            p = p + 1 to i64
+            while p < ce:
+                let wb as u8 = deref ((data to usize + p) to ptr[u8])
+                if (wb >= 97 to u8 and wb <= 122 to u8) or (wb >= 65 to u8 and wb <= 90 to u8) or (wb >= 48 to u8 and wb <= 57 to u8) or wb == 95 to u8:
+                    p = p + 1 to i64
+                else:
+                    break
+            kw = __fmt_is_kw(data, ts, p - ts)
+        elif b >= 48 to u8 and b <= 57 to u8:
+            k = 2 to i64
+            p = p + 1 to i64
+            if p + 1 to i64 < ce and (deref ((data to usize + p) to ptr[u8]) == 120 to u8 or deref ((data to usize + p) to ptr[u8]) == 88 to u8) and ts + 1 to i64 == p:
+                p = p + 1 to i64
+                while p < ce:
+                    let hb as u8 = deref ((data to usize + p) to ptr[u8])
+                    if (hb >= 48 to u8 and hb <= 57 to u8) or (hb >= 97 to u8 and hb <= 102 to u8) or (hb >= 65 to u8 and hb <= 70 to u8):
+                        p = p + 1 to i64
+                    else:
+                        break
+            else:
+                while p < ce:
+                    let db as u8 = deref ((data to usize + p) to ptr[u8])
+                    if db >= 48 to u8 and db <= 57 to u8:
+                        p = p + 1 to i64
+                    else:
+                        break
+                if p + 1 to i64 < ce and deref ((data to usize + p) to ptr[u8]) == 46 to u8 and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) >= 48 to u8 and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) <= 57 to u8:
+                    p = p + 1 to i64
+                    while p < ce:
+                        let db2 as u8 = deref ((data to usize + p) to ptr[u8])
+                        if db2 >= 48 to u8 and db2 <= 57 to u8:
+                            p = p + 1 to i64
+                        else:
+                            break
+        else:
+            k = 4 to i64
+            if b == 46 to u8:
+                if p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 46 to u8:
+                    if p + 2 to i64 < ce and deref ((data to usize + (p + 2 to i64)) to ptr[u8]) == 46 to u8:
+                        p = p + 3 to i64
+                    else:
+                        p = p + 2 to i64
+                else:
+                    p = p + 1 to i64
+            elif b == 35 to u8:
+                // color literal: `#` plus glued hex suffix is one token
+                p = p + 1 to i64
+                while p < ce:
+                    let hb as u8 = deref ((data to usize + p) to ptr[u8])
+                    if (hb >= 48 to u8 and hb <= 57 to u8) or (hb >= 97 to u8 and hb <= 102 to u8) or (hb >= 65 to u8 and hb <= 70 to u8):
+                        p = p + 1 to i64
+                    else:
+                        break
+            elif b == 45 to u8 and p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 62 to u8:
+                p = p + 2 to i64
+            elif b == 60 to u8 and p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 60 to u8:
+                p = p + 2 to i64
+            elif b == 62 to u8 and p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 62 to u8:
+                p = p + 2 to i64
+            elif b == 61 to u8 and p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 62 to u8:
+                p = p + 2 to i64
+            elif p + 1 to i64 < ce and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 61 to u8 and (b == 61 to u8 or b == 33 to u8 or b == 60 to u8 or b == 62 to u8 or b == 43 to u8 or b == 45 to u8 or b == 42 to u8 or b == 47 to u8 or b == 37 to u8 or b == 38 to u8 or b == 124 to u8 or b == 94 to u8):
+                p = p + 2 to i64
+            else:
+                p = p + 1 to i64
+            if c == 43 to i64 or c == 45 to i64:
+                if p - ts == 1 to i64:
+                    unary = prev_kind == 0 to i64 or prev_kind == 4 to i64 or (prev_kind == 1 to i64 and prev_kw)
+        var sp as bool = True
+        if prev_kind == 0 to i64:
+            sp = False
+        else:
+            if k == 4 to i64:
+                if c == 44 to i64 or c == 41 to i64 or c == 93 to i64 or c == 58 to i64 or c == 63 to i64 or c == 64 to i64:
+                    sp = False
+                elif c == 46 to i64:
+                    // `..`/`...` glue; a comma keeps exactly 1 space before
+                    sp = prev_kind == 4 to i64 and prev_c == 44 to i64
+                elif c == 40 to i64 or c == 91 to i64:
+                    // tag declarators: `import[c]`, `link[c]` keep `[` glued
+                    let tag_kw as bool = prev_kind == 1 to i64 and prev_kw and (prev_off >= 0 to i64) and (__fmt_kw_eq(data, prev_off, prev_len, "import" to cstr) or __fmt_kw_eq(data, prev_off, prev_len, "link" to cstr))
+                    if (prev_kind == 1 to i64 and not prev_kw) or prev_close or tag_kw:
+                        sp = False
+            elif k == 3 to i64 and prev_kind == 1 to i64:
+                // word directly before a string: f-string prefix stays glued
+                sp = had_gap
+            if prev_kind == 4 to i64 and (prev_c == 40 to i64 or prev_c == 91 to i64 or prev_c == 46 to i64 or prev_c == 64 to i64):
+                sp = False
+            elif prev_unary:
+                sp = False
+        if sp:
+            (deref out).append_char(32 to u8)
+        __fmt_out_range(out, data, ts, p - ts)
+        emitted = True
+        prev_kind = k
+        prev_kw = kw
+        prev_unary = unary
+        prev_c = c
+        prev_close = k == 4 to i64 and (c == 41 to i64 or c == 93 to i64)
+        prev_off = ts
+        prev_len = p - ts
 // the transform
 
 fn fmt_transform(src as String) as String:
@@ -684,7 +906,7 @@ fn fmt_transform(src as String) as String:
             else:
                 break
         if ce > lw:
-            __fmt_out_range(ref out, data, lw, ce - lw)
+            __fmt_space_emit(data, lw, ce, ref out)
         (deref out).append_char(10 to u8)
         li = li + 1 to i64
 
