@@ -786,6 +786,200 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
         prev_close = k == 4 to i64 and (c == 41 to i64 or c == 93 to i64)
         prev_off = ts
         prev_len = p - ts
+// ── parameter-list wrapping (spec §7.1) ────────────────────────────────
+// Long fn signatures (> 100 columns) break to one parameter per line
+// at indent+4, with a trailing comma (the grammar accepts it). The
+// decision runs on the space-normalized scratch text, so it composes
+// with the §3.3 spacing pass; fixed-point because broken signature
+// lines (header `fn x(`, param lines, `)`-closer) never re-qualify.
+
+// is w a fn-signature modifier word?
+fn __fmt_is_mod(data as ptr[u8], off as i64, len as i64) as bool:
+    let b as u8 = deref ((data to usize + off) to ptr[u8])
+    if b == 112 to u8:
+        return __fmt_kw_eq(data, off, len, "public" to cstr) or __fmt_kw_eq(data, off, len, "private" to cstr)
+    if b == 105 to u8:
+        return __fmt_kw_eq(data, off, len, "inline" to cstr)
+    if b == 115 to u8:
+        return __fmt_kw_eq(data, off, len, "static" to cstr)
+    if b == 101 to u8:
+        return __fmt_kw_eq(data, off, len, "extern" to cstr)
+    if b == 97 to u8:
+        return __fmt_kw_eq(data, off, len, "abstract" to cstr) or __fmt_kw_eq(data, off, len, "async" to cstr) or __fmt_kw_eq(data, off, len, "atomic" to cstr)
+    if b == 102 to u8:
+        return __fmt_kw_eq(data, off, len, "final" to cstr)
+    if b == 118 to u8:
+        return __fmt_kw_eq(data, off, len, "volatile" to cstr)
+    return False
+
+fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[StringBuilder]) as bool:
+    // header word walk: modifiers* fn NAME [Generics]? then '('
+    var p as i64 = 0 to i64
+    var saw_fn as bool = False
+    var name_seen as bool = False
+    var p1 as i64 = -1 to i64
+    while p < slen:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if b == 32 to u8 or b == 9 to u8:
+            p = p + 1 to i64
+            continue
+        if (b >= 97 to u8 and b <= 122 to u8) or (b >= 65 to u8 and b <= 90 to u8) or b == 95 to u8:
+            var q as i64 = p
+            while q < slen:
+                let wb as u8 = deref ((data to usize + q) to ptr[u8])
+                if (wb >= 97 to u8 and wb <= 122 to u8) or (wb >= 65 to u8 and wb <= 90 to u8) or (wb >= 48 to u8 and wb <= 57 to u8) or wb == 95 to u8:
+                    q = q + 1 to i64
+                else:
+                    break
+            if saw_fn and not name_seen:
+                name_seen = True
+            elif not saw_fn and not name_seen:
+                if __fmt_kw_eq(data, p, q - p, "fn" to cstr):
+                    saw_fn = True
+                elif __fmt_is_mod(data, p, q - p):
+                    pass
+                else:
+                    return False
+            else:
+                return False
+            p = q
+            continue
+        if b == 40 to u8:
+            if not name_seen:
+                return False
+            p1 = p
+            break
+        if b == 91 to u8:
+            if not name_seen:
+                return False
+            var d as i64 = 1 to i64
+            p = p + 1 to i64
+            while p < slen and d > 0 to i64:
+                let gb as u8 = deref ((data to usize + p) to ptr[u8])
+                if gb == 91 to u8:
+                    d = d + 1 to i64
+                elif gb == 93 to u8:
+                    d = d - 1 to i64
+                p = p + 1 to i64
+            continue
+        return False
+    // locate the matching ')' (string-safe); bail on an inline comment
+    var p2 as i64 = -1 to i64
+    var r as i64 = p1 + 1 to i64
+    var depth as i64 = 1 to i64
+    var in_str as bool = False
+    while r < slen:
+        let rb as u8 = deref ((data to usize + r) to ptr[u8])
+        if in_str:
+            if rb == 92 to u8:
+                r = r + 2 to i64
+                continue
+            if rb == 34 to u8:
+                in_str = False
+            r = r + 1 to i64
+            continue
+        if rb == 34 to u8:
+            in_str = True
+        elif rb == 47 to u8 and r + 1 to i64 < slen and deref ((data to usize + (r + 1 to i64)) to ptr[u8]) == 47 to u8:
+            // `//` comment inside the parameter list: leave the line alone
+            return False
+        elif rb == 40 to u8:
+            depth = depth + 1 to i64
+        elif rb == 41 to u8:
+            depth = depth - 1 to i64
+            if depth == 0 to i64:
+                p2 = r
+                break
+        r = r + 1 to i64
+    if p2 < 0 to i64:
+        return False
+    // split the parameter text [p1+1, p2) at top-level commas; paren
+    // AND bracket depth are tracked so `Map[i32, String]` stays intact
+    var starts as List[i64] = List[i64]()
+    var lens as List[i64] = List[i64]()
+    var seg as i64 = p1 + 1 to i64
+    var bd as i64 = 0 to i64
+    depth = 1 to i64
+    in_str = False
+    var cur as i64 = p1 + 1 to i64
+    while cur < p2:
+        let sb as u8 = deref ((data to usize + cur) to ptr[u8])
+        if in_str:
+            if sb == 92 to u8:
+                cur = cur + 2 to i64
+                continue
+            if sb == 34 to u8:
+                in_str = False
+            cur = cur + 1 to i64
+            continue
+        if sb == 34 to u8:
+            in_str = True
+        elif sb == 91 to u8:
+            bd = bd + 1 to i64
+        elif sb == 93 to u8:
+            if bd > 0 to i64:
+                bd = bd - 1 to i64
+        elif sb == 40 to u8:
+            depth = depth + 1 to i64
+        elif sb == 41 to u8:
+            depth = depth - 1 to i64
+        elif sb == 44 to u8 and depth == 1 to i64 and bd == 0 to i64:
+            var pe as i64 = cur
+            while pe > seg:
+                let pb as u8 = deref ((data to usize + (pe - 1 to i64)) to ptr[u8])
+                if pb == 32 to u8 or pb == 9 to u8:
+                    pe = pe - 1 to i64
+                else:
+                    break
+            if pe > seg:
+                starts.append(seg)
+                lens.append(pe - seg)
+            seg = cur + 1 to i64
+            while seg < p2:
+                let lsb as u8 = deref ((data to usize + seg) to ptr[u8])
+                if lsb == 32 to u8 or lsb == 9 to u8:
+                    seg = seg + 1 to i64
+                else:
+                    break
+        cur = cur + 1 to i64
+    // final piece runs up to the closing paren (rtrim; skips empties
+    // such as a trailing comma already present in the source)
+    var pe2 as i64 = p2
+    while pe2 > seg:
+        let q2b as u8 = deref ((data to usize + (pe2 - 1 to i64)) to ptr[u8])
+        if q2b == 32 to u8 or q2b == 9 to u8:
+            pe2 = pe2 - 1 to i64
+        else:
+            break
+    var ls2 as i64 = seg
+    while ls2 < pe2:
+        let l2b as u8 = deref ((data to usize + ls2) to ptr[u8])
+        if l2b == 32 to u8 or l2b == 9 to u8:
+            ls2 = ls2 + 1 to i64
+        else:
+            break
+    if pe2 > ls2:
+        starts.append(ls2)
+        lens.append(pe2 - ls2)
+    let ncnt as i64 = starts.length() to i64
+    if ncnt < 2 to i64:
+        return False
+    // emit: header through '(' stays with the already-emitted indent,
+    // then one param per line at indent+4 with a trailing comma, then
+    // ')' + return-type tail back at the base indent
+    __fmt_out_range(out, data, 0 to i64, p1 + 1 to i64)
+    (deref out).append_char(10 to u8)
+    var pi as i64 = 0 to i64
+    while pi < ncnt:
+        __fmt_out_spaces(out, ind_w + 4 to i64)
+        __fmt_out_range(out, data, starts[pi], lens[pi])
+        (deref out).append_char(44 to u8)
+        (deref out).append_char(10 to u8)
+        pi = pi + 1 to i64
+    __fmt_out_spaces(out, ind_w)
+    __fmt_out_range(out, data, p2, slen - p2)
+    return True
+
 // the transform
 
 fn fmt_transform(src as String) as String:
@@ -906,8 +1100,27 @@ fn fmt_transform(src as String) as String:
             else:
                 break
         if ce > lw:
-            __fmt_space_emit(data, lw, ce, ref out)
-        (deref out).append_char(10 to u8)
+            var scratch as StringBuilder = StringBuilder.make()
+            __fmt_space_emit(data, lw, ce, ref scratch)
+            let slen as i64 = (deref scratch).len to i64
+            var ind_w as i64 = 0 to i64
+            var hq2 as i64 = s
+            while hq2 < lw:
+                let hqb2 as u8 = deref ((data to usize + hq2) to ptr[u8])
+                if hqb2 == 9 to u8:
+                    ind_w = ind_w + 4 to i64
+                else:
+                    ind_w = ind_w + 1 to i64
+                hq2 = hq2 + 1 to i64
+            var wrapped as bool = False
+            if ind_w + slen > 100 to i64:
+                wrapped = __fmt_wrap_fn_sig((deref scratch).buffer, slen, ind_w, ref out)
+            if not wrapped:
+                __fmt_out_range(ref out, (deref scratch).buffer, 0 to i64, slen)
+            (deref out).append_char(10 to u8)
+            (deref scratch).deinit()
+        else:
+            (deref out).append_char(10 to u8)
         li = li + 1 to i64
 
     if run_first >= 0 to i64:
