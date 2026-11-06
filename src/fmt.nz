@@ -424,6 +424,146 @@ fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], 
         else:
             (deref line_lws).append(cur_lws)
 
+// ── vertical rhythm: blank-run policy (spec §4) ────────────────────────
+// Each blank run's emitted size is a deterministic function of the
+// surrounding code lines, so fmt∘fmt == fmt holds. Multi-line-string
+// blanks are verbatim (handled before this policy runs).
+
+fn __fmt_line_linkish(data as ptr[u8], lw as i64, e as i64) as bool:
+    // `link "..."` counts as an import-tier line for blank policy
+    if e - lw < 5 to i64:
+        return False
+    if deref ((data to usize + lw) to ptr[u8]) != 108 to u8:
+        return False
+    if deref ((data to usize + (lw + 1 to i64)) to ptr[u8]) != 105 to u8:
+        return False
+    if deref ((data to usize + (lw + 2 to i64)) to ptr[u8]) != 110 to u8:
+        return False
+    if deref ((data to usize + (lw + 3 to i64)) to ptr[u8]) != 107 to u8:
+        return False
+    return deref ((data to usize + (lw + 4 to i64)) to ptr[u8]) == 32 to u8
+
+// last code byte of a line (comments stripped, string-aware) == ':'?
+fn __fmt_line_ends_colon(data as ptr[u8], lw as i64, e as i64) as bool:
+    var p as i64 = lw
+    var st as i64 = 0 to i64
+    var last as i64 = -1 to i64
+    while p < e:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if st != 0 to i64:
+            if b == 92 to u8 and p + 1 to i64 < e:
+                p = p + 2 to i64
+                continue
+            if b == st to u8:
+                st = 0 to i64
+            p = p + 1 to i64
+            continue
+        if b == 34 to u8 or b == 39 to u8:
+            st = b to i64
+            last = p
+            p = p + 1 to i64
+            continue
+        if b == 47 to u8 and p + 1 to i64 < e and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 47 to u8:
+            break
+        if b != 32 to u8 and b != 9 to u8 and b != 13 to u8:
+            last = p
+        p = p + 1 to i64
+    if last < 0 to i64:
+        return False
+    return deref ((data to usize + last) to ptr[u8]) == 58 to u8
+
+// does the line's first word start a definition? (used to keep exactly
+// 1 blank before method/field-group definitions at dedent boundaries)
+fn __fmt_word_at(data as ptr[u8], lw as i64, e as i64, w as cstr) as bool:
+    var p as i64 = lw
+    var q as i64 = 0 to i64
+    while q < 32 to i64:
+        let wb as u8 = deref ((w to usize + q) to ptr[u8])
+        if wb == 0 to u8:
+            break
+        if p >= e or deref ((data to usize + p) to ptr[u8]) != wb:
+            return False
+        p = p + 1 to i64
+        q = q + 1 to i64
+    if p < e:
+        let nb as u8 = deref ((data to usize + p) to ptr[u8])
+        if (nb >= 97 to u8 and nb <= 122 to u8) or (nb >= 65 to u8 and nb <= 90 to u8) or (nb >= 48 to u8 and nb <= 57 to u8) or nb == 95 to u8:
+            return False
+    return True
+
+fn __fmt_next_starts_def(data as ptr[u8], lw as i64, e as i64) as bool:
+    if lw >= e:
+        return False
+    let b as u8 = deref ((data to usize + lw) to ptr[u8])
+    if b == 102 to u8:
+        return __fmt_word_at(data, lw, e, "fn" to cstr)
+    if b == 112 to u8:
+        return __fmt_word_at(data, lw, e, "public" to cstr)
+    if b == 115 to u8:
+        return __fmt_word_at(data, lw, e, "struct" to cstr) or __fmt_word_at(data, lw, e, "static" to cstr)
+    if b == 101 to u8:
+        return __fmt_word_at(data, lw, e, "enum" to cstr) or __fmt_word_at(data, lw, e, "extern" to cstr)
+    if b == 99 to u8:
+        return __fmt_word_at(data, lw, e, "class" to cstr) or __fmt_word_at(data, lw, e, "const" to cstr)
+    if b == 105 to u8:
+        return __fmt_word_at(data, lw, e, "interface" to cstr) or __fmt_word_at(data, lw, e, "impl" to cstr) or __fmt_word_at(data, lw, e, "inline" to cstr)
+    if b == 116 to u8:
+        return __fmt_word_at(data, lw, e, "trait" to cstr) or __fmt_word_at(data, lw, e, "type" to cstr)
+    if b == 117 to u8:
+        return __fmt_word_at(data, lw, e, "union" to cstr)
+    return False
+
+// cap for the blank run starting at `li` (length run_len). Exact caps:
+// 1 after a banner; 1 between import/link lines; 2 before a col-0 line;
+// 0 at dedents and right after a block introducer (prev ends ':');
+// else min(run, 1). File-start/end runs keep the old <= 2 behavior.
+fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], line_vis as List[i64], line_banner as List[i64], li as i64, line_count as i64, run_len as i64) as i64:
+    var lim as i64 = run_len
+    if lim > 2 to i64:
+        lim = 2 to i64
+    var pi as i64 = li - 1 to i64
+    var found_p as bool = False
+    while pi >= 0 to i64:
+        if line_vis[pi] == 1 to i64:
+            break
+        if line_lws[pi] < line_ends[pi]:
+            found_p = True
+            break
+        pi = pi - 1 to i64
+    var ni as i64 = li + run_len
+    var found_n as bool = False
+    while ni < line_count:
+        if line_vis[ni] == 1 to i64:
+            break
+        if line_lws[ni] < line_ends[ni]:
+            found_n = True
+            break
+        ni = ni + 1 to i64
+    if not found_p or not found_n:
+        return lim
+    if line_banner[pi] == 1 to i64:
+        return 1 to i64
+    var d1 as i64 = 0 to i64
+    var d2 as i64 = 0 to i64
+    var d3 as i64 = 0 to i64
+    var imp_p as bool = __fmt_import_kind(data, line_lws[pi], line_ends[pi], ref d1, ref d2, ref d3) != 0 to i64 or __fmt_line_linkish(data, line_lws[pi], line_ends[pi])
+    var imp_n as bool = __fmt_import_kind(data, line_lws[ni], line_ends[ni], ref d1, ref d2, ref d3) != 0 to i64 or __fmt_line_linkish(data, line_lws[ni], line_ends[ni])
+    if imp_p and imp_n:
+        return 1 to i64
+    let ip as i64 = line_lws[pi] - line_starts[pi]
+    let inz as i64 = line_lws[ni] - line_starts[ni]
+    if inz == 0 to i64:
+        return 2 to i64
+    if inz < ip:
+        if __fmt_next_starts_def(data, line_lws[ni], line_ends[ni]):
+            return 1 to i64
+        return 0 to i64
+    if inz > ip and __fmt_line_ends_colon(data, line_lws[pi], line_ends[pi]):
+        return 0 to i64
+    if lim > 1 to i64:
+        lim = 1 to i64
+    return lim
+
 // the transform
 
 fn fmt_transform(src as String) as String:
@@ -442,7 +582,6 @@ fn fmt_transform(src as String) as String:
 
     var out as StringBuilder = StringBuilder.make()
 
-    var blanks_out as i64 = 0 to i64
     var run_first as i64 = -1 to i64
     var run_koff as List[i64] = List[i64]()
     var run_klen as List[i64] = List[i64]()
@@ -499,20 +638,25 @@ fn fmt_transform(src as String) as String:
                     (deref out).append_slice("─" to ptr[u8], 3 to usize)
                     col = col + 1 to i64
                 (deref out).append_char(10 to u8)
-                blanks_out = 0 to i64
                 li = li + 1 to i64
                 continue
 
         if is_blank:
             if is_vis:
                 (deref out).append_char(10 to u8)
-            elif blanks_out < 2 to i64:
+                li = li + 1 to i64
+                continue
+            var re as i64 = li + 1 to i64
+            while re < line_count and line_vis[re] == 0 to i64 and line_lws[re] >= line_ends[re]:
+                re = re + 1 to i64
+            let run_len as i64 = re - li
+            let cap as i64 = __fmt_blank_cap(data, line_starts, line_ends, line_lws, line_vis, line_banner, li, line_count, run_len)
+            var bk as i64 = 0 to i64
+            while bk < cap:
                 (deref out).append_char(10 to u8)
-                blanks_out = blanks_out + 1 to i64
-            li = li + 1 to i64
+                bk = bk + 1 to i64
+            li = re
             continue
-
-        blanks_out = 0 to i64
 
         if is_vis:
             __fmt_out_range(ref out, data, s, e - s)
