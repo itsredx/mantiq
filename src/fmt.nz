@@ -359,7 +359,10 @@ fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], 
             else:
                 (deref line_vis).append(0 to i64)
             (deref line_banner).append(banner_hit)
-            if cur_lws < 0 to i64 or lws_only:
+            if line_start_st != 0 to i64:
+                // in-string line: lw = start so is_blank == truly empty
+                (deref line_lws).append(line_start)
+            elif cur_lws < 0 to i64 or lws_only:
                 (deref line_lws).append(i to i64)
             else:
                 (deref line_lws).append(cur_lws)
@@ -413,7 +416,10 @@ fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], 
         else:
             (deref line_vis).append(0 to i64)
         (deref line_banner).append(banner_hit)
-        if cur_lws < 0 to i64 or lws_only:
+        if line_start_st != 0 to i64:
+            // in-string line: lw = start so is_blank == truly empty
+            (deref line_lws).append(line_start)
+        elif cur_lws < 0 to i64 or lws_only:
             (deref line_lws).append(n to i64)
         else:
             (deref line_lws).append(cur_lws)
