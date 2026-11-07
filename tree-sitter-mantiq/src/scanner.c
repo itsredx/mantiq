@@ -8,6 +8,7 @@ enum TokenType {
     INDENT,
     DEDENT,
     NEWLINE,
+    DOT_NEWLINE,
 };
 
 typedef struct {
@@ -102,6 +103,25 @@ bool tree_sitter_mantiq_external_scanner_scan(void *payload, TSLexer *lexer, con
 
     if (found_newline || start_column == 0) {
         scanner->current_line_indent = indent;
+    }
+
+    // Expression continuation: a line whose first content character is
+    // '.' is a fluent-call chain broken before the dot (spec §7.2).
+    // When the parser state can accept a member continuation, emit
+    // DOT_NEWLINE for the newline + indentation consumed above; the
+    // '.' itself is consumed into the token, which stands in for the
+    // member-access dot. The valid_symbols gate keeps this inert in
+    // every other context, e.g. '...' spread items inside object
+    // literals, which also begin a line with a dot but are not member
+    // continuations. Emitting nothing on the non-member path preserves
+    // the previous INDENT/DEDENT/NEWLINE decisions verbatim.
+    if (found_newline && lexer->lookahead == '.' && valid_symbols[DOT_NEWLINE]) {
+        // the '.' is consumed into the DOT_NEWLINE token, which stands
+        // in for the member-access dot of the continuation line
+        advance(lexer);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = DOT_NEWLINE;
+        return true;
     }
 
     uint16_t current_indent = scanner->indent_stack[scanner->stack_size - 1];

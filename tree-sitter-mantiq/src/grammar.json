@@ -3275,6 +3275,10 @@
               {
                 "type": "STRING",
                 "value": "?."
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_dot_newline"
               }
             ]
           },
@@ -6794,6 +6798,10 @@
     {
       "type": "SYMBOL",
       "name": "_newline"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_dot_newline"
     }
   ],
   "inline": [],

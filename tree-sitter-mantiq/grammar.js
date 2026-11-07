@@ -11,6 +11,7 @@ module.exports = grammar({
     $._indent,
     $._dedent,
     $._newline,
+    $._dot_newline,
   ],
 
   conflicts: $ => [
@@ -498,7 +499,7 @@ module.exports = grammar({
 
     member_expression: $ => prec.left(17, seq(
       field('object', $._call),
-      choice('.', '?.'),
+      choice('.', '?.', $._dot_newline),
       optional($._nl),
       field('property', $.identifier)
     )),
