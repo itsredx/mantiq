@@ -1257,12 +1257,84 @@ headers, parameter lines and `)`-closer lines cannot re-qualify —
 fixed-point by construction. 25 signatures in the real compiler
 sources (codegen.nz, sema.nz) exercise the path.
 
+### Grammar prerequisite: leading-dot expression continuation (`2d6f756`)
+Spec §7.2's break-before-dot shape requires the parser to accept a
+member access whose dot opens a line. Both grammars rejected it (E0101
+at each leading dot; the trailing-dot form parses), so the feature
+landed in the grammar first:
+
+- New external token `_dot_newline` (scanner enum `DOT_NEWLINE`,
+  index 3): emitted only when the scanner consumed a newline +
+  indentation AND the next content char is '.' AND the parser state
+  accepts a member continuation (`valid_symbols` gate). The '.' is
+  consumed into the token, which stands in for the member-access dot;
+  `member_expression` now chooses between '.', '?.' and
+  `_dot_newline`.
+- The `valid_symbols` gate keeps the token inert in every other
+  context — notably `...spread` items inside object literals
+  (`research/formatter_example.mq`), whose lines also begin with a
+  dot but are not member continuations.
+- Parser lore that forced a real token: `_newline` is external-only —
+  the internal lexer cannot skip `\n`, so a scanner false-return after
+  consuming whitespace does NOT continue the expression (it falls
+  into error-recovery gluing). Only a real token works.
+- Regenerated `parser.c`/`grammar.json`/`node-types.json` (CLI 0.27.0,
+  LANGUAGE_VERSION 15 — same ABI as before); `tree_sitter/array.h`
+  updated as a generate side effect.
+- Runtime artifacts rebuilt. `libtree-sitter-mantiq.so` is now
+  SELF-CONTAINED: the tree-sitter v0.25.10 runtime compiled in via
+  `lib.c` (which aggregates every runtime `.c` except `alloc.c` —
+  that one double-defines the allocator symbols), instead of
+  depending on the repo's `libtree-sitter.so.0` (whose export set
+  lacks `ts_language_abi_version`, and whose split shape breaks any
+  future `-ltree-sitter-mantiq` link because the grammar `.so` no
+  longer carries `ts_*`). Keeping the `.so` self-contained leaves the
+  compiler link lines untouched. `libtree-sitter-mantiq.a` rebuilt
+  with REAL wasm32-wasi objects: the old archive held ELF x86-64
+  members, which wasm-ld skips ("archive member is neither Wasm
+  object file nor LLVM bitcode") — the wasm link path was silently
+  broken at HEAD; the new archive actually links, verified by running
+  a leading-dot parse inside a wasm module under node.
+- Zero flips: parse trees identical modulo positions across the
+  50-file suite (6 files carry pre-existing ERROR counts, identical
+  both sides); check-status sweep 0 flips (3 files carry pre-existing
+  E0404s, identical both sides); chain gate 50/50 + promotion.
+
+### Phase D: method-chain wrapping (§7.2) (`e99a985`)
+`__fmt_wrap_chain` runs in the emit path when §7.1 wrapping did not
+apply: if indent + content > 100 columns, the line breaks before each
+top-level method dot, one `.method(...)` link per line at indent+4
+(no trailing comma), the head staying at the base indent. A split dot
+must sit at paren AND bracket depth zero, follow a plausible receiver
+(ident char, ')' ']' or a string literal) and open a `name [G]? (...)`
+call link — the balanced-bracket walk tolerates the horizontal spaces
+the §3.3 keyword spacing emits (`union (`). `//` comments at line
+level bail out; `?.` chains never split at the `?.` itself; field-only
+tails stay glued to their call piece. Fixed-point: wrapped pieces each
+start with '.', so the head is empty on re-entry, and single-link
+lines never qualify (≥2 split-dot gate).
+
+Validation: shape battery (plain/return/keyword-space/generic-bracket
+/`?.`/field/single-link/comment-bail) parses 0 errors under the new
+grammar; battery + full 50-file corpus fmt(fmt(x)) == fmt(x);
+check-status flip sweep 0 flips (same-dir siblings); runtime
+equivalence on test_match/test_std/test_closures_lambdas byte-equal;
+chain gate 50/50 + promotion.
+
+Old-builder bug found while landing: `not` applied to a parenthesized
+short-circuit boolean chain lowers as `icmp eq i8` on an i1 alloca
+load — invalid IR (selfhost build failure). `not` on a simple bool
+var is fine; the single occurrence was rewritten to a named bool
+before the gate.
+
 ### Documented deviations from `research/formatter-spec.md`
 - §3.2: the 88-column soft target is NOT implemented; only the hard
   100-column limit. Continuation pieces longer than 100 are emitted
   as-is rather than re-broken; long `if`/binary lines are not wrapped
-  (§7.1 covers fn signatures only; §7.2 method-chain breaking is a
-  later phase).
+  (§7.1 covers fn signatures, §7.2 top-level method-call chains).
+- §7.2 pre-existing quirk: §3.3 keyword spacing emits a space between
+  a keyword-named method and its paren (`union (`); the chain wrapper
+  tolerates it, but the spacing itself is unchanged here.
 - §4: no blank run is EVER inserted to reach a cap; runs are only
   compressed (2 from N≥2 pre-existing or absent; ≤1 in-body; 0 at
   plated dedents/block intros).
