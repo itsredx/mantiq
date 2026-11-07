@@ -1189,6 +1189,108 @@ fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Strin
         si = si + 1 to i64
     return True
 
+// ── canonical modifier order (spec §6.1.1) ─────────────────────────────
+// Modifiers precede `fn` as [access] [static] [extern|inline]
+// [volatile] [atomic] [async] [abstract] [final]. A line whose leading
+// words are modifiers followed by `fn` is reordered (stable); any
+// other line passes through untouched.
+
+fn __fmt_mod_rank(data as ptr[u8], off as i64, len as i64) as i64:
+    if __fmt_kw_eq(data, off, len, "public" to cstr):
+        return 0 to i64
+    if __fmt_kw_eq(data, off, len, "private" to cstr):
+        return 1 to i64
+    if __fmt_kw_eq(data, off, len, "protected" to cstr):
+        return 2 to i64
+    if __fmt_kw_eq(data, off, len, "static" to cstr):
+        return 3 to i64
+    if __fmt_kw_eq(data, off, len, "extern" to cstr):
+        return 4 to i64
+    if __fmt_kw_eq(data, off, len, "inline" to cstr):
+        return 5 to i64
+    if __fmt_kw_eq(data, off, len, "volatile" to cstr):
+        return 6 to i64
+    if __fmt_kw_eq(data, off, len, "atomic" to cstr):
+        return 7 to i64
+    if __fmt_kw_eq(data, off, len, "async" to cstr):
+        return 8 to i64
+    if __fmt_kw_eq(data, off, len, "abstract" to cstr):
+        return 9 to i64
+    if __fmt_kw_eq(data, off, len, "final" to cstr):
+        return 10 to i64
+    return -1 to i64
+
+// If the line [lw, ce) opens with modifier words followed by `fn`,
+// append the canonical reorder (single-space separated) plus the
+// verbatim remainder to `out` and return True. Returns False without
+// emitting when the line does not qualify.
+fn __fmt_mod_reorder(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuilder]) as bool:
+    var m_off as List[i64] = List[i64]()
+    var m_len as List[i64] = List[i64]()
+    var m_rank as List[i64] = List[i64]()
+    var p as i64 = lw
+    var fn_start as i64 = -1 to i64
+    var fn_end as i64 = -1 to i64
+    var saw_mod as bool = False
+    while p < ce:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        let word_start as bool = (b >= 65 to u8 and b <= 90 to u8) or (b >= 97 to u8 and b <= 122 to u8) or b == 95 to u8
+        if not word_start:
+            return False
+        var we as i64 = p
+        while we < ce:
+            let wb as u8 = deref ((data to usize + we) to ptr[u8])
+            if (wb >= 65 to u8 and wb <= 90 to u8) or (wb >= 97 to u8 and wb <= 122 to u8) or (wb >= 48 to u8 and wb <= 57 to u8) or wb == 95 to u8:
+                we = we + 1 to i64
+            else:
+                break
+        let wlen as i64 = we - p
+        if __fmt_kw_eq(data, p, wlen, "fn" to cstr):
+            fn_start = p
+            fn_end = we
+            break
+        let rank as i64 = __fmt_mod_rank(data, p, wlen)
+        if rank < 0 to i64:
+            return False
+        saw_mod = True
+        m_off.append(p)
+        m_len.append(wlen)
+        m_rank.append(rank)
+        p = we
+        while p < ce and deref ((data to usize + p) to ptr[u8]) == 32 to u8:
+            p = p + 1 to i64
+    if not saw_mod or fn_end < 0 to i64:
+        return False
+    // stable insertion sort by rank
+    let mcnt as i64 = m_rank.length() to i64
+    var order as List[i64] = List[i64]()
+    var oi as i64 = 0 to i64
+    while oi < mcnt:
+        order.append(oi)
+        oi = oi + 1 to i64
+    var i as i64 = 1 to i64
+    while i < mcnt:
+        var j as i64 = i
+        while j > 0 to i64:
+            if m_rank[order[j]] < m_rank[order[j - 1]]:
+                let tmp as i64 = order[j]
+                order[j] = order[j - 1]
+                order[j - 1] = tmp
+                j = j - 1 to i64
+            else:
+                break
+        i = i + 1 to i64
+    var k as i64 = 0 to i64
+    while k < mcnt:
+        if k > 0 to i64:
+            (deref out).append_char(32 to u8)
+        __fmt_out_range(out, data, m_off[order[k]], m_len[order[k]])
+        k = k + 1 to i64
+    (deref out).append_char(32 to u8)
+    // remainder starts AT the `fn` token (kept verbatim through the end)
+    __fmt_out_range(out, data, fn_start, ce - fn_start)
+    return True
+
 // the transform
 
 fn fmt_transform(src as String, max_cols as i64) as String:
@@ -1312,8 +1414,18 @@ fn fmt_transform(src as String, max_cols as i64) as String:
             else:
                 break
         if ce > lw:
+            // §6.1.1: leading modifiers before `fn` reorder canonically;
+            // the spacing/wrapping passes then run on the reordered text
+            var src_data as ptr[u8] = data
+            var src_lw as i64 = lw
+            var src_len as i64 = ce - lw
+            var mod_sb as StringBuilder = StringBuilder.make()
+            if __fmt_mod_reorder(data, lw, ce, ref mod_sb):
+                src_data = (deref mod_sb).buffer
+                src_lw = 0 to i64
+                src_len = (deref mod_sb).len to i64
             var scratch as StringBuilder = StringBuilder.make()
-            __fmt_space_emit(data, lw, ce, ref scratch)
+            __fmt_space_emit(src_data, src_lw, src_lw + src_len, ref scratch)
             let slen as i64 = (deref scratch).len to i64
             var ind_w as i64 = 0 to i64
             var hq2 as i64 = s
@@ -1333,6 +1445,7 @@ fn fmt_transform(src as String, max_cols as i64) as String:
                 __fmt_out_range(ref out, (deref scratch).buffer, 0 to i64, slen)
             (deref out).append_char(10 to u8)
             (deref scratch).deinit()
+            (deref mod_sb).deinit()
         else:
             (deref out).append_char(10 to u8)
         li = li + 1 to i64
