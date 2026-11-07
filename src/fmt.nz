@@ -980,6 +980,149 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
     __fmt_out_range(out, data, p2, slen - p2)
     return True
 
+// ── method-chain wrapping (spec §7.2) ──────────────────────────────────
+// Long fluent-call chains (> 100 columns) break before each top-level
+// method dot at indent+4 (the spec's break-before-dot shape). The
+// decision runs on the space-normalized scratch text, so it composes
+// with the §3.3 spacing pass. A split dot must sit at depth zero
+// (paren AND bracket), follow a plausible receiver (ident char, ')',
+// ']' or a string literal) and open a `name [G]? (...)` call link.
+// Fixed-point because wrapped pieces each start with '.', so the head
+// is empty on re-entry, and single-link lines never qualify.
+
+fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[StringBuilder]) as bool:
+    // collect top-level method-call split dots (string-safe)
+    var starts as List[i64] = List[i64]()
+    var pd as i64 = 0 to i64
+    var bd as i64 = 0 to i64
+    var in_str as bool = False
+    var p as i64 = 0 to i64
+    while p < slen:
+        let b as u8 = deref ((data to usize + p) to ptr[u8])
+        if in_str:
+            if b == 92 to u8:
+                p = p + 2 to i64
+                continue
+            if b == 34 to u8:
+                in_str = False
+            p = p + 1 to i64
+            continue
+        if b == 34 to u8:
+            in_str = True
+        elif b == 47 to u8 and p + 1 to i64 < slen and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 47 to u8 and pd == 0 to i64 and bd == 0 to i64:
+            // `//` comment at line level: leave the line alone
+            return False
+        elif b == 40 to u8:
+            pd = pd + 1 to i64
+        elif b == 41 to u8:
+            if pd > 0 to i64:
+                pd = pd - 1 to i64
+        elif b == 91 to u8:
+            bd = bd + 1 to i64
+        elif b == 93 to u8:
+            if bd > 0 to i64:
+                bd = bd - 1 to i64
+        elif b == 46 to u8 and pd == 0 to i64 and bd == 0 to i64:
+            // candidate split dot: must follow a receiver end and open a
+            // `name [G]? (...)` call link
+            if p + 1 to i64 >= slen:
+                p = p + 1 to i64
+                continue
+            let nb as u8 = deref ((data to usize + (p + 1 to i64)) to ptr[u8])
+            let nb_ok as bool = (nb >= 97 to u8 and nb <= 122 to u8) or (nb >= 65 to u8 and nb <= 90 to u8) or nb == 95 to u8
+            if not nb_ok:
+                p = p + 1 to i64
+                continue
+            // receiver check: previous non-space byte
+            var q as i64 = p
+            var prev as u8 = 0 to u8
+            while q > 0 to i64:
+                q = q - 1 to i64
+                let rb as u8 = deref ((data to usize + q) to ptr[u8])
+                if rb == 32 to u8 or rb == 9 to u8:
+                    continue
+                prev = rb
+                break
+            let recv_ok as bool = (prev >= 97 to u8 and prev <= 122 to u8) or (prev >= 65 to u8 and prev <= 90 to u8) or (prev >= 48 to u8 and prev <= 57 to u8) or prev == 95 to u8 or prev == 41 to u8 or prev == 93 to u8 or prev == 34 to u8
+            if not recv_ok:
+                p = p + 1 to i64
+                continue
+            // walk the link: ident chars, optional balanced [..] groups
+            // (spaces between the tokens are tolerated — §3.3 keyword
+            // spacing emits `name (`), then '('
+            var w as i64 = p + 1 to i64
+            while w < slen:
+                let wb as u8 = deref ((data to usize + w) to ptr[u8])
+                if (wb >= 97 to u8 and wb <= 122 to u8) or (wb >= 65 to u8 and wb <= 90 to u8) or (wb >= 48 to u8 and wb <= 57 to u8) or wb == 95 to u8:
+                    w = w + 1 to i64
+                else:
+                    break
+            var g as i64 = w
+            while g < slen:
+                let sgb as u8 = deref ((data to usize + g) to ptr[u8])
+                if sgb == 32 to u8 or sgb == 9 to u8:
+                    g = g + 1 to i64
+                else:
+                    break
+            var gd as i64 = 0 to i64
+            while g < slen:
+                let gb as u8 = deref ((data to usize + g) to ptr[u8])
+                if gb == 91 to u8:
+                    gd = gd + 1 to i64
+                elif gb == 93 to u8:
+                    gd = gd - 1 to i64
+                elif gd == 0 to i64:
+                    break
+                g = g + 1 to i64
+            while g < slen:
+                let sgb2 as u8 = deref ((data to usize + g) to ptr[u8])
+                if sgb2 == 32 to u8 or sgb2 == 9 to u8:
+                    g = g + 1 to i64
+                else:
+                    break
+            if g < slen and deref ((data to usize + g) to ptr[u8]) == 40 to u8:
+                starts.append(p)
+        p = p + 1 to i64
+    let ncnt as i64 = starts.length() to i64
+    if ncnt < 2 to i64:
+        return False
+    let h0 as i64 = starts[0]
+    // head must be non-empty (a line starting with '.' is already a
+    // broken continuation: fixed point)
+    if h0 == 0 to i64:
+        return False
+    var he as i64 = h0
+    while he > 0 to i64:
+        let hb as u8 = deref ((data to usize + (he - 1 to i64)) to ptr[u8])
+        if hb == 32 to u8 or hb == 9 to u8:
+            he = he - 1 to i64
+        else:
+            break
+    if he == 0 to i64:
+        return False
+    // emit: head stays with the already-emitted indent, then one
+    // `.method(...)` link per line at indent+4 (no trailing comma —
+    // the grammar's leading-dot member continuation)
+    __fmt_out_range(out, data, 0 to i64, he)
+    var si as i64 = 0 to i64
+    while si < ncnt:
+        var pe as i64 = 0 to i64
+        if si + 1 to i64 < ncnt:
+            pe = starts[si + 1 to i64]
+        else:
+            pe = slen
+        while pe > starts[si]:
+            let eb as u8 = deref ((data to usize + (pe - 1 to i64)) to ptr[u8])
+            if eb == 32 to u8 or eb == 9 to u8:
+                pe = pe - 1 to i64
+            else:
+                break
+        (deref out).append_char(10 to u8)
+        __fmt_out_spaces(out, ind_w + 4 to i64)
+        __fmt_out_range(out, data, starts[si], pe - starts[si])
+        si = si + 1 to i64
+    return True
+
 // the transform
 
 fn fmt_transform(src as String) as String:
@@ -1115,6 +1258,8 @@ fn fmt_transform(src as String) as String:
             var wrapped as bool = False
             if ind_w + slen > 100 to i64:
                 wrapped = __fmt_wrap_fn_sig((deref scratch).buffer, slen, ind_w, ref out)
+                if not wrapped:
+                    wrapped = __fmt_wrap_chain((deref scratch).buffer, slen, ind_w, ref out)
             if not wrapped:
                 __fmt_out_range(ref out, (deref scratch).buffer, 0 to i64, slen)
             (deref out).append_char(10 to u8)
