@@ -7,8 +7,11 @@
 //   trailing whitespace stripped (never inside string literals)
 //   3+ consecutive blank lines collapsed to 2
 //   `// ── Name ───...` banner lines re-padded to exactly column 80
-//   contiguous runs of import/from lines stably sorted by module path;
-//   from-lists rebuilt comma-space sorted (exotic forms passthrough)
+//   contiguous runs of import/from/link lines stably sorted by
+//   (tier, module path) per spec §4.4: tier 1 = std.*, tier 2 =
+//   `link "..."` externals, tier 3 = project-local; 1 blank line
+//   between tier groups; from-lists rebuilt comma-space sorted
+//   (exotic forms passthrough)
 //
 // Deliberately NOT in F1: full pretty-printing (Wadler-Lindig doc IR),
 // vertical blank-line rhythm (2-between top-levels etc.), operator
@@ -244,7 +247,41 @@ fn __fmt_import_kind(data as ptr[u8], lws as i64, e as i64, mod_off as ptr[i64],
                     return 2 to i64
             p = p + 1 to i64
         return 0 to i64
+    if b0 == 108 to u8:
+        // `link "path"` — tier-2 external C FFI (kind 3); the module
+        // key is the string interior, so link lines sort within their
+        // tier by library name (spec §4.4 tier 2)
+        let l1 as u8 = deref ((data to usize + (lws + 1 to i64)) to ptr[u8])
+        let l2 as u8 = deref ((data to usize + (lws + 2 to i64)) to ptr[u8])
+        let l3 as u8 = deref ((data to usize + (lws + 3 to i64)) to ptr[u8])
+        let l4 as u8 = deref ((data to usize + (lws + 4 to i64)) to ptr[u8])
+        if l1 == 105 to u8 and l2 == 110 to u8 and l3 == 107 to u8 and l4 == 32 to u8:
+            var lq as i64 = lws + 5 to i64
+            while lq < e and deref ((data to usize + lq) to ptr[u8]) == 32 to u8:
+                lq = lq + 1 to i64
+            if lq < e and deref ((data to usize + lq) to ptr[u8]) == 34 to u8:
+                var lq2 as i64 = lq + 1 to i64
+                while lq2 < e and deref ((data to usize + lq2) to ptr[u8]) != 34 to u8:
+                    lq2 = lq2 + 1 to i64
+                if lq2 < e:
+                    (deref mod_off) = lq + 1 to i64
+                    (deref mod_len) = lq2 - lq - 1 to i64
+                    (deref list_off) = -1 to i64
+                    return 3 to i64
+        return 0 to i64
     return 0 to i64
+
+// spec §4.4 tiers: 1 = std.* modules, 2 = `link "..."` externals,
+// 3 = everything else (project-local). Tagged imports (`import[c] x`)
+// are passthrough (kind 0) and never enter a run.
+
+fn __fmt_import_tier(data as ptr[u8], kind as i64, mod_off as i64, mod_len as i64) as i64:
+    if kind == 3 to i64:
+        return 2 to i64
+    if mod_len >= 3 to i64 and deref ((data to usize + mod_off) to ptr[u8]) == 115 to u8 and deref ((data to usize + (mod_off + 1 to i64)) to ptr[u8]) == 116 to u8 and deref ((data to usize + (mod_off + 2 to i64)) to ptr[u8]) == 100 to u8:
+        if mod_len == 3 to i64 or deref ((data to usize + (mod_off + 3 to i64)) to ptr[u8]) == 46 to u8:
+            return 1 to i64
+    return 3 to i64
 
 // right-trimmed length of [s, e)
 
@@ -311,14 +348,21 @@ fn __fmt_emit_import_line(data as ptr[u8], li as i64, line_starts as List[i64], 
             ce = ce - 1 to i64
         else:
             break
+    // kind 1 (import) emits through the spacing pass; kind 3 (link)
+    // emits verbatim — gluing the string to the keyword would break
+    // kind-3 recognition (`link ` + space) on the next pass
     if kind == 1 to i64:
         __fmt_space_emit(data, lw, ce, out)
+        (deref out).append_char(10 to u8)
+        return
+    if kind == 3 to i64:
+        __fmt_out_range(out, data, lw, ce - lw)
         (deref out).append_char(10 to u8)
         return
     // kind == 2: rebuilt below
     __fmt_emit_from_line(data, line_starts[li], lw, ce, mod_off, mod_len, list_off, out)
 
-fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[List[i64]], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder], first_li as i64):
+fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[List[i64]], run_kind as ptr[List[i64]], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder], first_li as i64):
     let cnt as i64 = (deref run_koff).length() to i64
     if cnt <= 0 to i64:
         return
@@ -327,22 +371,38 @@ fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[
     while oi < cnt:
         order.append(first_li + oi)
         oi = oi + 1 to i64
+    // stable insertion sort on (tier, module path): tier equality
+    // keeps the original relative order; within a tier the shorter-
+    // is-less module key orders the lines
     var i as i64 = 1 to i64
     while i < cnt:
         var j as i64 = i
         while j > 0 to i64:
             let idx_a as i64 = order[j]
             let idx_b as i64 = order[j - 1]
-            if __fmt_key_lt(data, (deref run_koff)[idx_a - first_li], (deref run_klen)[idx_a - first_li], (deref run_koff)[idx_b - first_li], (deref run_klen)[idx_b - first_li]):
+            let tier_a as i64 = __fmt_import_tier(data, (deref run_kind)[idx_a - first_li], (deref run_koff)[idx_a - first_li], (deref run_klen)[idx_a - first_li])
+            let tier_b as i64 = __fmt_import_tier(data, (deref run_kind)[idx_b - first_li], (deref run_koff)[idx_b - first_li], (deref run_klen)[idx_b - first_li])
+            var swap as bool = tier_a < tier_b
+            if tier_a == tier_b:
+                swap = __fmt_key_lt(data, (deref run_koff)[idx_a - first_li], (deref run_klen)[idx_a - first_li], (deref run_koff)[idx_b - first_li], (deref run_klen)[idx_b - first_li])
+            if swap:
                 order[j] = idx_b
                 order[j - 1] = idx_a
                 j = j - 1 to i64
             else:
                 break
         i = i + 1 to i64
+    // emit; exactly 1 blank line separates tier groups (never before
+    // the first or after the last line of the run)
     var k as i64 = 0 to i64
+    var prev_tier as i64 = -1 to i64
     while k < cnt:
-        __fmt_emit_import_line(data, order[k], line_starts, line_ends, line_lws, out)
+        let idx as i64 = order[k]
+        let tier as i64 = __fmt_import_tier(data, (deref run_kind)[idx - first_li], (deref run_koff)[idx - first_li], (deref run_klen)[idx - first_li])
+        if k > 0 to i64 and tier != prev_tier:
+            (deref out).append_char(10 to u8)
+        prev_tier = tier
+        __fmt_emit_import_line(data, idx, line_starts, line_ends, line_lws, out)
         k = k + 1 to i64
 
 // one import line: kind 1 emitted verbatim (trailing ws stripped),
@@ -1150,6 +1210,7 @@ fn fmt_transform(src as String, max_cols as i64) as String:
     var run_first as i64 = -1 to i64
     var run_koff as List[i64] = List[i64]()
     var run_klen as List[i64] = List[i64]()
+    var run_kind as List[i64] = List[i64]()
 
     let line_count as i64 = line_starts.length() to i64
     var li as i64 = 0 to i64
@@ -1168,16 +1229,18 @@ fn fmt_transform(src as String, max_cols as i64) as String:
             ikind = __fmt_import_kind(data, lw, e, ref mod_off, ref mod_len, ref list_off)
 
         if run_first >= 0 to i64 and ikind == 0 to i64:
-            __fmt_run_flush(data, ref run_koff, ref run_klen, line_starts, line_ends, line_lws, ref out, run_first)
+            __fmt_run_flush(data, ref run_koff, ref run_klen, ref run_kind, line_starts, line_ends, line_lws, ref out, run_first)
             run_first = -1 to i64
             run_koff = List[i64]()
             run_klen = List[i64]()
+            run_kind = List[i64]()
 
         if ikind != 0 to i64:
             if run_first < 0 to i64:
                 run_first = li
             run_koff.append(mod_off)
             run_klen.append(mod_len)
+            run_kind.append(ikind)
             li = li + 1 to i64
             continue
 
@@ -1275,7 +1338,7 @@ fn fmt_transform(src as String, max_cols as i64) as String:
         li = li + 1 to i64
 
     if run_first >= 0 to i64:
-        __fmt_run_flush(data, ref run_koff, ref run_klen, line_starts, line_ends, line_lws, ref out, run_first)
+        __fmt_run_flush(data, ref run_koff, ref run_klen, ref run_kind, line_starts, line_ends, line_lws, ref out, run_first)
         run_koff = List[i64]()
         run_klen = List[i64]()
 
