@@ -791,8 +791,9 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
         prev_off = ts
         prev_len = p - ts
 // ── parameter-list wrapping (spec §7.1) ────────────────────────────────
-// Long fn signatures (> 100 columns) break to one parameter per line
-// at indent+4, with a trailing comma (the grammar accepts it). The
+// Long fn signatures (> the configured column limit) break to one
+// parameter per line at indent+4, with a trailing comma (the grammar
+// accepts it). The
 // decision runs on the space-normalized scratch text, so it composes
 // with the §3.3 spacing pass; fixed-point because broken signature
 // lines (header `fn x(`, param lines, `)`-closer) never re-qualify.
@@ -985,9 +986,10 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
     return True
 
 // ── method-chain wrapping (spec §7.2) ──────────────────────────────────
-// Long fluent-call chains (> 100 columns) break before each top-level
-// method dot at indent+4 (the spec's break-before-dot shape). The
-// decision runs on the space-normalized scratch text, so it composes
+// Long fluent-call chains (> the configured column limit) break
+// before each top-level method dot at indent+4 (the spec's
+// break-before-dot shape). The decision runs on the space-normalized
+// scratch text, so it composes
 // with the §3.3 spacing pass. A split dot must sit at depth zero
 // (paren AND bracket), follow a plausible receiver (ident char, ')',
 // ']' or a string literal) and open a `name [G]? (...)` call link.
@@ -1129,7 +1131,7 @@ fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Strin
 
 // the transform
 
-fn fmt_transform(src as String) as String:
+fn fmt_transform(src as String, max_cols as i64) as String:
     extern fn memcpy(dst as ptr, src_p as ptr, n as i64) as ptr
     let data as ptr[u8] = (deref src).data
     if data == None to ptr[u8]:
@@ -1260,7 +1262,7 @@ fn fmt_transform(src as String) as String:
                     ind_w = ind_w + 1 to i64
                 hq2 = hq2 + 1 to i64
             var wrapped as bool = False
-            if ind_w + slen > 100 to i64:
+            if ind_w + slen > max_cols:
                 wrapped = __fmt_wrap_fn_sig((deref scratch).buffer, slen, ind_w, ref out)
                 if not wrapped:
                     wrapped = __fmt_wrap_chain((deref scratch).buffer, slen, ind_w, ref out)

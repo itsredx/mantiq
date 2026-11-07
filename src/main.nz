@@ -1159,6 +1159,95 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     return argv[idx]
 
+// ── fmt CLI helpers (spec §8) ───────────────────────────────────────────
+// does p end in .nz or .mq?
+fn __fmt_path_is_src(p as cstr) as bool:
+    let pl as usize = strlen(p)
+    if pl < 3 to usize:
+        return False
+    if strcmp((p to usize + (pl - 3 to usize)) to cstr, ".nz" to cstr) == 0:
+        return True
+    if strcmp((p to usize + (pl - 3 to usize)) to cstr, ".mq" to cstr) == 0:
+        return True
+    return False
+
+// collect every .nz/.mq file under path into out (a malloc'd ptr[cstr]
+// array); directories are probed with opendir, recursion filters by
+// extension, and explicitly given non-directory paths pass through
+// untouched (count grows; caller owns the cap)
+fn __fmt_collect_src(path as cstr, out as ptr[cstr], count as ptr[i64], cap as i64):
+    extern fn opendir(path as cstr) as ptr
+    extern fn readdir(d as ptr) as ptr
+    extern fn closedir(d as ptr) as i32
+    extern fn malloc(sz as i64) as ptr
+    extern fn memcpy(dst as ptr, src_p as ptr, n as usize) as ptr
+    let d as ptr = opendir(path)
+    if d != None to ptr:
+        var ent as ptr = readdir(d)
+        while ent != None to ptr:
+            // glibc x86-64 dirent: d_name sits at offset 19
+            let name as cstr = (ent to usize + 19 to usize) to cstr
+            let nb as u8 = deref (name to ptr[u8])
+            if nb != 46 to u8:
+                let pl as usize = strlen(path)
+                let nl as usize = strlen(name)
+                let cp as ptr[u8] = malloc((pl + nl + 2 to usize) to i64) to ptr[u8]
+                memcpy(cp to ptr, path to ptr, pl)
+                deref ((cp to usize + pl) to ptr[u8]) = 47 to u8
+                memcpy((cp to usize + pl + 1 to usize) to ptr, name to ptr, nl)
+                deref ((cp to usize + pl + 1 to usize + nl) to ptr[u8]) = 0 to u8
+                let child as cstr = cp to cstr
+                let dd as ptr = opendir(child)
+                if dd != None to ptr:
+                    closedir(dd)
+                    if (deref count) < cap:
+                        __fmt_collect_src(child, out, count, cap)
+                elif __fmt_path_is_src(child):
+                    if (deref count) < cap:
+                        deref ((out to usize + ((deref count) to usize * 8 to usize)) to ptr[cstr]) = child
+                        deref count = (deref count) + 1 to i64
+            ent = readdir(d)
+        closedir(d)
+    else:
+        if (deref count) < cap:
+            deref ((out to usize + ((deref count) to usize * 8 to usize)) to ptr[cstr]) = path
+            deref count = (deref count) + 1 to i64
+
+// insertion sort by strcmp (deterministic processing order)
+fn __fmt_sort_paths(arr as ptr[cstr], count as i64):
+    var i as i64 = 1 to i64
+    while i < count:
+        let key as cstr = deref ((arr to usize + (i to usize * 8 to usize)) to ptr[cstr])
+        var j as i64 = i - 1 to i64
+        while j >= 0 to i64:
+            let cur as cstr = deref ((arr to usize + (j to usize * 8 to usize)) to ptr[cstr])
+            if strcmp(cur, key) > 0:
+                deref ((arr to usize + ((j + 1 to i64) to usize * 8 to usize)) to ptr[cstr]) = cur
+                j = j - 1 to i64
+            else:
+                break
+        deref ((arr to usize + ((j + 1 to i64) to usize * 8 to usize)) to ptr[cstr]) = key
+        i = i + 1 to i64
+
+// read all of stdin (16 MB cap — codegen.nz-sized inputs must fit)
+fn __fmt_read_stdin() as cstr:
+    extern fn read(fd as i32, buf as ptr, count as usize) as i64
+    extern fn malloc(sz as i64) as ptr
+    let cap as i64 = 16777216 to i64
+    let buf as ptr[u8] = malloc(cap) to ptr[u8]
+    var off as i64 = 0 to i64
+    var done as bool = False
+    while not done:
+        let r as i64 = read(0, (buf to usize + (off to usize)) to ptr, (cap - off) to usize)
+        if r <= 0 to i64:
+            done = True
+        else:
+            off = off + r
+            if off >= cap:
+                done = True
+    deref ((buf to usize + (off to usize)) to ptr[u8]) = 0 to u8
+    return buf to cstr
+
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     var default_mode as i32 = LanguageMode.Mantiq to i32
     var bin_name as cstr = "mantiq" to cstr
@@ -1221,73 +1310,159 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
 
     // ── Milestone F: fmt — deterministic line canonicalizer ─────────────
-    // Usage: nizam fmt [paths...] [-w|--write] [-c|--check]
+    // Usage: nizam fmt [paths...] [-w|--write] [-c|--check] [-d|--diff]
+    //              [--line-length <N>] [--stdin-filepath <path>]
     //   default: print formatted text to stdout
     //   -w: overwrite in place; -c: exit 1 if any file needs formatting
+    //   -d: display unified diffs without modifying files
+    //   --line-length: wrapping limit (default 100)
+    //   --stdin-filepath: format stdin, reporting as the given path
+    //   directory paths expand recursively to their .nz/.mq files
     if strcmp(cmd, "fmt" to cstr) == 0:
         if argc < 3:
-            let _p_fmt_err as i32 = printf("Error: 'fmt' requires file paths\nUsage: %s fmt <file.nz|file.mq>... [-w|--write] [-c|--check]\n" to cstr, bin_name)
+            let _p_fmt_err as i32 = printf("Error: 'fmt' requires file paths\nUsage: %s fmt <file.nz|file.mq|dir>... [-w|--write] [-c|--check] [-d|--diff] [--line-length <N>] [--stdin-filepath <path>]\n" to cstr, bin_name)
             return 1 to i32
         var write_mode as bool = False
         var check_mode as bool = False
+        var diff_mode as bool = False
+        var max_cols as i64 = 100 to i64
+        var stdin_path as cstr = None to cstr
         var fmt_dirty as i32 = 0 to i32
         var fmt_missing as bool = False
+        extern fn malloc(sz as i64) as ptr
+        let paths as ptr[cstr] = malloc(8192 to i64 * 8 to i64) to ptr[cstr]
+        var pcount as i64 = 0 to i64
+        let pcap as i64 = 8192 to i64
         var fmt_i as i32 = 2 to i32
+        var cap_hit as bool = False
         while fmt_i < argc:
             let fmt_arg as cstr = get_arg(argv, fmt_i)
             if strcmp(fmt_arg, "-w" to cstr) == 0 or strcmp(fmt_arg, "--write" to cstr) == 0:
                 write_mode = True
             elif strcmp(fmt_arg, "-c" to cstr) == 0 or strcmp(fmt_arg, "--check" to cstr) == 0:
                 check_mode = True
+            elif strcmp(fmt_arg, "-d" to cstr) == 0 or strcmp(fmt_arg, "--diff" to cstr) == 0:
+                diff_mode = True
+            elif strcmp(fmt_arg, "--line-length" to cstr) == 0 and fmt_i + 1 to i32 < argc:
+                fmt_i = fmt_i + 1 to i32
+                let ls as cstr = get_arg(argv, fmt_i)
+                var v as i64 = 0 to i64
+                var li as usize = 0 to usize
+                var digits as bool = False
+                var ld as bool = True
+                while ld:
+                    let lb as u8 = deref ((ls to usize + li) to ptr[u8])
+                    if lb >= 48 to u8 and lb <= 57 to u8:
+                        v = v * 10 to i64 + ((lb - 48 to u8) to i64)
+                        digits = True
+                        li = li + 1 to usize
+                    else:
+                        ld = False
+                if not digits or v < 10 to i64:
+                    let _p_fmt_len as i32 = printf("Error: --line-length expects an integer >= 10\n" to cstr)
+                    return 1 to i32
+                max_cols = v
+            elif strcmp(fmt_arg, "--stdin-filepath" to cstr) == 0 and fmt_i + 1 to i32 < argc:
+                fmt_i = fmt_i + 1 to i32
+                stdin_path = get_arg(argv, fmt_i)
             elif strcmp(fmt_arg, "--lib-dir" to cstr) == 0 and fmt_i + 1 to i32 < argc:
                 extern fn set_compiler_lib_dir(dir as cstr)
                 set_compiler_lib_dir(get_arg(argv, fmt_i + 1 to i32))
                 fmt_i = fmt_i + 1 to i32
             else:
-                let fmt_path as cstr = fmt_arg
-                let fmt_cstr as cstr = read_file_to_cstr(fmt_path)
-                if fmt_cstr == None to cstr:
-                    let _p_fmt_missing as i32 = printf("Error: Could not read file '%s'\n" to cstr, fmt_path)
-                    fmt_missing = True
+                if pcount < pcap:
+                    __fmt_collect_src(fmt_arg, paths, ref pcount, pcap)
                 else:
-                    let fmt_src as String = String.make(fmt_cstr)
-                    let fmt_out as String = fmt_transform(fmt_src)
-                    var changed as bool = False
-                    if (deref fmt_src).len != (deref fmt_out).len:
-                        changed = True
-                    else:
-                        extern fn memcmp(a as ptr, b as ptr, n as usize) as i32
-                        let cmp as i32 = memcmp((deref fmt_src).data to ptr, (deref fmt_out).data to ptr, (deref fmt_src).len)
-                        if cmp != 0 to i32:
-                            changed = True
-                    if check_mode:
-                        if changed:
-                            let _p_fmt_dirty as i32 = printf("%s: needs formatting\n" to cstr, fmt_path)
-                            fmt_dirty = 1 to i32
-                        else:
-                            let _p_fmt_clean as i32 = printf("%s: formatted\n" to cstr, fmt_path)
-                    elif write_mode:
-                        if changed:
-                            let f as ptr = fopen(fmt_path, "wb" to cstr)
-                            if f == None to ptr:
-                                let _p_fmt_nof as i32 = printf("Error: could not write '%s'\n" to cstr, fmt_path)
-                                fmt_dirty = 2 to i32
-                            else:
-                                let _fw as usize = fwrite((deref fmt_out).data to ptr, 1 to usize, (deref fmt_out).len, f)
-                                let _fc as i32 = fclose(f)
-                                let _p_fmt_w as i32 = printf("formatted %s\n" to cstr, fmt_path)
-                        else:
-                            let _p_fmt_keep as i32 = printf("%s: already formatted\n" to cstr, fmt_path)
-                    else:
-                        // default: formatted text to stdout
-                        let _p_fmt_out as i32 = printf("%s" to cstr, (deref fmt_out).data to cstr)
-                    fmt_src.deinit()
-                    fmt_out.deinit()
+                    cap_hit = True
             fmt_i = fmt_i + 1 to i32
+        if cap_hit or pcount >= pcap:
+            let _p_fmt_many as i32 = printf("Error: too many input paths (limit 8192)\n" to cstr)
+            return 1 to i32
+        __fmt_sort_paths(paths, pcount)
+        if stdin_path != None to cstr:
+            // stdin mode: format standard input, print to stdout; the
+            // path is reported in messages only
+            let sin_c as cstr = __fmt_read_stdin()
+            let sin as String = String.make(sin_c)
+            let sout as String = fmt_transform(sin, max_cols)
+            let _p_stdin as i32 = printf("%s" to cstr, (deref sout).data to cstr)
+            sin.deinit()
+            sout.deinit()
+            let _ff_stdin as i32 = fflush(None to ptr)
+            return 0 to i32
+        if pcount == 0 to i64:
+            let _p_fmt_nofiles as i32 = printf("Error: no readable .nz/.mq inputs under the given paths\n" to cstr)
+            return 1 to i32
+        var pi as i64 = 0 to i64
+        while pi < pcount:
+            let fmt_path as cstr = deref ((paths to usize + (pi to usize * 8 to usize)) to ptr[cstr])
+            let fmt_cstr as cstr = read_file_to_cstr(fmt_path)
+            if fmt_cstr == None to cstr:
+                let _p_fmt_missing as i32 = printf("Error: Could not read file '%s'\n" to cstr, fmt_path)
+                fmt_missing = True
+            else:
+                let fmt_src as String = String.make(fmt_cstr)
+                let fmt_out as String = fmt_transform(fmt_src, max_cols)
+                var changed as bool = False
+                if (deref fmt_src).len != (deref fmt_out).len:
+                    changed = True
+                else:
+                    extern fn memcmp(a as ptr, b as ptr, n as usize) as i32
+                    let cmp as i32 = memcmp((deref fmt_src).data to ptr, (deref fmt_out).data to ptr, (deref fmt_src).len)
+                    if cmp != 0 to i32:
+                        changed = True
+                if diff_mode:
+                    if changed:
+                        // unified diff to stdout; no files modified
+                        let _ff_d as i32 = fflush(None to ptr)
+                        let tf as ptr = fopen("/tmp/nizam-fmt-diff.tmp", "wb" to cstr)
+                        if tf == None to ptr:
+                            fmt_dirty = 2 to i32
+                        else:
+                            let _fdw as usize = fwrite((deref fmt_out).data to ptr, 1 to usize, (deref fmt_out).len, tf)
+                            let _fdc as i32 = fclose(tf)
+                            extern fn unlink(p as cstr) as i32
+                            let dlen as i64 = 8704 to i64 + (strlen(fmt_path) to i64 * 3 to i64)
+                            let dbuf as ptr[u8] = malloc(dlen) to ptr[u8]
+                            sprintf(dbuf, "diff -u --label %s --label %s -- \"%s\" /tmp/nizam-fmt-diff.tmp 2>&1" to cstr, fmt_path, fmt_path, fmt_path)
+                            let drc as i32 = system(dbuf to cstr)
+                            let _unu as i32 = unlink("/tmp/nizam-fmt-diff.tmp")
+                            // system() yields the raw wait status; decode
+                            // with the /256 idiom: 0 same, 1 diffs shown
+                            // (CI-friendly exit 1), >=2 diff itself failed
+                            let drc_code as i32 = drc / 256
+                            if drc_code == 1 to i32:
+                                fmt_dirty = 1 to i32
+                            elif drc_code >= 2 to i32:
+                                fmt_missing = True
+                elif check_mode:
+                    if changed:
+                        let _p_fmt_dirty as i32 = printf("%s: needs formatting\n" to cstr, fmt_path)
+                        fmt_dirty = 1 to i32
+                    else:
+                        let _p_fmt_clean as i32 = printf("%s: formatted\n" to cstr, fmt_path)
+                elif write_mode:
+                    if changed:
+                        let f as ptr = fopen(fmt_path, "wb" to cstr)
+                        if f == None to ptr:
+                            let _p_fmt_nof as i32 = printf("Error: could not write '%s'\n" to cstr, fmt_path)
+                            fmt_dirty = 2 to i32
+                        else:
+                            let _fw as usize = fwrite((deref fmt_out).data to ptr, 1 to usize, (deref fmt_out).len, f)
+                            let _fc as i32 = fclose(f)
+                            let _p_fmt_w as i32 = printf("formatted %s\n" to cstr, fmt_path)
+                    else:
+                        let _p_fmt_keep as i32 = printf("%s: already formatted\n" to cstr, fmt_path)
+                else:
+                    // default: formatted text to stdout
+                    let _p_fmt_out as i32 = printf("%s" to cstr, (deref fmt_out).data to cstr)
+                fmt_src.deinit()
+                fmt_out.deinit()
+            pi = pi + 1 to i64
         if fmt_missing or fmt_dirty == 2 to i32:
             let _ff_fmt_e as i32 = fflush(None to ptr)
             return 1 to i32
-        if check_mode and fmt_dirty != 0 to i32:
+        if (check_mode or diff_mode) and fmt_dirty != 0 to i32:
             let _ff_fmt_c as i32 = fflush(None to ptr)
             return 1 to i32
         let _ff_fmt_ok as i32 = fflush(None to ptr)
