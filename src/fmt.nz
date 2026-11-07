@@ -651,6 +651,7 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
     var prev_close as bool = False
     var prev_off as i64 = -1 to i64
     var prev_len as i64 = 0 to i64
+    var prev_member as bool = False
     var emitted as bool = False
     var had_gap as bool = False
     while p < ce:
@@ -766,7 +767,9 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
                 elif c == 40 to i64 or c == 91 to i64:
                     // tag declarators: `import[c]`, `link[c]` keep `[` glued
                     let tag_kw as bool = prev_kind == 1 to i64 and prev_kw and (prev_off >= 0 to i64) and (__fmt_kw_eq(data, prev_off, prev_len, "import" to cstr) or __fmt_kw_eq(data, prev_off, prev_len, "link" to cstr))
-                    if (prev_kind == 1 to i64 and not prev_kw) or prev_close or tag_kw:
+                    // member properties keep the call paren glued even when
+                    // keyword-named: `x.union(y)`, `x.map[T](y)` (spec §7.2)
+                    if (prev_kind == 1 to i64 and not prev_kw) or prev_close or tag_kw or prev_member:
                         sp = False
             elif k == 3 to i64 and prev_kind == 1 to i64:
                 // word directly before a string: f-string prefix stays glued
@@ -779,6 +782,7 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
             (deref out).append_char(32 to u8)
         __fmt_out_range(out, data, ts, p - ts)
         emitted = True
+        prev_member = k == 1 to i64 and prev_kind == 4 to i64 and ((prev_c == 46 to i64 and prev_len == 1 to i64) or (prev_c == 63 to i64 and prev_len == 2 to i64))
         prev_kind = k
         prev_kw = kw
         prev_unary = unary
