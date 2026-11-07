@@ -1358,10 +1358,46 @@ TEST_FILES array length instead of a hardcoded 50.
   paren — see Phase E.
 - §4: no blank run is EVER inserted to reach a cap; runs are only
   compressed (2 from N≥2 pre-existing or absent; ≤1 in-body; 0 at
-  plated dedents/block intros).
+  plated dedents/block intros). (Import-tier blank insertion is the
+  §4.4 exception — see Phase G.)
 - F2 does not ship the Wadler-Lindig doc-IR pretty printer (§2.2);
   all three phases are line-transformation passes over the existing
   F1 scanner.
+
+### Phase F: CLI completeness (spec §8) — `0e73b09`
+`fmt_transform` takes the wrap limit as a parameter (max_cols) and
+the fmt command gains the spec's remaining flags: `-d/--diff`
+(unified diffs via the system `diff`, no file writes; exit 1 when
+diffs exist — system() yields the raw wait status, decoded with the
+`status/256` idiom, so a diff's exit 1 arrives as 256 and "diff tool
+broke" is >= 2), `--line-length <N>`, `--stdin-filepath <path>`, and
+recursive directory expansion (opendir/readdir, hidden entries
+skipped, extension-filtered, strcmp-sorted processing order; path
+arrays via the malloc'd `ptr[cstr]` pattern, cap 8192).
+
+### Phase G: import tier grouping (spec §4.4) — `37b80a1`
+Import runs sort stably by (tier, module path): tier 1 = `std.*`,
+tier 2 = `link "..."` C FFI externals (new import kind 3, module key
+= string interior), tier 3 = project-local; exactly 1 blank line
+between tier groups. Idempotency argument: the tier blank breaks the
+run on pass 2, so pass 2 re-sorts each group to a no-op and the
+(blank-cap keeps it at 1). Link lines emit VERBATIM, not through the
+§3.3 spacing pass — spacing glues the string to the keyword
+(`link"m"`), which would defeat kind-3 recognition next pass.
+Conservative deviation: no cross-blank-run merging (a blank line the
+user put between imports is never regrouped across); within a
+contiguous run tiers always apply.
+
+### Phase H: canonical modifier order (spec §6.1.1)
+Lines opening with modifier words followed by `fn` are reordered
+(stable, single-space) to [access] [static] [extern|inline]
+[volatile] [atomic] [async] [abstract] [final]; the `fn` token and
+the rest of the line continue verbatim into the §3.3 spacing pass.
+Lines whose leading word is not a modifier (or that never reach
+`fn`) pass through, so string content (`"async public fn ..."`) and
+identifier collisions (`async = 3`) are untouched. The corpus
+currently has no multi-modifier declarations — this is
+future-proofing; reordering is validated on synthetic PoCs.
 
 ### Validation (each phase before its commit)
 - check-status flip sweep: format every suite test file to a
