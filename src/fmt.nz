@@ -1,4 +1,4 @@
-// ── fmt: deterministic line canonicalizer ──────────────────────────────
+// ── fmt: deterministic line canonicalizer ────────────────────────────────────
 // Milestone F1 (spec: research/formatter-spec.md §3.1, §4.4, §5).
 //
 // Transforms (all AST-safe, idempotent by construction):
@@ -20,9 +20,11 @@
 // Columns count CODEPOINTS: the box-drawing dash ─ is 3 bytes but one
 // column. Line byte ranges exclude the newline.
 
+
 from std.string import String, StringBuilder
 
-// ── ASCII key ordering (shorter-is-less on equal prefix) ───────────────
+
+// ── ASCII key ordering (shorter-is-less on equal prefix) ─────────────────────
 fn __fmt_key_lt(data as ptr[u8], a_off as i64, a_len as i64, b_off as i64, b_len as i64) as bool:
     var i as i64 = 0 to i64
     let m as i64 = if a_len < b_len: a_len else: b_len
@@ -38,12 +40,16 @@ fn __fmt_key_lt(data as ptr[u8], a_off as i64, a_len as i64, b_off as i64, b_len
         return True
     return False
 
+
 // append the byte range [off, off+len) of data
+
 
 fn __fmt_out_range(out as ptr[StringBuilder], data as ptr[u8], off as i64, len as i64):
     (deref out).append_slice(((data to usize + off) to ptr[u8]), len to usize)
 
+
 // append P spaces (indent emission, tabs already expanded by callers)
+
 
 fn __fmt_out_spaces(out as ptr[StringBuilder], count as i64):
     var k as i64 = 0 to i64
@@ -51,7 +57,9 @@ fn __fmt_out_spaces(out as ptr[StringBuilder], count as i64):
         (deref out).append_char(32 to u8)
         k = k + 1 to i64
 
+
 // visible codepoint count of the byte range [off, off+len)
+
 
 fn __fmt_cp_len(data as ptr[u8], off as i64, len as i64) as i64:
     var cnt as i64 = 0 to i64
@@ -75,13 +83,15 @@ fn __fmt_cp_len(data as ptr[u8], off as i64, len as i64) as i64:
             i = i + 1 to i64
     return cnt
 
-// ── banner matcher ─────────────────────────────────────────────────────
+
+// ── banner matcher ───────────────────────────────────────────────────────────
 // True and sets name_len (bytes) when the line matches:
 //   literal prefix "// ── "            (10 bytes / 6 columns)
 //   a name with no dash bytes and no tab
 //   a tail of dash bytes / spaces only, to end of line
 // Regular comments like "// ── notes: x ends here ──" fail the tail
 // check (non-dash bytes in the remainder) and stay untouched.
+
 
 fn __fmt_rtrim_len(data as ptr[u8], s as i64, e as i64) as i64:
     var q as i64 = e
@@ -93,7 +103,9 @@ fn __fmt_rtrim_len(data as ptr[u8], s as i64, e as i64) as i64:
             break
     return q - s
 
+
 // left-trimmed offset of [s, e)
+
 
 fn __fmt_ltrim_off(data as ptr[u8], s as i64, e as i64) as i64:
     var p as i64 = s
@@ -105,9 +117,11 @@ fn __fmt_ltrim_off(data as ptr[u8], s as i64, e as i64) as i64:
             break
     return p
 
-// ── from-list parser: explode "N1 , N2" into trimmed (off,len) items ───
+
+// ── from-list parser: explode "N1 , N2" into trimmed (off,len) items ─────────
 // False and empty lists on anything exotic (quotes, parens, stars,
 // trailing commas, non-ASCII).
+
 
 fn __fmt_banner_match(data as ptr[u8], lws as i64, e as i64, name_len as ptr[i64]) as bool:
     if e - lws < 11 to i64:
@@ -155,12 +169,20 @@ fn __fmt_banner_match(data as ptr[u8], lws as i64, e as i64, name_len as ptr[i64
     (deref name_len) = nlen
     return True
 
-// ── import classification ──────────────────────────────────────────────
+
+// ── import classification ────────────────────────────────────────────────────
 // kind: 0 none, 1 `import MOD`, 2 `from MOD import ...`
 // Lines containing a slash (comments, paths) are kind 0. mod is
 // right-trimmed. list_off points at the first name for kind 2.
 
-fn __fmt_parse_names(data as ptr[u8], s as i64, e as i64, starts as ptr[List[i64]], lens as ptr[List[i64]]) as bool:
+
+fn __fmt_parse_names(
+    data as ptr[u8],
+    s as i64,
+    e as i64,
+    starts as ptr[List[i64]],
+    lens as ptr[List[i64]],
+) as bool:
     var item_s as i64 = s
     var p as i64 = s
     while p < e:
@@ -186,12 +208,21 @@ fn __fmt_parse_names(data as ptr[u8], s as i64, e as i64, starts as ptr[List[i64
     (deref lens).append(ll2)
     return True
 
-// ── run machinery ──────────────────────────────────────────────────────
+
+// ── run machinery ────────────────────────────────────────────────────────────
 // A run is a maximal sequence of contiguous import/from lines. Runs are
 // buffered (indices + module keys) and flushed with a stable insertion
 // sort by module key: equality keeps the original relative order.
 
-fn __fmt_import_kind(data as ptr[u8], lws as i64, e as i64, mod_off as ptr[i64], mod_len as ptr[i64], list_off as ptr[i64]) as i64:
+
+fn __fmt_import_kind(
+    data as ptr[u8],
+    lws as i64,
+    e as i64,
+    mod_off as ptr[i64],
+    mod_len as ptr[i64],
+    list_off as ptr[i64],
+) as i64:
     if e - lws < 7 to i64:
         return 0 to i64
     var q as i64 = lws
@@ -271,9 +302,11 @@ fn __fmt_import_kind(data as ptr[u8], lws as i64, e as i64, mod_off as ptr[i64],
         return 0 to i64
     return 0 to i64
 
+
 // spec §4.4 tiers: 1 = std.* modules, 2 = `link "..."` externals,
 // 3 = everything else (project-local). Tagged imports (`import[c] x`)
 // are passthrough (kind 0) and never enter a run.
+
 
 fn __fmt_import_tier(data as ptr[u8], kind as i64, mod_off as i64, mod_len as i64) as i64:
     if kind == 3 to i64:
@@ -283,9 +316,20 @@ fn __fmt_import_tier(data as ptr[u8], kind as i64, mod_off as i64, mod_len as i6
             return 1 to i64
     return 3 to i64
 
+
 // right-trimmed length of [s, e)
 
-fn __fmt_emit_from_line(data as ptr[u8], li_start as i64, lw as i64, ce as i64, mod_off as i64, mod_len as i64, list_off as i64, out as ptr[StringBuilder]):
+
+fn __fmt_emit_from_line(
+    data as ptr[u8],
+    li_start as i64,
+    lw as i64,
+    ce as i64,
+    mod_off as i64,
+    mod_len as i64,
+    list_off as i64,
+    out as ptr[StringBuilder],
+):
     var n_starts as List[i64] = List[i64]()
     var n_lens as List[i64] = List[i64]()
     if not __fmt_parse_names(data, list_off, ce, ref n_starts, ref n_lens):
@@ -331,9 +375,17 @@ fn __fmt_emit_from_line(data as ptr[u8], li_start as i64, lw as i64, ce as i64, 
         k = k + 1 to i64
     (deref out).append_char(10 to u8)
 
-// ── byte scan: split lines, track string/comment context ───────────────
 
-fn __fmt_emit_import_line(data as ptr[u8], li as i64, line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder]):
+// ── byte scan: split lines, track string/comment context ─────────────────────
+
+fn __fmt_emit_import_line(
+    data as ptr[u8],
+    li as i64,
+    line_starts as List[i64],
+    line_ends as List[i64],
+    line_lws as List[i64],
+    out as ptr[StringBuilder],
+):
     let s as i64 = line_starts[li]
     let e as i64 = line_ends[li]
     let lw as i64 = line_lws[li]
@@ -362,7 +414,18 @@ fn __fmt_emit_import_line(data as ptr[u8], li as i64, line_starts as List[i64], 
     // kind == 2: rebuilt below
     __fmt_emit_from_line(data, line_starts[li], lw, ce, mod_off, mod_len, list_off, out)
 
-fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[List[i64]], run_kind as ptr[List[i64]], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], out as ptr[StringBuilder], first_li as i64):
+
+fn __fmt_run_flush(
+    data as ptr[u8],
+    run_koff as ptr[List[i64]],
+    run_klen as ptr[List[i64]],
+    run_kind as ptr[List[i64]],
+    line_starts as List[i64],
+    line_ends as List[i64],
+    line_lws as List[i64],
+    out as ptr[StringBuilder],
+    first_li as i64,
+):
     let cnt as i64 = (deref run_koff).length() to i64
     if cnt <= 0 to i64:
         return
@@ -405,11 +468,21 @@ fn __fmt_run_flush(data as ptr[u8], run_koff as ptr[List[i64]], run_klen as ptr[
         __fmt_emit_import_line(data, idx, line_starts, line_ends, line_lws, out)
         k = k + 1 to i64
 
+
 // one import line: kind 1 emitted verbatim (trailing ws stripped),
 // kind 2 rebuilt as `from MOD import N1, N2` with sorted comma-space
 // names; parse failures passthrough.
 
-fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], line_ends as ptr[List[i64]], line_vis as ptr[List[i64]], line_banner as ptr[List[i64]], line_lws as ptr[List[i64]]):
+
+fn __fmt_scan_lines(
+    data as ptr[u8],
+    n as usize,
+    line_starts as ptr[List[i64]],
+    line_ends as ptr[List[i64]],
+    line_vis as ptr[List[i64]],
+    line_banner as ptr[List[i64]],
+    line_lws as ptr[List[i64]],
+):
     var i as usize = 0 to usize
     var st as i64 = 0 to i64
     var line_start_st as i64 = 0 to i64
@@ -469,11 +542,11 @@ fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], 
                     in_comment = True
                     if c3 == 226 to u8 and c4 == 148 to u8:
                         banner_hit = 1 to i64
-            if b == 34 to u8 or b == 39 to u8:
+            if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
                 st = b to i64
             i = i + 1 to usize
             continue
-        if b == 34 to u8 or b == 39 to u8:
+        if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
             st = b to i64
         elif b == 47 to u8 and i + 1 to usize < n and deref ((data to usize + (i + 1 to usize)) to ptr[u8]) == 47 to u8:
             in_comment = True
@@ -494,10 +567,12 @@ fn __fmt_scan_lines(data as ptr[u8], n as usize, line_starts as ptr[List[i64]], 
         else:
             (deref line_lws).append(cur_lws)
 
-// ── vertical rhythm: blank-run policy (spec §4) ────────────────────────
+
+// ── vertical rhythm: blank-run policy (spec §4) ──────────────────────────────
 // Each blank run's emitted size is a deterministic function of the
 // surrounding code lines, so fmt∘fmt == fmt holds. Multi-line-string
 // blanks are verbatim (handled before this policy runs).
+
 
 fn __fmt_line_linkish(data as ptr[u8], lw as i64, e as i64) as bool:
     // `link "..."` counts as an import-tier line for blank policy
@@ -512,6 +587,7 @@ fn __fmt_line_linkish(data as ptr[u8], lw as i64, e as i64) as bool:
     if deref ((data to usize + (lw + 3 to i64)) to ptr[u8]) != 107 to u8:
         return False
     return deref ((data to usize + (lw + 4 to i64)) to ptr[u8]) == 32 to u8
+
 
 // last code byte of a line (comments stripped, string-aware) == ':'?
 fn __fmt_line_ends_colon(data as ptr[u8], lw as i64, e as i64) as bool:
@@ -528,7 +604,7 @@ fn __fmt_line_ends_colon(data as ptr[u8], lw as i64, e as i64) as bool:
                 st = 0 to i64
             p = p + 1 to i64
             continue
-        if b == 34 to u8 or b == 39 to u8:
+        if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
             st = b to i64
             last = p
             p = p + 1 to i64
@@ -541,6 +617,7 @@ fn __fmt_line_ends_colon(data as ptr[u8], lw as i64, e as i64) as bool:
     if last < 0 to i64:
         return False
     return deref ((data to usize + last) to ptr[u8]) == 58 to u8
+
 
 // does the line's first word start a definition? (used to keep exactly
 // 1 blank before method/field-group definitions at dedent boundaries)
@@ -560,6 +637,7 @@ fn __fmt_word_at(data as ptr[u8], lw as i64, e as i64, w as cstr) as bool:
         if (nb >= 97 to u8 and nb <= 122 to u8) or (nb >= 65 to u8 and nb <= 90 to u8) or (nb >= 48 to u8 and nb <= 57 to u8) or nb == 95 to u8:
             return False
     return True
+
 
 fn __fmt_next_starts_def(data as ptr[u8], lw as i64, e as i64) as bool:
     if lw >= e:
@@ -583,15 +661,26 @@ fn __fmt_next_starts_def(data as ptr[u8], lw as i64, e as i64) as bool:
         return __fmt_word_at(data, lw, e, "union" to cstr)
     return False
 
+
 // cap for the blank run starting at `li` (length run_len). Exact caps:
 // 1 after a banner; 1 between import/link lines; 2 before a col-0 line;
 // 0 at dedents and right after a block introducer (prev ends ':');
 // else min(run, 1). File-start/end runs keep the old <= 2 behavior.
-fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[i64], line_lws as List[i64], line_vis as List[i64], line_banner as List[i64], li as i64, line_count as i64, run_len as i64) as i64:
+fn __fmt_blank_cap(
+    data as ptr[u8],
+    line_starts as List[i64],
+    line_ends as List[i64],
+    line_lws as List[i64],
+    line_vis as List[i64],
+    line_banner as List[i64],
+    li as i64,
+    line_count as i64,
+    run_len as i64,
+) as i64:
     var lim as i64 = run_len
     if lim > 2 to i64:
         lim = 2 to i64
-    var pi as i64 = li - 1 to i64
+    var pi as i64 = li -1 to i64
     var found_p as bool = False
     while pi >= 0 to i64:
         if line_vis[pi] == 1 to i64:
@@ -600,7 +689,7 @@ fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[
             found_p = True
             break
         pi = pi - 1 to i64
-    var ni as i64 = li + run_len
+    var ni as i64 = li +run_len
     var found_n as bool = False
     while ni < line_count:
         if line_vis[ni] == 1 to i64:
@@ -620,8 +709,8 @@ fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[
     var imp_n as bool = __fmt_import_kind(data, line_lws[ni], line_ends[ni], ref d1, ref d2, ref d3) != 0 to i64 or __fmt_line_linkish(data, line_lws[ni], line_ends[ni])
     if imp_p and imp_n:
         return 1 to i64
-    let ip as i64 = line_lws[pi] - line_starts[pi]
-    let inz as i64 = line_lws[ni] - line_starts[ni]
+    let ip as i64 = line_lws[pi] -line_starts[pi]
+    let inz as i64 = line_lws[ni] -line_starts[ni]
     if inz == 0 to i64:
         return 2 to i64
     if inz < ip:
@@ -634,10 +723,12 @@ fn __fmt_blank_cap(data as ptr[u8], line_starts as List[i64], line_ends as List[
         lim = 1 to i64
     return lim
 
-// ── operator spacing (spec §3.3) ───────────────────────────────────────
+
+// ── operator spacing (spec §3.3) ─────────────────────────────────────────────
 // Token rewriter: re-emit a line's content with canonical single-space
 // separators. String/char literals and `//` comments pass through
 // verbatim; idempotent because canonical output re-tokenizes to itself.
+
 
 fn __fmt_kw_eq(data as ptr[u8], off as i64, len as i64, w as cstr) as bool:
     var q as i64 = 0 to i64
@@ -653,6 +744,7 @@ fn __fmt_kw_eq(data as ptr[u8], off as i64, len as i64, w as cstr) as bool:
             return False
         p = p + 1 to i64
     return True
+
 
 fn __fmt_is_kw(data as ptr[u8], off as i64, len as i64) as bool:
     if len < 2 to i64 or len > 9 to i64:
@@ -680,6 +772,7 @@ fn __fmt_is_kw(data as ptr[u8], off as i64, len as i64) as bool:
         return __fmt_kw_eq(data, off, len, "union" to cstr)
     return __fmt_kw_slow(data, off, len)
 
+
 fn __fmt_kw_slow(data as ptr[u8], off as i64, len as i64) as bool:
     let b as u8 = deref ((data to usize + off) to ptr[u8])
     if b == 109 to u8:
@@ -702,6 +795,7 @@ fn __fmt_kw_slow(data as ptr[u8], off as i64, len as i64) as bool:
         return __fmt_kw_eq(data, off, len, "yield" to cstr)
     return False
 
+
 fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuilder]):
     var p as i64 = lw
     var prev_kind as i64 = 0 to i64
@@ -712,6 +806,7 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
     var prev_off as i64 = -1 to i64
     var prev_len as i64 = 0 to i64
     var prev_member as bool = False
+    var in_ket as bool = False
     var emitted as bool = False
     var had_gap as bool = False
     while p < ce:
@@ -731,7 +826,7 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
         var kw as bool = False
         var unary as bool = False
         var c as i64 = b to i64
-        if b == 34 to u8 or b == 39 to u8:
+        if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
             k = 3 to i64
             let q as u8 = b
             p = p + 1 to i64
@@ -814,6 +909,28 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
             if c == 43 to i64 or c == 45 to i64:
                 if p - ts == 1 to i64:
                     unary = prev_kind == 0 to i64 or prev_kind == 4 to i64 or (prev_kind == 1 to i64 and prev_kw)
+            // ket literal: `|0>` is token-atomic (spacing inside changes
+            // the parse — `| 0 >` lexes as or/compare and alters
+            // runtime behavior). A single `|` directly followed by a
+            // word run that closes with `>` opens a ket; everything
+            // through the closing `>` glues.
+            if k == 4 to i64 and c == 124 to i64 and p - ts == 1 to i64:
+                let nb as u8 = deref ((data to usize + p) to ptr[u8])
+                let nw as bool = (nb >= 97 to u8 and nb <= 122 to u8) or (nb >= 65 to u8 and nb <= 90 to u8) or (nb >= 48 to u8 and nb <= 57 to u8) or nb == 95 to u8
+                if nw:
+                    var kp as i64 = p
+                    var closed as bool = False
+                    while kp < ce:
+                        let kb as u8 = deref ((data to usize + kp) to ptr[u8])
+                        if kb == 62 to u8:
+                            closed = True
+                            break
+                        let kw2 as bool = (kb >= 97 to u8 and kb <= 122 to u8) or (kb >= 65 to u8 and kb <= 90 to u8) or (kb >= 48 to u8 and kb <= 57 to u8) or kb == 95 to u8
+                        if not kw2:
+                            break
+                        kp = kp + 1 to i64
+                    if closed:
+                        in_ket = True
         var sp as bool = True
         if prev_kind == 0 to i64:
             sp = False
@@ -838,6 +955,10 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
                 sp = False
             elif prev_unary:
                 sp = False
+        if in_ket:
+            sp = False
+            if k == 4 to i64 and c == 62 to i64 and p - ts == 1 to i64:
+                in_ket = False
         if sp:
             (deref out).append_char(32 to u8)
         __fmt_out_range(out, data, ts, p - ts)
@@ -850,13 +971,14 @@ fn __fmt_space_emit(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBuil
         prev_close = k == 4 to i64 and (c == 41 to i64 or c == 93 to i64)
         prev_off = ts
         prev_len = p - ts
-// ── parameter-list wrapping (spec §7.1) ────────────────────────────────
+// ── parameter-list wrapping (spec §7.1) ──────────────────────────────────────
 // Long fn signatures (> the configured column limit) break to one
 // parameter per line at indent+4, with a trailing comma (the grammar
 // accepts it). The
 // decision runs on the space-normalized scratch text, so it composes
 // with the §3.3 spacing pass; fixed-point because broken signature
 // lines (header `fn x(`, param lines, `)`-closer) never re-qualify.
+
 
 // is w a fn-signature modifier word?
 fn __fmt_is_mod(data as ptr[u8], off as i64, len as i64) as bool:
@@ -876,6 +998,7 @@ fn __fmt_is_mod(data as ptr[u8], off as i64, len as i64) as bool:
     if b == 118 to u8:
         return __fmt_kw_eq(data, off, len, "volatile" to cstr)
     return False
+
 
 fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[StringBuilder]) as bool:
     // header word walk: modifiers* fn NAME [Generics]? then '('
@@ -939,11 +1062,11 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
             if rb == 92 to u8:
                 r = r + 2 to i64
                 continue
-            if rb == 34 to u8:
+            if rb == 34 to u8 or rb == 39 to u8 or rb == 96 to u8:
                 in_str = False
             r = r + 1 to i64
             continue
-        if rb == 34 to u8:
+        if rb == 34 to u8 or rb == 39 to u8 or rb == 96 to u8:
             in_str = True
         elif rb == 47 to u8 and r + 1 to i64 < slen and deref ((data to usize + (r + 1 to i64)) to ptr[u8]) == 47 to u8:
             // `//` comment inside the parameter list: leave the line alone
@@ -973,11 +1096,11 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
             if sb == 92 to u8:
                 cur = cur + 2 to i64
                 continue
-            if sb == 34 to u8:
+            if sb == 34 to u8 or sb == 39 to u8 or sb == 96 to u8:
                 in_str = False
             cur = cur + 1 to i64
             continue
-        if sb == 34 to u8:
+        if sb == 34 to u8 or sb == 39 to u8 or sb == 96 to u8:
             in_str = True
         elif sb == 91 to u8:
             bd = bd + 1 to i64
@@ -1045,7 +1168,8 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
     __fmt_out_range(out, data, p2, slen - p2)
     return True
 
-// ── method-chain wrapping (spec §7.2) ──────────────────────────────────
+
+// ── method-chain wrapping (spec §7.2) ────────────────────────────────────────
 // Long fluent-call chains (> the configured column limit) break
 // before each top-level method dot at indent+4 (the spec's
 // break-before-dot shape). The decision runs on the space-normalized
@@ -1055,6 +1179,7 @@ fn __fmt_wrap_fn_sig(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Stri
 // ']' or a string literal) and open a `name [G]? (...)` call link.
 // Fixed-point because wrapped pieces each start with '.', so the head
 // is empty on re-entry, and single-link lines never qualify.
+
 
 fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[StringBuilder]) as bool:
     // collect top-level method-call split dots (string-safe)
@@ -1069,11 +1194,11 @@ fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Strin
             if b == 92 to u8:
                 p = p + 2 to i64
                 continue
-            if b == 34 to u8:
+            if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
                 in_str = False
             p = p + 1 to i64
             continue
-        if b == 34 to u8:
+        if b == 34 to u8 or b == 39 to u8 or b == 96 to u8:
             in_str = True
         elif b == 47 to u8 and p + 1 to i64 < slen and deref ((data to usize + (p + 1 to i64)) to ptr[u8]) == 47 to u8 and pd == 0 to i64 and bd == 0 to i64:
             // `//` comment at line level: leave the line alone
@@ -1189,11 +1314,13 @@ fn __fmt_wrap_chain(data as ptr[u8], slen as i64, ind_w as i64, out as ptr[Strin
         si = si + 1 to i64
     return True
 
-// ── canonical modifier order (spec §6.1.1) ─────────────────────────────
+
+// ── canonical modifier order (spec §6.1.1) ───────────────────────────────────
 // Modifiers precede `fn` as [access] [static] [extern|inline]
 // [volatile] [atomic] [async] [abstract] [final]. A line whose leading
 // words are modifiers followed by `fn` is reordered (stable); any
 // other line passes through untouched.
+
 
 fn __fmt_mod_rank(data as ptr[u8], off as i64, len as i64) as i64:
     if __fmt_kw_eq(data, off, len, "public" to cstr):
@@ -1219,6 +1346,7 @@ fn __fmt_mod_rank(data as ptr[u8], off as i64, len as i64) as i64:
     if __fmt_kw_eq(data, off, len, "final" to cstr):
         return 10 to i64
     return -1 to i64
+
 
 // If the line [lw, ce) opens with modifier words followed by `fn`,
 // append the canonical reorder (single-space separated) plus the
@@ -1291,7 +1419,9 @@ fn __fmt_mod_reorder(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBui
     __fmt_out_range(out, data, fn_start, ce - fn_start)
     return True
 
+
 // the transform
+
 
 fn fmt_transform(src as String, max_cols as i64) as String:
     extern fn memcpy(dst as ptr, src_p as ptr, n as i64) as ptr
@@ -1329,23 +1459,20 @@ fn fmt_transform(src as String, max_cols as i64) as String:
         var list_off as i64 = 0 to i64
         if not is_vis:
             ikind = __fmt_import_kind(data, lw, e, ref mod_off, ref mod_len, ref list_off)
-
         if run_first >= 0 to i64 and ikind == 0 to i64:
             __fmt_run_flush(data, ref run_koff, ref run_klen, ref run_kind, line_starts, line_ends, line_lws, ref out, run_first)
             run_first = -1 to i64
             run_koff = List[i64]()
             run_klen = List[i64]()
             run_kind = List[i64]()
-
         if ikind != 0 to i64:
             if run_first < 0 to i64:
                 run_first = li
             run_koff.append(mod_off)
             run_klen.append(mod_len)
             run_kind.append(ikind)
-            li = li + 1 to i64
+            li = li +1 to i64
             continue
-
         if not is_vis and not is_blank and line_banner[li] == 1 to i64:
             var name_len as i64 = 0 to i64
             if __fmt_banner_match(data, lw, e, ref name_len):
@@ -1368,18 +1495,17 @@ fn fmt_transform(src as String, max_cols as i64) as String:
                     (deref out).append_slice("─" to ptr[u8], 3 to usize)
                     col = col + 1 to i64
                 (deref out).append_char(10 to u8)
-                li = li + 1 to i64
+                li = li +1 to i64
                 continue
-
         if is_blank:
             if is_vis:
                 (deref out).append_char(10 to u8)
-                li = li + 1 to i64
+                li = li +1 to i64
                 continue
-            var re as i64 = li + 1 to i64
+            var re as i64 = li +1 to i64
             while re < line_count and line_vis[re] == 0 to i64 and line_lws[re] >= line_ends[re]:
-                re = re + 1 to i64
-            let run_len as i64 = re - li
+                re = re +1 to i64
+            let run_len as i64 = re -li
             let cap as i64 = __fmt_blank_cap(data, line_starts, line_ends, line_lws, line_vis, line_banner, li, line_count, run_len)
             var bk as i64 = 0 to i64
             while bk < cap:
@@ -1387,13 +1513,11 @@ fn fmt_transform(src as String, max_cols as i64) as String:
                 bk = bk + 1 to i64
             li = re
             continue
-
         if is_vis:
             __fmt_out_range(ref out, data, s, e - s)
             (deref out).append_char(10 to u8)
-            li = li + 1 to i64
+            li = li +1 to i64
             continue
-
         var hp2 as i64 = s
         while hp2 < lw:
             let hb2 as u8 = deref ((data to usize + hp2) to ptr[u8])
@@ -1448,13 +1572,11 @@ fn fmt_transform(src as String, max_cols as i64) as String:
             (deref mod_sb).deinit()
         else:
             (deref out).append_char(10 to u8)
-        li = li + 1 to i64
-
+        li = li +1 to i64
     if run_first >= 0 to i64:
         __fmt_run_flush(data, ref run_koff, ref run_klen, ref run_kind, line_starts, line_ends, line_lws, ref out, run_first)
         run_koff = List[i64]()
         run_klen = List[i64]()
-
     let res as String = (deref out).to_string()
     (deref out).deinit()
 
@@ -1479,4 +1601,3 @@ fn fmt_transform(src as String, max_cols as i64) as String:
             res.deinit()
             return res2
     return res
-
