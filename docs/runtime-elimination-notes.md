@@ -1191,11 +1191,13 @@ missing-file error; multi-path invocation. All pass.
 ## Milestone F2 — line-transformation phases of the formatter (Nov 6)
 
 F2 ships the non-CST parts of the spec as incremental passes inside
-`fmt_transform`, each one validated against the 50-test chain before
+`fmt_transform`, each one validated against the full-test chain before
 landing: `65508be` (fix), `9536b71` (§4 rhythm), `9542afc` (§3.3
-spacing), `a3034fd` (§7.1 wrapping). All pass idempotency rules
+spacing), `a3034fd` (§7.1 wrapping) — later `2d6f756` (grammar),
+`e99a985` (§7.2 wrapping), the §3.3 member-keyword glue fix, and the
+51st conformance test (Nov 7). All pass idempotency rules
 (format(format(x)) == format(x)), and every commit was promoted on a
-50/50 chain run of the day.
+full-suite chain run of the day.
 
 ### fix: multi-line string preservation (`65508be`)
 F1's blank-repair path blanked the content of lines inside
@@ -1327,14 +1329,33 @@ load — invalid IR (selfhost build failure). `not` on a simple bool
 var is fine; the single occurrence was rewritten to a named bool
 before the gate.
 
+### Phase E: §3.3 member-keyword call glue + 51st conformance test
+Landing §7.2 exposed a §3.3 gap: keyword-named member properties got
+statement-keyword spacing (`x.union (y)`) because the `(`-glue rule
+only fired for non-keyword words. The spec's §7.2 example
+(`.filter(...)`, `.collect[List[String]]()`) requires glued call
+parens, so the spacing pass now tracks whether the previous word is a
+member property (directly follows a single `.` or `?.` token) and
+glues `(`/`[` in that position regardless of keyword-ness — statement
+keywords at line/keyword position are unaffected. The chain wrapper's
+space tolerance stays (harmless; hand-written `name (` still wraps).
+Validated: battery + corpus idempotency, 0 check-status flips, trio
+byte-equal, full-suite chain gate.
+
+The suite's 51st test, `src/tests/test_method_chains.nz`, is the
+conformance file for this milestone: hand-wrapped §7.2 chains parse
+and run identically to their inline equivalents (wrapped == inline
+assertions at runtime), the file is fmt-clean (fmt -c) and
+idempotent, and `tools/chain_stable.sh` promotion is now keyed to the
+TEST_FILES array length instead of a hardcoded 50.
+
 ### Documented deviations from `research/formatter-spec.md`
 - §3.2: the 88-column soft target is NOT implemented; only the hard
   100-column limit. Continuation pieces longer than 100 are emitted
   as-is rather than re-broken; long `if`/binary lines are not wrapped
   (§7.1 covers fn signatures, §7.2 top-level method-call chains).
-- §7.2 pre-existing quirk: §3.3 keyword spacing emits a space between
-  a keyword-named method and its paren (`union (`); the chain wrapper
-  tolerates it, but the spacing itself is unchanged here.
+- (resolved) §3.3 keyword-named member calls now glue their call
+  paren — see Phase E.
 - §4: no blank run is EVER inserted to reach a cap; runs are only
   compressed (2 from N≥2 pre-existing or absent; ≤1 in-body; 0 at
   plated dedents/block intros).
