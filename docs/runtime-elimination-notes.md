@@ -1195,7 +1195,11 @@ F2 ships the non-CST parts of the spec as incremental passes inside
 landing: `65508be` (fix), `9536b71` (§4 rhythm), `9542afc` (§3.3
 spacing), `a3034fd` (§7.1 wrapping) — later `2d6f756` (grammar),
 `e99a985` (§7.2 wrapping), the §3.3 member-keyword glue fix, and the
-51st conformance test (Nov 7). All pass idempotency rules
+51st conformance test (Nov 7), then the spec-completion arc
+(Nov 7–8): Phase F `0e73b09` (§8 CLI), Phase G `37b80a1` (§4.4
+tiers), Phase H `aff4e54` (§6.1.1 modifier order), the string-
+integrity fix `f588954`, and Phase I `ba1751f` (repo-wide dogfood).
+All pass idempotency rules
 (format(format(x)) == format(x)), and every commit was promoted on a
 full-suite chain run of the day.
 
@@ -1399,6 +1403,40 @@ identifier collisions (`async = 3`) are untouched. The corpus
 currently has no multi-modifier declarations — this is
 future-proofing; reordering is validated on synthetic PoCs.
 
+### Phase I: dogfood — the formatter formats its own repo (spec §9)
+`fmt -w` over all 111 .nz/.mq files under src/, std/, probes/,
+then the full chain gate rebuilds the compiler FROM the formatted
+sources and runs the complete 51-test suite: 51/51 with promotion,
+tree-wide idempotency (fmt(x) == x for every file), and byte-equal
+runtime equivalence on five tests.
+
+The dogfood run is the spec's ultimate test and it earned its keep:
+it flushed out THREE string-integrity leaks the targeted corpora
+never triggered, two of them semantic —
+1. backtick template strings were spaced like code (`Item: {item}`
+   → ` Item: { item } `); every string-awareness site now tracks
+   backtick (96) alongside ' and ",
+2. ket literals `|0>` were spaced to `| 0 >`, which lexes as
+   or/compare instead of a ket and FLIPPED a quantum gate test's
+   runtime result — kets now glue through the closing `>`,
+3. triple-quoted f-strings `f"""..."""` re-lexed as empty-string +
+   string + string and spacing between string tokens split the
+   literal; the mangled source still compiled but cored at runtime —
+   triple quotes now lex as ONE token.
+(`f588954` fixes all three; `ba1751f` is the formatted repo.)
+
+Dogfood lesson for the notes: a failed gate run is informative —
+49/51 pointed straight at the two semantic leaks, and the mangled
+triple-quote lines were visible in the failing test's diff before
+any debugger time.
+
+Pre-existing (NOT formatter-caused, HEAD fails identically):
+`nizam-new check src/main.nz` (and std/collections, std/path,
+std/string) reports E0404/E0403 borrow errors in DEPENDENCY files
+that check clean standalone; `nizam-new build` — the gate's
+authority — compiles everything. Dependency-mode borrowck quirk,
+recorded here for the next person who sees it.
+
 ### Validation (each phase before its commit)
 - check-status flip sweep: format every suite test file to a
   same-dir sibling copy (module resolution requires the same tree —
@@ -1411,4 +1449,5 @@ future-proofing; reordering is validated on synthetic PoCs.
   sources, and wrap PoCs. (Probe gotcha: `codegen.nz` is 1.2 MB —
   read it with a ≥16 MB probe buffer or the input truncates and
   produces phantom non-idempotency.)
-- chain_stable.sh: 50/50 pass and promotion before each phase commit.
+- chain_stable.sh: full-suite (51/51) pass and promotion before each
+  phase commit; Phase I additionally promoted ON the formatted tree.
