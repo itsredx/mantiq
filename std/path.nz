@@ -20,15 +20,17 @@
 // representations.  Strings are assumed to be valid UTF-8 on all platforms.
 // ============================================================================
 
+
 // --- Imports ----------------------------------------------------------------
 // make:           allocate a heap buffer (used by make_from_slice)
 // String, StringBuilder, memcpy:  core string types and raw memory copy
 // exists:         std.fs file-existence check for exists_ref()
 // os:             returns the current operating system name ("windows", "linux", etc.)
+from std.fs import exists
 from std.mem import make
 from std.string import String, StringBuilder, memcpy
-from std.fs import exists
 from std.sys import os
+
 
 // ---------------------------------------------------------------------------
 // Helper: is_windows() -> bool
@@ -39,6 +41,7 @@ from std.sys import os
 // ---------------------------------------------------------------------------
 fn is_windows() as bool:
     return os() == "windows"
+
 
 // ---------------------------------------------------------------------------
 // Helper: is_sep(c) -> bool
@@ -56,6 +59,7 @@ fn is_sep(c as u8) as bool:
             return True
     return False
 
+
 // ---------------------------------------------------------------------------
 // Helper: sep() -> cstr
 //
@@ -66,8 +70,9 @@ fn is_sep(c as u8) as bool:
 // ---------------------------------------------------------------------------
 fn sep() as cstr:
     if is_windows():
-        return "\\" to cstr
-    return "/" to cstr
+        return"\\" to cstr
+    return"/" to cstr
+
 
 // ---------------------------------------------------------------------------
 // Helper: is_letter(c) -> bool
@@ -80,6 +85,7 @@ fn is_letter(c as u8) as bool:
     if (c >= 65 to u8 and c <= 90 to u8) or (c >= 97 to u8 and c <= 122 to u8):
         return True
     return False
+
 
 // ============================================================================
 // Internal: make_from_slice(bytes, len) -> String
@@ -95,7 +101,8 @@ fn make_from_slice(bytes as ptr[u8], len as usize) as String:
     let d as ptr[u8] = make[u8](cap) to ptr[u8]
     memcpy(d to ptr, bytes to ptr, len)
     d[len] = 0 to u8
-    return String(data=d, len=len, capacity=cap)
+    return String(data = d, len = len, capacity = cap)
+
 
 // ============================================================================
 // isabs_ref(path) -> bool
@@ -136,6 +143,7 @@ fn isabs_ref(path as ptr[String]) as bool:
                 return True
     return False
 
+
 // ---------------------------------------------------------------------------
 // Convenience wrapper: isabs(path) -> bool
 //
@@ -143,6 +151,7 @@ fn isabs_ref(path as ptr[String]) as bool:
 // ---------------------------------------------------------------------------
 fn isabs(path as String) as bool:
     return isabs_ref(ref path)
+
 
 // ============================================================================
 // exists_ref(path) -> bool
@@ -154,7 +163,8 @@ fn isabs(path as String) as bool:
 // takes a value-type String.
 // ============================================================================
 fn exists_ref(path as ptr[String]) as bool:
-    return exists(String(data=(deref path).data, len=(deref path).len, capacity=(deref path).capacity))
+    return exists(String(data = (deref path).data, len = (deref path).len, capacity = (deref path).capacity))
+
 
 // ============================================================================
 // join_ref(p1, p2) -> String
@@ -172,10 +182,8 @@ fn exists_ref(path as ptr[String]) as bool:
 fn join_ref(p1 as ptr[String], p2 as ptr[String]) as String:
     if isabs_ref(p2):
         return String((deref p2).data to cstr)
-
     if (deref p1).len == 0 to usize:
         return String((deref p2).data to cstr)
-
     let mut sb as StringBuilder = StringBuilder.make_builder()
     sb.append_builder((deref p1).data to cstr)
 
@@ -185,22 +193,22 @@ fn join_ref(p1 as ptr[String], p2 as ptr[String]) as String:
         let res as String = sb.builder_to_string()
         sb.deinit_builder()
         return res
-
     if is_sep((deref p1).data[(deref p1).len - 1]):
         sb.append_builder((deref p2).data to cstr)
     else:
         sb.append_builder(sep())
         sb.append_builder((deref p2).data to cstr)
-
     let res as String = sb.builder_to_string()
     sb.deinit_builder()
     return res
+
 
 // ---------------------------------------------------------------------------
 // Convenience wrapper: join(p1, p2) -> String
 // ---------------------------------------------------------------------------
 fn join(p1 as String, p2 as String) as String:
     return join_ref(ref p1, ref p2)
+
 
 // ============================================================================
 // dirname_ref(path) -> String
@@ -230,7 +238,6 @@ fn dirname_ref(path as ptr[String]) as String:
     let len as usize = (deref path).len
     if len == 0 to usize:
         return String("." to cstr)
-
     let mut prefix_len as usize = 0 to usize
     if is_windows():
         if len >= 2 to usize and (deref path).data[1] == 58 to u8 and is_letter((deref path).data[0]):
@@ -246,14 +253,11 @@ fn dirname_ref(path as ptr[String]) as String:
                     sep_count = sep_count + 1 to i64
                 i = i + 1 to usize
             prefix_len = i
-
     if prefix_len >= len:
         return String((deref path).data to cstr)
-
     let mut end_idx as i64 = len to i64 - 1
     while end_idx >= prefix_len to i64 and is_sep((deref path).data[end_idx]):
         end_idx = end_idx - 1
-
     if end_idx < prefix_len to i64:
         if prefix_len > 0 to usize:
             return make_from_slice((deref path).data, prefix_len)
@@ -262,21 +266,17 @@ fn dirname_ref(path as ptr[String]) as String:
                 return String(sep())
             else:
                 return String("." to cstr)
-
     let mut slash_idx as i64 = end_idx
     while slash_idx >= prefix_len to i64 and not is_sep((deref path).data[slash_idx]):
         slash_idx = slash_idx - 1
-
     if slash_idx < prefix_len to i64:
         if prefix_len > 0 to usize:
             return make_from_slice((deref path).data, prefix_len)
         else:
             return String("." to cstr)
-
     let mut dir_end as i64 = slash_idx - 1
     while dir_end >= prefix_len to i64 and is_sep((deref path).data[dir_end]):
         dir_end = dir_end - 1
-
     if dir_end < prefix_len to i64:
         if prefix_len > 0 to usize:
             return make_from_slice((deref path).data, prefix_len)
@@ -285,11 +285,13 @@ fn dirname_ref(path as ptr[String]) as String:
     else:
         return make_from_slice((deref path).data, (dir_end + 1) to usize)
 
+
 // ---------------------------------------------------------------------------
 // Convenience wrapper: dirname(path) -> String
 // ---------------------------------------------------------------------------
 fn dirname(path as String) as String:
     return dirname_ref(ref path)
+
 
 // ============================================================================
 // basename_ref(path) -> String
@@ -317,7 +319,6 @@ fn basename_ref(path as ptr[String]) as String:
     let len as usize = (deref path).len
     if len == 0 to usize:
         return String("" to cstr)
-
     let mut prefix_len as usize = 0 to usize
     if is_windows():
         if len >= 2 to usize and (deref path).data[1] == 58 to u8 and is_letter((deref path).data[0]):
@@ -333,11 +334,9 @@ fn basename_ref(path as ptr[String]) as String:
                     sep_count = sep_count + 1 to i64
                 i = i + 1 to usize
             prefix_len = i
-
     let mut end_idx as i64 = len to i64 - 1
     while end_idx >= prefix_len to i64 and is_sep((deref path).data[end_idx]):
         end_idx = end_idx - 1
-
     if end_idx < prefix_len to i64:
         if prefix_len > 0 to usize:
             return String("" to cstr)
@@ -346,11 +345,9 @@ fn basename_ref(path as ptr[String]) as String:
                 return String(sep())
             else:
                 return String("" to cstr)
-
     let mut slash_idx as i64 = end_idx
     while slash_idx >= prefix_len to i64 and not is_sep((deref path).data[slash_idx]):
         slash_idx = slash_idx - 1
-
     if slash_idx < prefix_len to i64:
         let start_ptr as ptr[u8] = ref (deref path).data[prefix_len]
         return make_from_slice(start_ptr, (end_idx - prefix_len to i64 + 1) to usize)
@@ -358,11 +355,13 @@ fn basename_ref(path as ptr[String]) as String:
         let start_ptr as ptr[u8] = ref (deref path).data[slash_idx + 1]
         return make_from_slice(start_ptr, (end_idx - slash_idx) to usize)
 
+
 // ---------------------------------------------------------------------------
 // Convenience wrapper: basename(path) -> String
 // ---------------------------------------------------------------------------
 fn basename(path as String) as String:
     return basename_ref(ref path)
+
 
 // ============================================================================
 // Module-level notes:

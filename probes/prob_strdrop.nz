@@ -1,13 +1,16 @@
 // Probe: does dropping a List[String] built from literals abort?
 from std.collections import List
 
+
 extern fn printf(format as cstr, ...) as i32
+
 
 fn build() as List[String]:
     var l as List[String] = List[String]()
     (ref l).append("alpha")
     (ref l).append("beta")
     return l
+
 
 fn main():
     var l as List[String] = build()

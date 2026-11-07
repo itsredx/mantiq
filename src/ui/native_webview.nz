@@ -1,8 +1,15 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 from std.string import String
 
-// ── Extern C Declarations ───────────────────────────────────────────────
-extern fn nizam_webview_create(title as cstr, width as i32, height as i32, resizable as i32, debug as i32) as ptr
+
+// ── Extern C Declarations ────────────────────────────────────────────────────
+extern fn nizam_webview_create(
+    title as cstr,
+    width as i32,
+    height as i32,
+    resizable as i32,
+    debug as i32,
+) as ptr
 extern fn nizam_webview_set_title(wv as ptr, title as cstr)
 extern fn nizam_webview_set_size(wv as ptr, width as i32, height as i32)
 extern fn nizam_webview_navigate(wv as ptr, url as cstr)
@@ -14,7 +21,8 @@ extern fn nizam_webview_step(wv as ptr)
 extern fn nizam_webview_terminate(wv as ptr)
 extern fn nizam_webview_destroy(wv as ptr)
 
-// ── Webview Window ──────────────────────────────────────────────────────
+
+// ── Webview Window ───────────────────────────────────────────────────────────
 struct WebviewWindow:
     public var handle as ptr
     public var title as String

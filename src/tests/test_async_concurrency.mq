@@ -1,28 +1,31 @@
-import string
-from string import String
 import error
 from error import DiagnosticEngine
-import symbols
-from symbols import Node, NodeType, LanguageMode, node_kind, node_is_async
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
-import types
-from types import Type, TypeKind
 import sema
 from sema import Sema
+import string
+from string import String
+import symbols
+from symbols import LanguageMode, Node, NodeType, node_is_async, node_kind
 import typecheck
 from typecheck import TypeChecker
+import types
+from types import Type, TypeKind
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
 
-// ── Assertions ─────────────────────────────────────────────────────────────
+
+// ── Assertions ───────────────────────────────────────────────────────────────
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
         exit(1 to i32)
 
-// ── AST Lowering, Sema & Typecheck Tests ────────────────────────────────────
+
+// ── AST Lowering, Sema & Typecheck Tests ─────────────────────────────────────
 fn test_ast_lowering_and_sema():
     let src as cstr = "async fn worker(x as i32) as i32:\n    return x * 2\n\nfn main():\n    let t = spawn worker(10)\n    let res = await t\n" to cstr
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "test_async.mq" to cstr)
@@ -47,9 +50,11 @@ fn test_ast_lowering_and_sema():
     assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
     let _ as i32 = printf("  PASS: Async / Concurrency AST lowering, sema, and typecheck\n" to cstr)
 
-// ── Async Functions ────────────────────────────────────────────────────────
+
+// ── Async Functions ──────────────────────────────────────────────────────────
 async fn async_add(a as i32, b as i32) as i32:
     return a + b
+
 
 async fn async_factorial(n as i32) as i32:
     if n <= 1 to i32:
@@ -61,10 +66,12 @@ async fn async_factorial(n as i32) as i32:
         i = i + 1 to i32
     return res
 
+
 async fn async_multiply(x as i32, y as i32) as i32:
     return x * y
 
-// ── Runtime Execution Tests ────────────────────────────────────────────────
+
+// ── Runtime Execution Tests ──────────────────────────────────────────────────
 fn test_basic_async_spawn_await():
     let t1 = spawn async_add(25 to i32, 17 to i32)
     let t2 = spawn async_factorial(5 to i32)
@@ -75,6 +82,7 @@ fn test_basic_async_spawn_await():
     assert_true(res1 == 42 to i32, "async_add(25, 17) must be 42" to cstr)
     assert_true(res2 == 120 to i32, "async_factorial(5) must be 120" to cstr)
     let _ as i32 = printf("  PASS: Basic spawn and await execution\n" to cstr)
+
 
 fn test_multiple_concurrent_tasks():
     let t_a = spawn async_add(100 to i32, 200 to i32)
@@ -93,7 +101,8 @@ fn test_multiple_concurrent_tasks():
     assert_true(val_d == 1000 to i32, "t_d must be 1000" to cstr)
     let _ as i32 = printf("  PASS: Multiple concurrent async tasks\n" to cstr)
 
-// ── Main Entry ─────────────────────────────────────────────────────────────
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     let _1 as i32 = printf("[TEST SUITE] Async & Concurrency (async fn, spawn, await)\n" to cstr)
     test_ast_lowering_and_sema()

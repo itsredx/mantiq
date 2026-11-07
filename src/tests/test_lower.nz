@@ -1,11 +1,13 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
+from std.collections import Dict, List
 from std.string import String
-from std.collections import List, Dict
-from symbols import Node, LanguageMode
-from lower import Lowerer, MacroDef
 
-// ── Main Entry ─────────────────────────────────────────────────────────
+from lower import Lowerer, MacroDef
+from symbols import LanguageMode, Node
+
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     let source as String = String.make("let x = 42" to cstr)
     let path as String = String.make("test.nz" to cstr)

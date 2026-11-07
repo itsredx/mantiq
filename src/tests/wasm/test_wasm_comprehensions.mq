@@ -1,11 +1,13 @@
-// ── Imports ──────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import string
 from string import String
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
 
-// ── Main Entrypoint ──────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     let _ as i32 = printf("=== Testing WASM Mantiq List Comprehensions ===\n" to cstr)
 

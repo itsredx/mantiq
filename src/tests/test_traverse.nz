@@ -1,7 +1,8 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 from lower import Lowerer, make_lowerer_from_cstr
 
-// ── Main Entry ─────────────────────────────────────────────────────────
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     // Parse variable declaration containing the binary expression "x + 42"
     let lower as ptr[Lowerer] = make_lowerer_from_cstr("let a = x + 42" to cstr, "test.nz" to cstr)
@@ -11,7 +12,6 @@ fn main():
     if root_ast == None to ptr:
         print("Lowering failed")
         return
-
     // Verify AST structure recursively
     let ok as bool = lower.verify_ast(root_ast)
     if ok:

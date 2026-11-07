@@ -1,18 +1,21 @@
-// ── Imports ──────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import string
 from string import String
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn exit(code as i32)
 
-// ── Assertions ───────────────────────────────────────────────────────
+
+// ── Assertions ───────────────────────────────────────────────────────────────
 fn assert_str_eq(actual as String, expected as cstr, msg as cstr):
     if strcmp(actual.data to cstr, expected) != 0:
         let _ as i32 = printf("FAIL: %s (got '%s', expected '%s')\n" to cstr, msg, actual.data to cstr, expected)
         exit(1 to i32)
 
-// ── Main Entrypoint ──────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     let _ as i32 = printf("=== Testing WASM Mantiq String Interpolation (F-Strings) ===\n" to cstr)
 

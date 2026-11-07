@@ -1,15 +1,17 @@
-from std.string import String, StringBuilder
 from std.collections import List
 from std.mem import make
+from std.string import String, StringBuilder
+
 
 fn append_cstr(sb as ptr[StringBuilder], s as cstr):
     (deref sb).append(s)
 
+
 fn slen(data as ptr[u8], at as i64, blen as i64) as i64:
     var depth as i64 = 0 to i64
     var k as i64 = 1 to i64
-    while (at + k) < blen:
-        let c as u8 = deref ((data to usize + (at + k)) to ptr[u8])
+    while (at +k) < blen:
+        let c as u8 = deref ((data to usize + (at +k)) to ptr[u8])
         if c == 123 to u8 or c == 91 to u8:
             depth = depth + 1 to i64
         elif c == 125 to u8 or c == 93 to u8:
@@ -19,25 +21,33 @@ fn slen(data as ptr[u8], at as i64, blen as i64) as i64:
         k = k + 1 to i64
     return k - 1 to i64
 
+
 fn scopy(data as ptr[u8], at as i64, blen as i64, arena as ptr[u8], cur_off as i64) as i64:
     let nlen as i64 = slen(data, at, blen) to i64
     if nlen <= 0 to i64 or nlen > 4096 to i64:
         return cur_off
     var k as i64 = 0 to i64
     while k < nlen:
-        let srcb as u8 = (deref ((data to usize + (at + 1 to i64 + k)) to ptr[u8]))
+        let srcb as u8 = (deref ((data to usize + (at +1 to i64 + k)) to ptr[u8]))
         arena[(cur_off + k)] = srcb
         k = k + 1 to i64
     arena[(cur_off + nlen)] = 0 to u8
     return (cur_off + nlen + 1 to i64)
 
-fn n_contains(offs as List[i64], ends as List[i64], arena as ptr[u8], name_data as ptr[u8], name_len as i64) as i32:
+
+fn n_contains(
+    offs as List[i64],
+    ends as List[i64],
+    arena as ptr[u8],
+    name_data as ptr[u8],
+    name_len as i64,
+) as i32:
     let n as i64 = offs.length()
     var i as i64 = 0 to i64
     while i < n:
         let sv as i64 = offs[i]
         let ev as i64 = ends[i]
-        let seglen as i64 = (ev - sv) - 1 to i64
+        let seglen as i64 = (ev - sv) -1 to i64
         if seglen == name_len:
             var k as i64 = 0 to i64
             var matched as i32 = 1 to i32
@@ -51,6 +61,7 @@ fn n_contains(offs as List[i64], ends as List[i64], arena as ptr[u8], name_data 
                 return 1 to i32
         i = i + 1 to i64
     return 0 to i32
+
 
 fn filter_declares(text as String) as String:
     if text.data == None to ptr[u8]:
@@ -149,9 +160,9 @@ fn filter_declares(text as String) as String:
                     if got_at == 1 to i32:
                         let nlen as i64 = slen(td, at, i) to i64
                         if nlen > 0 to i64 and nlen <= 4096 to i64:
-                            if n_contains(offs, ends, arena, (td to usize + (at + 1 to i64)) to ptr[u8], nlen) == 1 to i32:
+                            if n_contains(offs, ends, arena, (td to usize + (at +1 to i64)) to ptr[u8], nlen) == 1 to i32:
                                 keep = 0 to i32
-                            elif n_contains(offs2, ends2, seen_arena, (td to usize + (at + 1 to i64)) to ptr[u8], nlen) == 1 to i32:
+                            elif n_contains(offs2, ends2, seen_arena, (td to usize + (at +1 to i64)) to ptr[u8], nlen) == 1 to i32:
                                 keep = 0 to i32
                             else:
                                 let newcur as i64 = scopy(td, at, i, seen_arena, scur)
@@ -168,6 +179,7 @@ fn filter_declares(text as String) as String:
         i = i + 1 to i64
     return out2.to_string()
 
+
 fn count_sub(hay as ptr[u8], hlen as i64, needle as cstr) as i64:
     extern fn strlen(s as cstr) as usize
     let nlen as usize = strlen(needle)
@@ -178,13 +190,14 @@ fn count_sub(hay as ptr[u8], hlen as i64, needle as cstr) as i64:
         var j as i64 = 0 to i64
         var ok as i32 = 1 to i32
         while j < nlen64:
-            if deref ((hay to usize + (i + j)) to ptr[u8]) != deref (((needle to usize) + j) to ptr[u8]):
+            if deref ((hay to usize + (i + j)) to ptr[u8]) != deref (((needle to usize) +j) to ptr[u8]):
                 ok = 0 to i32
             j = j + 1 to i64
         if ok == 1 to i32:
             count = count + 1 to i64
         i = i + 1 to i64
     return count
+
 
 fn main() as i32:
     let input as String = String.make("declare i64 @mantiq_strlen(ptr)\ndeclare ptr @calloc(i64, i64)\n@.str = type [8 x i8]\n\ndeclare i64 @mantiq_strlen(ptr)\ndeclare i64 @mantiq_strlen(ptr)\ndeclare ptr @calloc(i64, i64)\n")

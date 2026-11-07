@@ -1,13 +1,16 @@
-// ── Imports ──────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import string
 from string import String
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
 
-// ── Cooperative Coroutines ───────────────────────────────────────────
+
+// ── Cooperative Coroutines ───────────────────────────────────────────────────
 async fn async_worker(id as i32, multiplier as i32) as i32:
     return id * multiplier
+
 
 async fn async_sum(limit as i32) as i32:
     var acc as i32 = 0
@@ -17,7 +20,8 @@ async fn async_sum(limit as i32) as i32:
         i = i + 1
     return acc
 
-// ── Main Entrypoint ──────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     let _ as i32 = printf("=== Testing WASM Mantiq Actor & Async Concurrency ===\n" to cstr)
 

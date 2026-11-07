@@ -1,32 +1,36 @@
-import string
-from string import String
 import error
 from error import DiagnosticEngine
-import symbols
-from symbols import Node, NodeType, LanguageMode, node_kind
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
-import types
-from types import Type, TypeKind
 import sema
 from sema import Sema
+import string
+from string import String
+import symbols
+from symbols import LanguageMode, Node, NodeType, node_kind
 import typecheck
 from typecheck import TypeChecker
+import types
+from types import Type, TypeKind
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
-// ── Assertions ─────────────────────────────────────────────────────────────
+
+// ── Assertions ───────────────────────────────────────────────────────────────
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
         exit(1 to i32)
 
+
 fn assert_str_eq(actual as String, expected as cstr, msg as cstr):
     if strcmp(actual.data to cstr, expected) != 0:
         let _ as i32 = printf("FAIL: %s (got '%s', expected '%s')\n" to cstr, msg, actual.data to cstr, expected)
         exit(1 to i32)
+
 
 fn test_ast_lowering_and_sema():
     let src as cstr = "let name = \"Alice\"\nlet msg = f\"Hello {name}!\"\nlet count = 42\nlet calc = `Count is: {count}`\nlet escaped = f\"Escaped {{braces}} {count}\"\n" to cstr
@@ -52,11 +56,13 @@ fn test_ast_lowering_and_sema():
     assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
     let _ as i32 = printf("  PASS: F-Strings AST lowering, sema, and typecheck\n" to cstr)
 
+
 fn test_basic_fstring():
     let name as String = String.make("World" to cstr)
     let greeting as String = f"Hello, {name}!"
     assert_str_eq(greeting, "Hello, World!" to cstr, "Basic string interpolation" to cstr)
     let _ as i32 = printf("  PASS: Basic F-String variable interpolation\n" to cstr)
+
 
 fn test_number_and_bool_interpolation():
     let i as i32 = 100 to i32
@@ -69,12 +75,14 @@ fn test_number_and_bool_interpolation():
     assert_str_eq(s_bool, "Flag: True, Other: False" to cstr, "bool interpolation" to cstr)
     let _ as i32 = printf("  PASS: Integer and Boolean interpolation\n" to cstr)
 
+
 fn test_expression_interpolation():
     let a as i32 = 20 to i32
     let b as i32 = 30 to i32
     let s_expr as String = f"Sum: {a + b}"
     assert_str_eq(s_expr, "Sum: 50" to cstr, "Binary expression interpolation" to cstr)
     let _ as i32 = printf("  PASS: Binary expression inside interpolation\n" to cstr)
+
 
 fn test_backtick_and_escaped_braces():
     let item as String = String.make("apple" to cstr)
@@ -85,6 +93,7 @@ fn test_backtick_and_escaped_braces():
     let braces as String = f"{{literal braces}} and {item}"
     assert_str_eq(braces, "{literal braces} and apple" to cstr, "Escaped braces in f-string" to cstr)
     let _ as i32 = printf("  PASS: Backtick strings and escaped braces\n" to cstr)
+
 
 fn test_quote_varieties_and_floats():
     let single_q as String = f'Single: {10 to i32}'
@@ -106,6 +115,7 @@ fn test_quote_varieties_and_floats():
     let multi as String = f"{a} + {b} = {c}"
     assert_str_eq(multi, "1 + 2 = 3" to cstr, "Multi-part interpolation" to cstr)
     let _ as i32 = printf("  PASS: Quote varieties, floats, and multi-part interpolations\n" to cstr)
+
 
 fn main() as i32:
     let _ as i32 = printf("=== Running String Interpolation (F-Strings) Test Suite ===\n" to cstr)

@@ -1,17 +1,20 @@
-// ── Extern Declarations ──────────────────────────────────────────────
+// ── Extern Declarations ──────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn exit(code as i32)
 
-// ── Test Assertions ──────────────────────────────────────────────────
+
+// ── Test Assertions ──────────────────────────────────────────────────────────
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
         exit(1)
 
-// ── Interface & Class Hierarchy ──────────────────────────────────────
+
+// ── Interface & Class Hierarchy ──────────────────────────────────────────────
 interface Shape:
     fn area(self) as f64
     fn perimeter(self) as f64
+
 
 class Circle:
     public var radius as f64
@@ -21,6 +24,7 @@ class Circle:
 
     public fn perimeter(self) as f64:
         return 2.0 * 3.14159 * (deref self).radius
+
 
 class Rectangle:
     public var width as f64
@@ -32,11 +36,13 @@ class Rectangle:
     public fn perimeter(self) as f64:
         return 2.0 * ((deref self).width + (deref self).height)
 
+
 class BaseEntity:
     public var id as i32
 
     public fn compute(self) as i32:
         return (deref self).id * 10
+
 
 class Player(BaseEntity):
     public var score as i32
@@ -45,7 +51,8 @@ class Player(BaseEntity):
         let base_res as i32 = super().compute()
         return base_res + (deref self).score
 
-// ── Main Entrypoint ──────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     let _ as i32 = printf("=== Testing WASM Mantiq Classes & Interfaces ===\n" to cstr)
 

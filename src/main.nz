@@ -1,33 +1,35 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
+from std.collections import Dict, List
 from std.string import String, StringBuilder
-from std.collections import List, Dict
-import symbols
-from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, node_return_type_annot, TypeAnnotation, node_kind, node_declarations, set_node_declarations, node_name
-import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr, make_lowerer_from_cstr, monomorphize_program, monomorphize_with_sources
-import sema
-from sema import Sema
-import types
-from types import Type, TypeKind, make_type
-import typecheck
-from typecheck import TypeChecker
+
 import borrowck
 from borrowck import BorrowChecker
-import dce
-from dce import DeadCodeEliminator
-import codegen
-from codegen import LLVMCodegen
-import layout
-from layout import Target
 import cfg
 from cfg import CFGAnalyzer
+import codegen
+from codegen import LLVMCodegen
+import dce
+from dce import DeadCodeEliminator
 import error
 from error import DiagnosticEngine
 import fmt
 from fmt import fmt_transform
+import layout
+from layout import Target
+import lower
+from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr, monomorphize_program, monomorphize_with_sources
+import sema
+from sema import Sema
+import symbols
+from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, TypeAnnotation, node_declarations, node_kind, node_name, node_return_type_annot, set_node_declarations
+import typecheck
+from typecheck import TypeChecker
+import types
+from types import Type, TypeKind, make_type
 
-// ── Program-local allocator surface (leak-mode) ─────────────────────────
+
+// ── Program-local allocator surface (leak-mode) ──────────────────────────────
 // Defining these in the TU is the ONLY reliable override: the compiler
 // lazily emits mantiq_free/mantiq_realloc bodies from templates baked into
 // whichever binary is building, unless the program already defines them
@@ -42,6 +44,7 @@ from fmt import fmt_transform
 // but never releases the old block, so stale shallow copies stay valid.
 fn mantiq_free(ptr_val as ptr):
     return
+
 
 fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
     extern fn malloc(sz as i64) as ptr
@@ -59,7 +62,8 @@ fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
         let _ as ptr = memcpy(out, old_ptr, cp)
     return out
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
@@ -81,12 +85,12 @@ extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
 extern fn access(path as cstr, mode as i32) as i32
 
 
-// ── Milestone D: native ports of the last runtime.c functions ──────────
+// ── Milestone D: native ports of the last runtime.c functions ────────────────
 // Everything here was previously resolved from runtime.c at link time.
 // These are TU-local definitions: the compiler binary carries its own
 // copies, so runtime.c is no longer linked into native builds.
 //
-// ── Direct Process Execution (no /bin/sh overhead) ──────────────────────
+// ── Direct Process Execution (no /bin/sh overhead) ───────────────────────────
 fn mantiq_run_command_direct(argv as ptr[cstr]) as i32:
     extern fn fork() as i32
     extern fn execvp(file as cstr, argv as ptr[cstr]) as i32
@@ -113,6 +117,7 @@ fn mantiq_run_command_direct(argv as ptr[cstr]) as i32:
         return code & 255
     return sig
 
+
 // Guard: reject filesystem paths containing control bytes. Such paths can
 // only originate from uninitialized or freed memory passed as a cstr (see
 // docs/runtime-elimination-notes.md, aliasing-drop instances #1-#5);
@@ -122,12 +127,13 @@ fn mantiq_path_sane(p as cstr) as i32:
         return 0 to i32
     let pu as ptr[u8] = p to ptr[u8]
     var i as usize = 0 to usize
-    while pu[i] != 0 to u8:
-        let c as i32 = pu[i] to i32
+    while pu [i] != 0 to u8:
+        let c as i32 = pu [i] to i32
         if c < 32 to i32 or c == 127 to i32:
             return 0 to i32
         i = i + 1 to usize
     return 1 to i32
+
 
 fn mantiq_mkdir_p(dir_path as cstr) as i32:
     extern fn mkdir(path as cstr, mode as i32) as i32
@@ -155,6 +161,7 @@ fn mantiq_mkdir_p(dir_path as cstr) as i32:
         return 0 to i32
     return 1 to i32
 
+
 fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
     extern fn open(path as cstr, flags as i32, mode as i32) as i32
     extern fn close(fd as i32) as i32
@@ -176,7 +183,7 @@ fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
         let _m2 as ptr = memcpy(ddir to ptr, dst_path to ptr, dlen + 1 to usize)
         var li as usize = dlen
         while li > 0 to usize:
-            li = li - 1 to usize
+            li = li -1 to usize
             if ddir[li] == 47 to u8: // '/'
                 ddir[li] = 0 to u8
                 let _mk as i32 = mantiq_mkdir_p(ddir to cstr)
@@ -206,7 +213,8 @@ fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
         return 0 to i32
     return 1 to i32
 
-// ── Performance Monitor ─────────────────────────────────────────────────
+
+// ── Performance Monitor ──────────────────────────────────────────────────────
 fn mantiq_perf_now_ns() as i64:
     extern fn clock_gettime(clk as i32, ts as ptr) as i32
     let ts as ptr[i64] = malloc(16 to usize) to ptr[i64]
@@ -214,6 +222,7 @@ fn mantiq_perf_now_ns() as i64:
     let sec as i64 = ts[0]
     let nsec as i64 = ts[1]
     return sec * 1000000000 + nsec
+
 
 fn mantiq_perf_rss_bytes() as i64:
     extern fn getrusage(who as i32, usage as ptr) as i32
@@ -225,6 +234,7 @@ fn mantiq_perf_rss_bytes() as i64:
     let kb as i64 = p[0]
     return kb * 1024
 
+
 // The C-side tallies (_alloc_count/_alloc_bytes/_free_count) only counted
 // allocations made by runtime.c's own C-internal helpers; the Nizam-side
 // mantiq_malloc (calloc-backed) never fed them. Ported as inert zeros to
@@ -232,24 +242,30 @@ fn mantiq_perf_rss_bytes() as i64:
 fn mantiq_alloc_count() as i64:
     return 0 to i64
 
+
 fn mantiq_alloc_bytes() as i64:
     return 0 to i64
+
 
 fn mantiq_free_count() as i64:
     return 0 to i64
 
+
 fn mantiq_set_profile_active(active as i32):
     return
+
 
 // Leak-mode: the C bump-arena reset/destroy is a no-op (stale pointers stay
 // valid; mantiq_ast_alloc now calloc's fresh zeroed blocks).
 fn mantiq_ast_arena_reset():
     return
 
+
 fn mantiq_intern_reset():
     return
 
-// ── Allocator / interning surface (last runtime.c link-time deps) ───────
+
+// ── Allocator / interning surface (last runtime.c link-time deps) ────────────
 // Leak-mode semantics: allocations are never released, so the C arena, slab
 // and page machinery reduce to fresh zeroed allocations. The needle text in
 // emit_rt_glue_bodies (codegen.nz) matches these compiled defines, so the
@@ -267,9 +283,11 @@ fn mantiq_ast_alloc(sz as usize) as ptr:
         return calloc(1 to usize, 1 to usize)
     return calloc(1 to usize, sz)
 
+
 fn mantiq_alloc_box32() as ptr:
     extern fn calloc(nmemb as usize, sz as usize) as ptr
     return calloc(1 to usize, 32 to usize)
+
 
 fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]:
     extern fn calloc(nmemb as usize, sz as usize) as ptr
@@ -279,8 +297,16 @@ fn mantiq_intern_string(s as cstr, len as usize) as ptr[u8]:
     let _m as ptr = memcpy(buf to ptr, s to ptr, len)
     return buf
 
+
 fn mantiq_page_alloc(req_size as usize) as ptr[u8]:
-    extern fn mmap(addr as ptr, length as usize, prot as i32, flags as i32, fd as i32, offset as i64) as ptr
+    extern fn mmap(
+        addr as ptr,
+        length as usize,
+        prot as i32,
+        flags as i32,
+        fd as i32,
+        offset as i64,
+    ) as ptr
     if req_size == 0 to usize:
         return None to ptr[u8]
     let aligned as usize = ((req_size + 4095 to usize) / 4096 to usize) * 4096 to usize
@@ -292,6 +318,7 @@ fn mantiq_page_alloc(req_size as usize) as ptr[u8]:
         return None to ptr[u8]
     return res to ptr[u8]
 
+
 fn mantiq_page_free(ptr_val as ptr[u8], req_size as usize):
     extern fn munmap(addr as ptr, length as usize) as i32
     if ptr_val == None to ptr[u8] or req_size == 0 to usize:
@@ -300,11 +327,14 @@ fn mantiq_page_free(ptr_val as ptr[u8], req_size as usize):
     let _r as i32 = munmap(ptr_val to ptr, aligned)
     return
 
+
 fn perf_now_ns() as i64:
     return mantiq_perf_now_ns()
 
+
 fn perf_rss_bytes() as i64:
     return mantiq_perf_rss_bytes()
+
 
 struct PerfPhase:
     public var name as cstr
@@ -313,6 +343,7 @@ struct PerfPhase:
     public var rss_end as i64
     public var alloc_delta as i64
     public var bytes_delta as i64
+
 
 struct PerfState:
     public var phase_buf as ptr[PerfPhase]
@@ -326,10 +357,12 @@ struct PerfState:
     public var allocs_last as i64
     public var bytes_last as i64
 
+
 fn perf_init() as PerfState:
     let a_start as i64 = mantiq_alloc_count()
     let b_start as i64 = mantiq_alloc_bytes()
     return PerfState(phase_buf = make[PerfPhase](16 to usize) to ptr[PerfPhase], phase_count = 0 to i64, wall_start = perf_now_ns(), rss_start = perf_rss_bytes(), enabled = False, allocs_start = a_start, bytes_start = b_start, frees_start = mantiq_free_count(), allocs_last = a_start, bytes_last = b_start)
+
 
 fn perf_begin(p as ptr[PerfState], name as cstr) as i64:
     if (deref p).enabled:
@@ -338,6 +371,7 @@ fn perf_begin(p as ptr[PerfState], name as cstr) as i64:
         (deref p).allocs_last = mantiq_alloc_count()
         (deref p).bytes_last = mantiq_alloc_bytes()
     return perf_now_ns()
+
 
 fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
     if not (deref p).enabled:
@@ -357,6 +391,7 @@ fn perf_end(p as ptr[PerfState], name as cstr, t0 as i64):
         let p_ptr as ptr[PerfPhase] = (base + offset) to ptr[PerfPhase]
         deref p_ptr = PerfPhase(name = name, time_ns = t1 - t0, rss_start = (deref p).rss_start, rss_end = rss_now, alloc_delta = a_delta, bytes_delta = b_delta)
         (deref p).phase_count = idx + 1 to i64
+
 
 fn perf_print(p as ptr[PerfState]):
     if not (deref p).enabled:
@@ -400,7 +435,6 @@ fn perf_print(p as ptr[PerfState]):
             let _ as i32 = sprintf(buf, "%ld.%ld ms", t_ns / 1000000 to i64, (t_ns % 1000000 to i64) / 100000 to i64)
         else:
             let _ as i32 = sprintf(buf, "%ld.%ld s", t_ns / 1000000000 to i64, (t_ns % 1000000000 to i64) / 100000000 to i64)
-
         let rss_delta as i64 = ph.rss_end - ph.rss_start
         let rss_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
         if rss_delta >= 0 to i64:
@@ -411,7 +445,6 @@ fn perf_print(p as ptr[PerfState]):
         let _ as i32 = sprintf(bytes_buf, "%ld KB", ph.bytes_delta / 1024 to i64)
         let _fp as i32 = printf("│  %-20s %10s %9s %10ld %11s  │\n" to cstr, ph.name, buf, rss_buf, ph.alloc_delta, bytes_buf)
         i = i + 1 to i64
-
     let _f7 as i32 = printf("├───────────────────────────────────────────────────────────────────┤\n" to cstr)
     let alloc_now as i64 = mantiq_alloc_count()
     let bytes_now as i64 = mantiq_alloc_bytes()
@@ -428,7 +461,8 @@ fn perf_print(p as ptr[PerfState]):
     let _f7d as i32 = printf("└───────────────────────────────────────────────────────────────────┘\n" to cstr)
     let _f8 as i32 = fflush(None to ptr)
 
-// ── File I/O Helper ──────────────────────────────────────────────────────
+
+// ── File I/O Helper ──────────────────────────────────────────────────────────
 fn read_file_to_cstr(path as cstr) as cstr:
     let f as ptr = fopen(path, "rb" to cstr)
     if f == None to ptr:
@@ -446,7 +480,8 @@ fn read_file_to_cstr(path as cstr) as cstr:
     deref (end_ptr to ptr[u8]) = 0 to u8
     return buf to cstr
 
-// ── Mode Detection Helpers ─────────────────────────────────────────────
+
+// ── Mode Detection Helpers ───────────────────────────────────────────────────
 fn str_ends_with(haystack as cstr, suffix as cstr) as bool:
     if haystack == None to cstr or suffix == None to cstr:
         return False
@@ -456,10 +491,12 @@ fn str_ends_with(haystack as cstr, suffix as cstr) as bool:
         return False
     return strcmp((haystack to usize + (hl - sl)) to cstr, suffix) == 0
 
+
 fn str_contains(haystack as cstr, needle as cstr) as bool:
     if haystack == None to cstr or needle == None to cstr:
         return False
     return strstr(haystack, needle) != None to cstr
+
 
 fn detect_mode(input_path as cstr, default_mode as i32) as i32:
     if input_path != None to cstr:
@@ -469,10 +506,12 @@ fn detect_mode(input_path as cstr, default_mode as i32) as i32:
             return LanguageMode.Mantiq to i32
     return default_mode
 
+
 fn compiler_name(mode as i32) as cstr:
     if mode == LanguageMode.Nizam to i32:
-        return "Nizam" to cstr
-    return "Mantiq" to cstr
+        return"Nizam" to cstr
+    return"Mantiq" to cstr
+
 
 fn get_module_name_from_path(path as cstr) as String:
     if path == None to cstr:
@@ -489,7 +528,7 @@ fn get_module_name_from_path(path as cstr) as String:
             start = i
             break
         i = i - 1 to usize
-    let base_ptr as cstr = ((path to usize) + start) to cstr
+    let base_ptr as cstr = ((path to usize) +start) to cstr
     let base_len as usize = strlen(base_ptr)
     var end as usize = base_len
     if strstr(base_ptr, ".abi3.so" to cstr) != None to cstr:
@@ -514,7 +553,8 @@ fn get_module_name_from_path(path as cstr) as String:
     free(buf to ptr)
     return res
 
-// ── Cache Content Keys ──────────────────────────────────────────────────
+
+// ── Cache Content Keys ───────────────────────────────────────────────────────
 // Milestone D: the C sha256 engine is gone with runtime.c. Cache keys now
 // use a dual-seed FNV-1a (two independent 32-bit streams combined into a
 // 64-bit key, no shared state with the 32-bit FNV used for dict hashing).
@@ -530,6 +570,7 @@ fn fnv1a32_stream(data as ptr[u8], len as usize, seed as i64) as i64:
         hash = (hash * 16777619) & m32
         i = i + 1 to usize
     return hash
+
 
 fn get_file_sha256(path as cstr) as String:
     let buf as ptr[u8] = malloc(17 to usize) to ptr[u8]
@@ -552,6 +593,7 @@ fn get_file_sha256(path as cstr) as String:
     free(buf to ptr)
     return s
 
+
 fn get_str_sha256(data as cstr, len as usize) as String:
     let buf as ptr[u8] = malloc(17 to usize) to ptr[u8]
     let h1 as i64 = fnv1a32_stream(data to ptr[u8], len, 2166136261)
@@ -560,6 +602,7 @@ fn get_str_sha256(data as cstr, len as usize) as String:
     let s as String = String.make(buf to cstr)
     free(buf to ptr)
     return s
+
 
 fn split_lines(content as String) as List[String]:
     let lines as List[String] = List[String]()
@@ -584,8 +627,19 @@ fn split_lines(content as String) as List[String]:
         free(buf to ptr)
     return lines
 
-// ── Compiler Pipeline ───────────────────────────────────────────────────
-fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode as i32, target_str as cstr, perf as ptr[PerfState], is_debug as bool, use_cache as bool, cache_dir as cstr) as bool:
+
+// ── Compiler Pipeline ────────────────────────────────────────────────────────
+fn compile_source(
+    source_cstr as cstr,
+    path_cstr as cstr,
+    out_file as cstr,
+    mode as i32,
+    target_str as cstr,
+    perf as ptr[PerfState],
+    is_debug as bool,
+    use_cache as bool,
+    cache_dir as cstr,
+) as bool:
     let exe_sha as String = get_file_sha256("/proc/self/exe" to cstr)
     let flags_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
     let _fb as i32 = sprintf(flags_buf, "%d_%s_%d_%s" to cstr, mode, target_str, if is_debug: 1 to i32 else: 0 to i32, exe_sha.data to cstr)
@@ -608,7 +662,6 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         mantiq_mkdir_p(cache_dir)
         mantiq_mkdir_p(bin_dir.data to cstr)
         mantiq_mkdir_p(meta_dir.data to cstr)
-
     let path_len as usize = strlen(path_cstr)
     let path_hash as String = get_str_sha256(path_cstr, path_len)
     let dep_path_sb as StringBuilder = StringBuilder.make()
@@ -619,7 +672,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let dep_file_path as String = dep_path_sb.to_string()
     dep_path_sb.deinit()
 
-    // ── Tier 1 Cache Check (Dependency Graph Short-Circuit) ──
+    // ── Tier 1 Cache Check (Dependency Graph Short-Circuit) ──────────────────────
     if use_cache and access(dep_file_path.data to cstr, 0 to i32) == 0 to i32:
         let dep_raw as cstr = read_file_to_cstr(dep_file_path.data to cstr)
         if dep_raw != None to cstr:
@@ -659,15 +712,13 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
                                     mantiq_ast_arena_reset()
                                     mantiq_intern_reset()
                                     return True
-
-
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make(path_cstr), String.make(source_cstr))
 
     let target as Target = Target.from_triple(target_str)
 
-    // ── Phase 1: Parse / Lower ──
+    // ── Phase 1: Parse / Lower ───────────────────────────────────────────────────
     let t0 as i64 = perf_begin(perf, "parse")
     var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
     if mode == LanguageMode.Nizam to i32:
@@ -683,9 +734,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         mantiq_ast_arena_reset()
         mantiq_intern_reset()
         return False
-
-
-    // ── Phase 2: Semantic Analysis ──
+    // ── Phase 2: Semantic Analysis ───────────────────────────────────────────────
     let t1 as i64 = perf_begin(perf, "sema")
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref sema).init_sema(path_cstr)
@@ -730,21 +779,21 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     sema.analyze_gil_safety(root)
     perf_end(perf, "sema", t1)
 
-    // ── Phase 3: Type Checking ──
+    // ── Phase 3: Type Checking ───────────────────────────────────────────────────
     let t2 as i64 = perf_begin(perf, "typecheck")
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc).init_tc(sema)
     let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
     perf_end(perf, "typecheck", t2)
 
-    // ── Phase 4: CFG Analysis & Drop Elaboration ──
+    // ── Phase 4: CFG Analysis & Drop Elaboration ─────────────────────────────────
     let t_cfg as i64 = perf_begin(perf, "cfg")
     let cfg_an as ptr[CFGAnalyzer] = make[CFGAnalyzer](1 to usize) to ptr[CFGAnalyzer]
     (deref cfg_an).init_cfg(engine, (deref sema).current_file)
     let _cfg_ok as bool = (deref cfg_an).analyze_program(root)
     perf_end(perf, "cfg", t_cfg)
 
-    // ── Phase 4.1: Borrow Checking ──
+    // ── Phase 4.1: Borrow Checking ───────────────────────────────────────────────
     let t3 as i64 = perf_begin(perf, "borrowck")
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     (deref bc).init_bc()
@@ -759,16 +808,14 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         mantiq_ast_arena_reset()
         mantiq_intern_reset()
         return False
-
-
-    // ── Phase 4.5: Dead Code Elimination ──
+    // ── Phase 4.5: Dead Code Elimination ─────────────────────────────────────────
     let t_dce as i64 = perf_begin(perf, "dce")
     let dce_opt as ptr[DeadCodeEliminator] = make[DeadCodeEliminator](1 to usize) to ptr[DeadCodeEliminator]
     (deref dce_opt).init_dce()
     dce_opt.optimize_program(root)
     perf_end(perf, "dce", t_dce)
 
-    // ── Phase 5: Code Generation ──
+    // ── Phase 5: Code Generation ─────────────────────────────────────────────────
     let t4 as i64 = perf_begin(perf, "codegen")
     let cg as ptr[LLVMCodegen] = make[LLVMCodegen](1 to usize) to ptr[LLVMCodegen]
     (deref cg).init_cg()
@@ -784,7 +831,7 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
     let ir_str as String = (deref cg).generate(root)
     perf_end(perf, "codegen", t4)
 
-    // ── Tier 2 Cache Check (IR Link Short-Circuit) ──
+    // ── Tier 2 Cache Check (IR Link Short-Circuit) ───────────────────────────────
     let ir_sha as String = get_str_sha256(ir_str.data to cstr, ir_str.len)
     let bin_name_sb as StringBuilder = StringBuilder.make()
     bin_name_sb.append(ir_sha.data to cstr)
@@ -805,10 +852,9 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         let copy_ok as i32 = mantiq_copy_file(cached_bin_path.data to cstr, out_file)
         if copy_ok != 0:
             link_cache_hit = True
-
     var res as i32 = 0
     if not link_cache_hit:
-        // ── Phase 6: Write IR ──
+        // ── Phase 6: Write IR ────────────────────────────────────────────────────────
         let t5 as i64 = perf_begin(perf, "write_ir")
         let ll_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
         let _ll0 as i32 = sprintf(ll_buf, "%s.ll" to cstr, out_file)
@@ -819,16 +865,15 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             mantiq_ast_arena_reset()
             mantiq_intern_reset()
             return False
-
         let _w1 as usize = fwrite(ir_str.data to ptr, 1 to usize, ir_str.len, f_ll)
         fclose(f_ll)
         perf_end(perf, "write_ir", t5)
 
-        // ── Phase 7: Link ──
+        // ── Phase 7: Link ────────────────────────────────────────────────────────────
         let t6 as i64 = perf_begin(perf, "link")
         let lib_dir as cstr = compiler_lib_dir()
         let cmd_buf as ptr[u8] = malloc(8192 to usize) to ptr[u8]
-        
+
         let extra_flags as StringBuilder = StringBuilder.make()
         let lt_count as i64 = (deref sema).link_targets.length()
         var lti as i64 = 0 to i64
@@ -861,7 +906,6 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             let rt_o_str as String = rt_o_sb.to_string()
             has_rt_obj = access(rt_o_str.data to cstr, 0 to i32) == 0 to i32
             rt_o_sb.deinit()
-
         var has_wasm_rt_obj as bool = False
         var wasm_rt_obj_path as String = String.make("" to cstr)
         if lib_dir != None to cstr:
@@ -878,7 +922,6 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             elif access("runtime_wasm.o" to cstr, 0 to i32) == 0 to i32:
                 wasm_rt_obj_path = String.make("runtime_wasm.o" to cstr)
                 has_wasm_rt_obj = True
-
         var _sp as i32 = 0
         if target.is_wasm():
             var wasm_rt_src as String = String.make("" to cstr)
@@ -1033,7 +1076,6 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
             res = system(cmd_buf to cstr)
         free(cmd_buf to ptr)
         perf_end(perf, "link", t6)
-
     if res == 0 and use_cache:
         if not link_cache_hit:
             let _cb_ok as i32 = mantiq_copy_file(out_file, cached_bin_path.data to cstr)
@@ -1065,39 +1107,42 @@ fn compile_source(source_cstr as cstr, path_cstr as cstr, out_file as cstr, mode
         if f_dep != None to ptr:
             let _w_dep as usize = fwrite(dep_content.data to ptr, 1 to usize, dep_content.len, f_dep)
             fclose(f_dep)
-
     if target.is_python_ext() and res == 0:
-        // ── Phase 7.5: Generate and write PEP 484 type stub (.pyi) ──
+        // ── Phase 7.5: Generate and write PEP 484 type stub (.pyi) ───────────────────
         let pyi_content as String = (deref cg).generate_pyi_stub()
         let pyi_buf as ptr[u8] = malloc(2048 to usize) to ptr[u8]
         let out_len as usize = strlen(out_file)
         var base_len as usize = out_len
-        if out_len > 8 to usize and strcmp(((out_file to usize) + (out_len - 8 to usize)) to cstr, ".abi3.so" to cstr) == 0:
+        if out_len > 8 to usize and strcmp(((out_file to usize) +(out_len - 8 to usize)) to cstr, ".abi3.so" to cstr) == 0:
             base_len = out_len - 8 to usize
-        elif out_len > 3 to usize and strcmp(((out_file to usize) + (out_len - 3 to usize)) to cstr, ".so" to cstr) == 0:
+        elif out_len > 3 to usize and strcmp(((out_file to usize) +(out_len - 3 to usize)) to cstr, ".so" to cstr) == 0:
             base_len = out_len - 3 to usize
         memcpy(pyi_buf to ptr, out_file to ptr, base_len)
         let pyi_suffix as cstr = ".pyi" to cstr
-        memcpy(((pyi_buf to usize) + base_len) to ptr, pyi_suffix to ptr, 5 to usize)
+        memcpy(((pyi_buf to usize) +base_len) to ptr, pyi_suffix to ptr, 5 to usize)
         let pyi_path as cstr = pyi_buf to cstr
         let f_pyi as ptr = fopen(pyi_path, "wb" to cstr)
         if f_pyi != None to ptr:
             let _w_pyi as usize = fwrite(pyi_content.data to ptr, 1 to usize, pyi_content.len, f_pyi)
             fclose(f_pyi)
         free(pyi_buf to ptr)
-
     mantiq_ast_arena_reset()
     mantiq_intern_reset()
     return res == 0
 
 
-// ── Check Pipeline (Syntax, Semantic, Types, Borrowck) ───────────────────
-fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr[PerfState]) as bool:
+// ── Check Pipeline (Syntax, Semantic, Types, Borrowck) ───────────────────────
+fn check_source(
+    source_cstr as cstr,
+    path_cstr as cstr,
+    mode as i32,
+    perf as ptr[PerfState],
+) as bool:
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make(path_cstr), String.make(source_cstr))
 
-    // ── Phase 1: Parse / Lower ──
+    // ── Phase 1: Parse / Lower ───────────────────────────────────────────────────
     let t0 as i64 = perf_begin(perf, "parse" to cstr)
     var lowerer as ptr[Lowerer] = None to ptr[Lowerer]
     if mode == LanguageMode.Nizam to i32:
@@ -1111,9 +1156,7 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
         mantiq_ast_arena_reset()
         mantiq_intern_reset()
         return False
-
-
-    // ── Phase 2: Semantic Analysis ──
+    // ── Phase 2: Semantic Analysis ───────────────────────────────────────────────
     let t1 as i64 = perf_begin(perf, "sema" to cstr)
     let sema as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref sema).init_sema(path_cstr)
@@ -1128,14 +1171,14 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
     sema.analyze_gil_safety(root)
     perf_end(perf, "sema" to cstr, t1)
 
-    // ── Phase 3: Type Checking ──
+    // ── Phase 3: Type Checking ───────────────────────────────────────────────────
     let t2 as i64 = perf_begin(perf, "typecheck" to cstr)
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc).init_tc(sema)
     let _tc_t as ptr[Type] = (deref tc).typecheck_node(root)
     perf_end(perf, "typecheck" to cstr, t2)
 
-    // ── Phase 4: Borrow Checking ──
+    // ── Phase 4: Borrow Checking ─────────────────────────────────────────────────
     let t3 as i64 = perf_begin(perf, "borrowck" to cstr)
     let bc as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     (deref bc).init_bc()
@@ -1149,17 +1192,17 @@ fn check_source(source_cstr as cstr, path_cstr as cstr, mode as i32, perf as ptr
         mantiq_ast_arena_reset()
         mantiq_intern_reset()
         return False
-
     mantiq_ast_arena_reset()
     mantiq_intern_reset()
     return True
 
 
-// ── CLI Driver ──────────────────────────────────────────────────────────
+// ── CLI Driver ───────────────────────────────────────────────────────────────
 fn get_arg(argv as ptr[cstr], idx as i32) as cstr:
     return argv[idx]
 
-// ── fmt CLI helpers (spec §8) ───────────────────────────────────────────
+
+// ── fmt CLI helpers (spec §8) ────────────────────────────────────────────────
 // does p end in .nz or .mq?
 fn __fmt_path_is_src(p as cstr) as bool:
     let pl as usize = strlen(p)
@@ -1170,6 +1213,7 @@ fn __fmt_path_is_src(p as cstr) as bool:
     if strcmp((p to usize + (pl - 3 to usize)) to cstr, ".mq" to cstr) == 0:
         return True
     return False
+
 
 // collect every .nz/.mq file under path into out (a malloc'd ptr[cstr]
 // array); directories are probed with opendir, recursion filters by
@@ -1205,13 +1249,14 @@ fn __fmt_collect_src(path as cstr, out as ptr[cstr], count as ptr[i64], cap as i
                 elif __fmt_path_is_src(child):
                     if (deref count) < cap:
                         deref ((out to usize + ((deref count) to usize * 8 to usize)) to ptr[cstr]) = child
-                        deref count = (deref count) + 1 to i64
+                        deref count = (deref count) +1 to i64
             ent = readdir(d)
         closedir(d)
     else:
         if (deref count) < cap:
             deref ((out to usize + ((deref count) to usize * 8 to usize)) to ptr[cstr]) = path
-            deref count = (deref count) + 1 to i64
+            deref count = (deref count) +1 to i64
+
 
 // insertion sort by strcmp (deterministic processing order)
 fn __fmt_sort_paths(arr as ptr[cstr], count as i64):
@@ -1228,6 +1273,7 @@ fn __fmt_sort_paths(arr as ptr[cstr], count as i64):
                 break
         deref ((arr to usize + ((j + 1 to i64) to usize * 8 to usize)) to ptr[cstr]) = key
         i = i + 1 to i64
+
 
 // read all of stdin (16 MB cap — codegen.nz-sized inputs must fit)
 fn __fmt_read_stdin() as cstr:
@@ -1248,6 +1294,7 @@ fn __fmt_read_stdin() as cstr:
     deref ((buf to usize + (off to usize)) to ptr[u8]) = 0 to u8
     return buf to cstr
 
+
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     var default_mode as i32 = LanguageMode.Mantiq to i32
     var bin_name as cstr = "mantiq" to cstr
@@ -1265,18 +1312,15 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         ai = ai + 1 to i32
     if prof_flag:
         mantiq_set_profile_active(1 to i32)
-
     if argc < 2:
         let _p3 as i32 = printf("%s Self-Hosting Compiler v0.1.0\nUsage: %s <command> [options]\n  build <file.nz> [-o <out>] [--target <triple>] [--release|--debug] [--profile]\n  run <file.nz> [--target <triple>] [--release|--debug] [--profile]\n  check <file.nz> [--profile]\n  version\n" to cstr, self_name, bin_name)
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
-
     let cmd as cstr = get_arg(argv, 1 to i32)
     if strcmp(cmd, "version" to cstr) == 0 or strcmp(cmd, "--version" to cstr) == 0:
         let _p4 as i32 = printf("%s Self-Hosting Compiler v0.1.0\n" to cstr, self_name)
         let _f2 as i32 = fflush(None to ptr)
         return 0 to i32
-
     if strcmp(cmd, "check" to cstr) == 0:
         if argc < 3:
             let _p_chk_err as i32 = printf("Error: 'check' requires an input file path\nUsage: %s check <file.nz|file.mq> [--profile]\n" to cstr, bin_name)
@@ -1289,13 +1333,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 set_compiler_lib_dir(get_arg(argv, chk_arg_i + 1 to i32))
                 chk_arg_i = chk_arg_i + 1 to i32
             chk_arg_i = chk_arg_i + 1 to i32
-
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
         if source_cstr == None to cstr:
             let _p_chk_read as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
-
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
         let ok as bool = check_source(source_cstr, input_path, mode, ref perf)
@@ -1308,7 +1350,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p_chk_fail as i32 = printf("Check failed for %s\n" to cstr, input_path)
             let _ff_chk2 as i32 = fflush(None to ptr)
             return 1 to i32
-
     // ── Milestone F: fmt — deterministic line canonicalizer ─────────────
     // Usage: nizam fmt [paths...] [-w|--write] [-c|--check] [-d|--diff]
     //              [--line-length <N>] [--stdin-filepath <path>]
@@ -1355,7 +1396,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                     if lb >= 48 to u8 and lb <= 57 to u8:
                         v = v * 10 to i64 + ((lb - 48 to u8) to i64)
                         digits = True
-                        li = li + 1 to usize
+                        li = li +1 to usize
                     else:
                         ld = False
                 if not digits or v < 10 to i64:
@@ -1467,7 +1508,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
         let _ff_fmt_ok as i32 = fflush(None to ptr)
         return 0 to i32
-
     if strcmp(cmd, "build" to cstr) == 0:
         if argc < 3:
             let _p5 as i32 = printf("Error: 'build' requires an input file path\nUsage: %s build <file.nz> [-o <out>] [--target <triple>] [--release|--debug] [--profile]\n" to cstr, bin_name)
@@ -1504,7 +1544,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 cache_dir = get_arg(argv, arg_i + 1 to i32)
                 arg_i = arg_i + 1 to i32
             arg_i = arg_i + 1 to i32
-
         if target_specified and strstr(target_triple, "wasm" to cstr) != None to cstr and not out_specified:
             out_path = "a.wasm" to cstr
         elif target_specified and strstr(target_triple, "python-ext" to cstr) != None to cstr and not out_specified:
@@ -1512,13 +1551,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let def_out_buf as ptr[u8] = malloc(128 to usize) to ptr[u8]
             let _sp_def as i32 = sprintf(def_out_buf, "%s.abi3.so" to cstr, mod_name_str.data to cstr)
             out_path = def_out_buf to cstr
-
         let mode as i32 = detect_mode(input_path, default_mode)
         let source_cstr as cstr = read_file_to_cstr(input_path)
         if source_cstr == None to cstr:
             let _p6 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
-
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
         let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir)
@@ -1531,7 +1568,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             let _p8 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
             let _ff2 as i32 = fflush(None to ptr)
             return 1 to i32
-
     if strcmp(cmd, "run" to cstr) == 0:
         if argc < 3:
             let _p9 as i32 = printf("Error: 'run' requires an input file path\nUsage: %s run <file.nz> [--target <triple>] [--release|--debug] [--profile] [--no-cache] [--cache-dir <dir>]\n" to cstr, bin_name)
@@ -1560,7 +1596,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 cache_dir = get_arg(argv, r_arg_i + 1 to i32)
                 r_arg_i = r_arg_i + 1 to i32
             r_arg_i = r_arg_i + 1 to i32
-
         let pidv as i32 = getpid()
         let rt_buf as ptr[u8] = malloc(256 to usize) to ptr[u8]
         var _rt0 as i32 = 0
@@ -1577,7 +1612,6 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         if source_cstr == None to cstr:
             let _p10 as i32 = printf("Error: Could not read file '%s'\n" to cstr, input_path)
             return 1 to i32
-
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
         let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir)
@@ -1607,6 +1641,5 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         else:
             let _p11 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)
             return 1 to i32
-
     let _p12 as i32 = printf("Unknown command: %s\nRun '%s' for usage.\n" to cstr, cmd, bin_name)
     return 1 to i32

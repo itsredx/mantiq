@@ -1,15 +1,16 @@
-// ── Test Dict Methods Parity ──────────────────────────────────────────
+// ── Test Dict Methods Parity ─────────────────────────────────────────────────
 
 import std.collections
 from std.collections import Dict, List, Tuple2
 import std.string
 from std.string import String
 
+
 fn main() as i32:
     print("[TEST SUITE] Native Dict Methods Parity (keys, values, copy, update, setdefault, pop, clear)")
 
-    // ── Test 1: Keys & Values ──────────────────────────────────────────
-    var d as Dict[String, i32] = {}
+    // ── Test 1: Keys & Values ────────────────────────────────────────────────────
+    var d as Dict[String, i32] = { }
     d["apple"] = 10
     d["banana"] = 20
     d["cherry"] = 30
@@ -17,17 +18,14 @@ fn main() as i32:
     if d.len() != 3 to usize:
         print("  FAIL: Initial dict length expected 3")
         return 1
-
     let ks as List[String] = d.keys()
     if ks.len() != 3 to usize:
         print("  FAIL: d.keys().len() expected 3")
         return 1
-
     let vs as List[i32] = d.values()
     if vs.len() != 3 to usize:
         print("  FAIL: d.values().len() expected 3")
         return 1
-
     var sum_v as i32 = 0
     var vi as i64 = 0 to i64
     let v_cnt as i64 = vs.len() to i64
@@ -39,12 +37,11 @@ fn main() as i32:
         return 1
     print("  PASS: keys() and values()")
 
-    // ── Test 2: Copy Semantics ─────────────────────────────────────────
+    // ── Test 2: Copy Semantics ───────────────────────────────────────────────────
     var d_copy as Dict[String, i32] = d.copy()
     if d_copy.len() != 3 to usize:
         print("  FAIL: d.copy().len() expected 3")
         return 1
-
     d_copy["date"] = 40
     if d_copy.len() != 4 to usize:
         print("  FAIL: d_copy length after addition expected 4")
@@ -54,12 +51,11 @@ fn main() as i32:
         return 1
     print("  PASS: copy()")
 
-    // ── Test 3: Setdefault ─────────────────────────────────────────────
+    // ── Test 3: Setdefault ───────────────────────────────────────────────────────
     let ex as i32 = d.setdefault("apple", 999)
     if ex != 10:
         print("  FAIL: setdefault on existing key expected 10")
         return 1
-
     let nw as i32 = d.setdefault("elderberry", 50)
     if nw != 50:
         print("  FAIL: setdefault on missing key expected 50")
@@ -72,7 +68,7 @@ fn main() as i32:
         return 1
     print("  PASS: setdefault()")
 
-    // ── Test 4: Pop with & without Default ──────────────────────────────
+    // ── Test 4: Pop with & without Default ───────────────────────────────────────
     let p1 as i32 = d.pop("banana", 0)
     if p1 != 20:
         print("  FAIL: pop existing key expected 20")
@@ -83,15 +79,14 @@ fn main() as i32:
     if d.len() != 3 to usize:
         print("  FAIL: d.len() after pop expected 3")
         return 1
-
     let p_missing as i32 = d.pop("nonexistent", 99)
     if p_missing != 99:
         print("  FAIL: pop missing key expected default 99")
         return 1
     print("  PASS: pop()")
 
-    // ── Test 5: Update / Merge ─────────────────────────────────────────
-    var other as Dict[String, i32] = {}
+    // ── Test 5: Update / Merge ───────────────────────────────────────────────────
+    var other as Dict[String, i32] = { }
     other["fig"] = 60
     other["grape"] = 70
     other["apple"] = 100
@@ -108,20 +103,20 @@ fn main() as i32:
         return 1
     print("  PASS: update()")
 
-    // ── Test 6: Clear ──────────────────────────────────────────────────
+    // ── Test 6: Clear ────────────────────────────────────────────────────────────
     d.clear()
     if d.len() != 0 to usize:
         print("  FAIL: d.len() after clear expected 0")
         return 1
     print("  PASS: clear()")
 
-    // ── Test 7: Fromkeys ───────────────────────────────────────────────
+    // ── Test 7: Fromkeys ─────────────────────────────────────────────────────────
     var keys_list as List[String] = List[String]()
     keys_list.append(String.make("alpha" to cstr))
     keys_list.append(String.make("beta" to cstr))
     keys_list.append(String.make("gamma" to cstr))
 
-    var d_proto as Dict[String, i32] = {}
+    var d_proto as Dict[String, i32] = { }
     var d_fk as Dict[String, i32] = d_proto.fromkeys(keys_list, 42)
     if d_fk.len() != 3 to usize:
         print("  FAIL: d.fromkeys().len() expected 3")
@@ -131,7 +126,7 @@ fn main() as i32:
         return 1
     print("  PASS: fromkeys()")
 
-    // ── Test 8: Items View & Mapping ───────────────────────────────────
+    // ── Test 8: Items View & Mapping ─────────────────────────────────────────────
     let items_view = d_fk.items()
     if items_view.len() != 3 to usize:
         print("  FAIL: items_view.len() expected 3")
@@ -157,7 +152,7 @@ fn main() as i32:
         return 1
     print("  PASS: items() and mapping()")
 
-    // ── Test 9: Popitem ────────────────────────────────────────────────
+    // ── Test 9: Popitem ──────────────────────────────────────────────────────────
     var pk as String = ""
     var pv as i32 = 0
     let popped as bool = d_fk.popitem(ref pk, ref pv)
@@ -173,7 +168,6 @@ fn main() as i32:
     if d_fk.has(pk):
         print("  FAIL: popped key still in dict")
         return 1
-
     var pk2 as String = ""
     var pv2 as i32 = 0
     let popped2 as bool = d_fk.popitem(ref pk2, ref pv2)

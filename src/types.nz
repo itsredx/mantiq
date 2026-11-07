@@ -1,10 +1,11 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
 from std.collections import List
 from std.mem import make
+from std.string import String
 
-// ── TypeKind ────────────────────────────────────────────────────────────
+
+// ── TypeKind ─────────────────────────────────────────────────────────────────
 enum TypeKind:
     I8
     I16
@@ -63,7 +64,8 @@ enum TypeKind:
     Void
     PyObject
 
-// ── Type ────────────────────────────────────────────────────────────────
+
+// ── Type ─────────────────────────────────────────────────────────────────────
 struct Type:
     public var kind as TypeKind
     public var payload as ptr[Type]
@@ -72,9 +74,11 @@ struct Type:
     public var param_types as List[Type]
     public var return_type as ptr[Type]
 
-// ── Helper Constructors ──────────────────────────────────────────────────
+
+// ── Helper Constructors ──────────────────────────────────────────────────────
 extern fn memset(ptr as ptr[u8], val as i32, num as usize) as ptr[u8]
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
 
 fn make_type(kind as TypeKind) as ptr[Type]:
     let t as ptr[Type] = make_ast[Type](1 to usize) to ptr[Type]
@@ -89,46 +93,55 @@ fn make_ptr_type(element as ptr[Type]) as ptr[Type]:
     (deref t).payload = element
     return t
 
+
 fn make_struct_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Struct)
     (deref t).name = name
     return t
+
 
 fn make_enum_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Enum)
     (deref t).name = name
     return t
 
+
 fn make_union_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Union)
     (deref t).name = name
     return t
+
 
 fn make_class_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Class)
     (deref t).name = name
     return t
 
+
 fn make_interface_type(name as String) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Interface)
     (deref t).name = name
     return t
 
+
 fn make_color_type() as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Color)
     return t
+
 
 fn make_list_type(element as ptr[Type]) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.List)
     (deref t).payload = element
     return t
 
+
 fn make_channel_type(element as ptr[Type]) as ptr[Type]:
     let t as ptr[Type] = make_type(TypeKind.Channel)
     (deref t).payload = element
     return t
 
-// ── Copy/Move Type Classification ──────────────────────────────────────
+
+// ── Copy/Move Type Classification ────────────────────────────────────────────
 fn is_copy_type(t as ptr[Type]) as bool:
     if t == None to ptr[Type]:
         return False
@@ -226,6 +239,7 @@ fn is_copy_type(t as ptr[Type]) as bool:
                 return False
         return True
     return False
+
 
 fn is_move_type(t as ptr[Type]) as bool:
     return not is_copy_type(t)

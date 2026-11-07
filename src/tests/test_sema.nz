@@ -1,19 +1,22 @@
 import std.collections
-from std.string import String
 from std.collections import List
-import symbols
-from symbols import Node, NodeType, TypeAnnotation, LanguageMode, Span, make_node, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_type_annots, node_inferred_type, set_node_name, set_node_left, set_node_right, set_node_body, set_node_type_annots, set_node_val, set_node_params, VarDeclData, NumberLiteralData, FunDeclData
+from std.string import String
+
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
-from sema import Sema, make_scope, make_symbol, Scope, Symbol, SymbolKind
+from sema import Scope, Sema, Symbol, SymbolKind, make_scope, make_symbol
+import symbols
+from symbols import FunDeclData, LanguageMode, Node, NodeType, NumberLiteralData, Span, TypeAnnotation, VarDeclData, make_node, node_body, node_declarations, node_inferred_type, node_kind, node_left, node_name, node_params, node_right, node_type_annots, set_node_body, set_node_left, set_node_name, set_node_params, set_node_right, set_node_type_annots, set_node_val
+import typecheck
+from typecheck import ListWrapper, TypeChecker, option_has_value, option_value
 import types
 from types import Type, TypeKind, make_type
-import typecheck
-from typecheck import TypeChecker, option_has_value, option_value, ListWrapper
+
 
 extern fn printf(format as cstr, val as cstr) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
 
 fn main() -> i32:
     extern fn memset(s as ptr, c as i32, n as usize) as ptr
@@ -22,58 +25,55 @@ fn main() -> i32:
     let src1 as cstr = "let x = 42\nfn f():\n    let x = 10\n    let y = x\n" to cstr
     let lowerer1 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src1, "test1.nz" to cstr)
     let root1 as ptr[Node] = (deref lowerer1).lower_source()
-    
+
     let s1 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s1).init_sema("test1.nz" to cstr)
-    
+
     s1.declare_pass(root1)
     s1.resolve_pass(root1)
-    
+
     if (deref s1).errors.length() == 0 to i64:
         let r as i32 = printf("Test 1 (Scoping & Shadowing): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 1 (Scoping & Shadowing): FAILED!\n" to cstr, "" to cstr)
-
     // Test Scenario 2: Duplicate Declaration Detection
     let src2 as cstr = "let x = 42\nlet x = 10\n" to cstr
     let lowerer2 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src2, "test2.nz" to cstr)
     let root2 as ptr[Node] = (deref lowerer2).lower_source()
-    
+
     let s2 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s2).init_sema("test2.nz" to cstr)
-    
+
     s2.declare_pass(root2)
     s2.resolve_pass(root2)
-    
+
     if (deref s2).errors.length() > 0 to i64:
         let r as i32 = printf("Test 2 (Duplicate Declaration): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 2 (Duplicate Declaration): FAILED!\n" to cstr, "" to cstr)
-
     // Test Scenario 3: Undeclared Variable Detection
     let src3 as cstr = "fn g():\n    let y = z\n" to cstr
     let lowerer3 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src3, "test3.nz" to cstr)
     let root3 as ptr[Node] = (deref lowerer3).lower_source()
-    
+
     let s3 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s3).init_sema("test3.nz" to cstr)
-    
+
     s3.declare_pass(root3)
     s3.resolve_pass(root3)
-    
+
     if (deref s3).errors.length() > 0 to i64:
         let r as i32 = printf("Test 3 (Undeclared Variable): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 3 (Undeclared Variable): FAILED!\n" to cstr, "" to cstr)
-
     // Test Scenario 4: Closure Capture Detection
     let src4 as cstr = "fn outer():\n    let a = 1\n    fn inner():\n        let b = a\n" to cstr
     let lowerer4 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src4, "test4.nz" to cstr)
     let root4 as ptr[Node] = (deref lowerer4).lower_source()
-    
+
     let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s4).init_sema("test4.nz" to cstr)
-    
+
     s4.declare_pass(root4)
     s4.resolve_pass(root4)
     let r_cap as i32 = printf("Test 4 (Closure Capture): PASSED!\n" to cstr, "" to cstr)
@@ -82,23 +82,22 @@ fn main() -> i32:
     let src5 as cstr = "from test_module import pi\nlet res = pi\n" to cstr
     let lowerer5 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src5, "test5.nz" to cstr)
     let root5 as ptr[Node] = (deref lowerer5).lower_source()
-    
+
     let s5 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s5).init_sema("test5.nz" to cstr)
-    
+
     let mod_scope as ptr[Scope] = make_scope(None to ptr[Scope], None to ptr[Node])
     let pi_sym as ptr[Symbol] = make_symbol(String.make("pi" to cstr), SymbolKind.Variable, None to ptr[Node])
     (deref mod_scope).symbols[String.make("pi" to cstr)] = pi_sym
     (deref s5).loaded_modules[String.make("test_module" to cstr)] = mod_scope
-    
+
     s5.declare_pass(root5)
     s5.resolve_pass(root5)
-    
+
     if (deref s5).errors.length() == 0 to i64:
         let r as i32 = printf("Test 5 (Cross-Module Resolution): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 5 (Cross-Module Resolution): FAILED!\n" to cstr, "" to cstr)
-
     // Run typecheck on existing ASTs to verify no unexpected crashes
     let tc1 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc1).init_tc(s1)
@@ -126,7 +125,7 @@ fn main() -> i32:
 
     let node6 as ptr[Node] = make_node(NodeType.VarDecl, span6)
     set_node_name(node6, String.make("x" to cstr))
-    
+
     // Type annotation: f64
     let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
     (deref annot).name = String.make("f64" to cstr)
@@ -136,44 +135,43 @@ fn main() -> i32:
     (deref annot).generics = Empty
     (deref annot).params = Empty
     (deref annot).return_type = None to ptr[TypeAnnotation]
-    
+
     let wrapper6 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
     (deref wrapper6).list = List[Option[ptr[TypeAnnotation]]]()
     let annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper6).list
     (deref annots).append(Some(annot))
     set_node_type_annots(node6, annots)
-    
+
     // Initializer literal: 42
     let init6 as ptr[Node] = make_node(NodeType.NumberLiteral, span6)
     set_node_val(init6, 42 to f64)
     set_node_left(node6, init6)
-    
+
     let s6 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s6).init_sema("test6.nz" to cstr)
     (deref s6).mode = LanguageMode.Mantiq
     s6.declare_pass(node6)
     s6.resolve_pass(node6)
-    
+
     let tc6 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc6).init_tc(s6)
     let tc_res as ptr[Type] = tc6.typecheck_node(node6)
-    
+
     // Verify that the inferred type of the initializer literal was coerced to F64
     let inferred as ptr[Type] = node_inferred_type(init6)
     if inferred != None to ptr[Type] and (deref inferred).kind to i32 == TypeKind.F64 to i32:
         let r as i32 = printf("Test 6 (Type Checking & Coercion): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 6 (Type Checking & Coercion): FAILED!\n" to cstr, "" to cstr)
-
     // Test Scenario 7: Generic Monomorphization
     let span7 as Span = Span(start_byte = 0 to u32, end_byte = 200 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 10 to u32, end_col = 0 to u32)
 
     let template as ptr[Node] = make_node(NodeType.FunDecl, span7)
     set_node_name(template, String.make("min" to cstr))
-    
+
     let p1 as ptr[Node] = make_node(NodeType.VarDecl, span7)
     set_node_name(p1, String.make("a" to cstr))
-    
+
     let p1_annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
     (deref p1_annot).name = String.make("T" to cstr)
     (deref p1_annot).is_ref = False
@@ -182,7 +180,7 @@ fn main() -> i32:
     (deref p1_annot).generics = Empty
     (deref p1_annot).params = Empty
     (deref p1_annot).return_type = None to ptr[TypeAnnotation]
-    
+
     let wrapper7_1 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
     (deref wrapper7_1).list = List[Option[ptr[TypeAnnotation]]]()
     let p1_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_1).list
@@ -191,7 +189,7 @@ fn main() -> i32:
 
     let p2 as ptr[Node] = make_node(NodeType.VarDecl, span7)
     set_node_name(p2, String.make("b" to cstr))
-    
+
     let wrapper7_2 as ptr[ListWrapper] = make[ListWrapper](1 to usize)
     (deref wrapper7_2).list = List[Option[ptr[TypeAnnotation]]]()
     let p2_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = ref (deref wrapper7_2).list
@@ -215,7 +213,7 @@ fn main() -> i32:
     // Now, monomorphize min with T = i32
     let concrete_t as ptr[Type] = make_type(TypeKind.I32)
     (deref concrete_t).name = String.make("i32" to cstr)
-    
+
     let monomorphized as ptr[Node] = tc7.monomorphize(template, "T" to cstr, concrete_t)
 
     // Verify the monomorphized function name is min_i32 and has correct param count
@@ -231,48 +229,44 @@ fn main() -> i32:
             let r as i32 = printf("Test 7 (Generic Monomorphization): FAILED (no annots pointer)!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 7 (Generic Monomorphization): FAILED (mangling)!\n" to cstr, "" to cstr)
-
     // Test Scenario 12: Literal Type Inference (destination type known)
     let src12 as cstr = "fn f(x as f64):\n    let a = 1\nfn main():\n    f(42)\n    let y as f64 = 0.0\n    y = 24\n" to cstr
     let lowerer12 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src12, "test12.nz" to cstr)
     let root12 as ptr[Node] = (deref lowerer12).lower_source()
-    
+
     let s12 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     (deref s12).init_sema("test12.nz" to cstr)
     s12.declare_pass(root12)
     s12.resolve_pass(root12)
-    
+
     let tc12 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     (deref tc12).init_tc(s12)
     tc12.typecheck_node(root12)
-    
+
     // Let's traverse to find the CallExpr "f(42)" and Assignment "y = 24"
     let decls12 as List[ptr[Node]] = node_declarations(root12)
     let main_fn as ptr[Node] = decls12[1] // second declaration in program
     let main_body as ptr[Node] = node_body(main_fn) // BlockStmt
     let main_decls as List[ptr[Node]] = node_declarations(main_body)
-    
+
     let call_node as ptr[Node] = main_decls[0] // f(42)
     let call_args as List[ptr[Node]] = node_params(call_node)
     let arg_lit as ptr[Node] = call_args[0] // 42
-    
+
     let assign_node as ptr[Node] = main_decls[2] // y = 24 (BinaryExpr)
     let assign_lit as ptr[Node] = node_right(assign_node) // 24
-    
+
     let arg_inf as ptr[Type] = node_inferred_type(arg_lit)
     let assign_inf as ptr[Type] = node_inferred_type(assign_lit)
-    
+
     var pass_call as bool = False
     if arg_inf != None to ptr[Type] and (deref arg_inf).kind to i32 == TypeKind.F64 to i32:
         pass_call = True
-        
     var pass_assign as bool = False
     if assign_inf != None to ptr[Type] and (deref assign_inf).kind to i32 == TypeKind.F64 to i32:
         pass_assign = True
-        
     if pass_call and pass_assign:
         let r as i32 = printf("Test 12 (Destination-Driven Literal Inference): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 12 (Destination-Driven Literal Inference): FAILED!\n" to cstr, "" to cstr)
-
     return 0

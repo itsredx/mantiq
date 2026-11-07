@@ -1,32 +1,37 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
+from std.collections import Dict, List
 from std.string import String
-from std.collections import List, Dict
-import symbols
-from symbols import Node, NodeType, Span, Symbol, LanguageMode, node_kind, node_name, node_declarations
+
+import error
+from error import Diagnostic, DiagnosticEngine
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
 from sema import Sema
+import symbols
+from symbols import LanguageMode, Node, NodeType, Span, Symbol, node_declarations, node_kind, node_name
 import typecheck
 from typecheck import TypeChecker
-import error
-from error import DiagnosticEngine, Diagnostic
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn exit(code as i32)
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
-// ── Test Assertions ──────────────────────────────────────────────────────
+
+// ── Test Assertions ──────────────────────────────────────────────────────────
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         let _ as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
         exit(1)
 
-// ── Executable OOP Hierarchy ─────────────────────────────────────────────
+
+// ── Executable OOP Hierarchy ─────────────────────────────────────────────────
 interface Drivable:
     fn drive(self) as i32
+
 
 class Vehicle(Drivable):
     public var wheels as i32
@@ -40,13 +45,13 @@ class Vehicle(Drivable):
 
     public fn drive(self) as i32:
         return (deref self).wheels * 10
-
     @final
     public fn get_vin(self) as i32:
         return (deref self).secret_code
 
     public fn get_fuel_level(self) as i32:
         return (deref self).fuel
+
 
 class Car(Vehicle):
     public var doors as i32
@@ -56,6 +61,7 @@ class Car(Vehicle):
         // Accessing protected field 'fuel' from subclass
         let base_drive as i32 = super().drive()
         return base_drive + (deref self).doors + (deref self).fuel
+
 
 @final
 class SportsCar(Car):
@@ -68,13 +74,13 @@ class SportsCar(Car):
             return car_drive + 100 to i32
         return car_drive
 
-// ── Helper for Semantic Diagnostic Verification ──────────────────────────
+
+// ── Helper for Semantic Diagnostic Verification ──────────────────────────────
 fn check_code_has_error(src as cstr, expected_code as cstr) as bool:
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "oop_test.mq" to cstr)
     let root as ptr[Node] = (deref lr).lower_source()
     if root == None to ptr[Node]:
         return False
-    
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make("oop_test.mq"), String.make(src))
@@ -85,11 +91,11 @@ fn check_code_has_error(src as cstr, expected_code as cstr) as bool:
     (deref s).mode = LanguageMode.Mantiq
     s.declare_pass(root)
     s.resolve_pass(root)
-    
+
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc.init_tc(s)
     tc.typecheck_node(root)
-    
+
     let diag_list as List[ptr[Diagnostic]] = (deref engine).diagnostics
     let count as i64 = diag_list.length()
     var i as i64 = 0 to i64
@@ -104,12 +110,12 @@ fn check_code_has_error(src as cstr, expected_code as cstr) as bool:
         i = i + 1 to i64
     return False
 
+
 fn check_code_valid(src as cstr) as bool:
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src, "oop_test_valid.mq" to cstr)
     let root as ptr[Node] = (deref lr).lower_source()
     if root == None to ptr[Node]:
         return False
-    
     let engine as ptr[DiagnosticEngine] = make[DiagnosticEngine](1 to usize) to ptr[DiagnosticEngine]
     engine.init()
     engine.register_source(String.make("oop_test_valid.mq"), String.make(src))
@@ -120,36 +126,38 @@ fn check_code_valid(src as cstr) as bool:
     (deref s).mode = LanguageMode.Mantiq
     s.declare_pass(root)
     s.resolve_pass(root)
-    
+
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc.init_tc(s)
     tc.typecheck_node(root)
-    
+
     return (deref engine).has_errors() == False
 
-// ── Test Cases ───────────────────────────────────────────────────────────
+
+// ── Test Cases ───────────────────────────────────────────────────────────────
 fn test_runtime_oop_execution() as bool:
     printf("[TEST] Testing Runtime Polymorphism & Method Overriding...\n" to cstr)
-    
+
     var v as Vehicle = Vehicle(wheels = 4 to i32, fuel = 50 to i32, secret_code = 9999 to i32)
     let v_drive as i32 = v.drive()
     assert_true(v_drive == 40 to i32, "Vehicle.drive() returned expected value" to cstr)
     let vin as i32 = v.get_vin()
     assert_true(vin == 9999 to i32, "Vehicle.get_vin() returned secret code" to cstr)
-    
+
     var c as Car = Car(wheels = 4 to i32, fuel = 50 to i32, secret_code = 1234 to i32, doors = 4 to i32)
     let c_drive as i32 = c.drive()
     // 40 (super) + 4 (doors) + 50 (fuel) = 94
     assert_true(c_drive == 94 to i32, "Car.drive() @override returned expected value" to cstr)
-    
+
     var sc as SportsCar = SportsCar(wheels = 4 to i32, fuel = 60 to i32, secret_code = 7777 to i32, doors = 2 to i32, turbo = True)
     let sc_drive as i32 = sc.drive()
     // 40 (wheels) + 2 (doors) + 60 (fuel) + 100 (turbo) = 202
     assert_true(sc_drive == 202 to i32, "SportsCar.drive() @override with turbo returned expected value" to cstr)
-    
+
     printf("  Vehicle drive: %d, Car drive: %d, SportsCar drive: %d\n" to cstr, v_drive, c_drive, sc_drive)
     printf("  [PASS] Runtime polymorphism, inheritance and @override execution verified.\n" to cstr)
     return True
+
 
 fn test_invalid_override_diagnostic() as bool:
     printf("[TEST] Testing E0316: Invalid @override Method Detection...\n" to cstr)
@@ -159,6 +167,7 @@ fn test_invalid_override_diagnostic() as bool:
     printf("  [PASS] Invalid @override correctly rejected (E0316).\n" to cstr)
     return True
 
+
 fn test_final_class_inheritance_diagnostic() as bool:
     printf("[TEST] Testing E0317: Final Class Subclassing Detection...\n" to cstr)
     let src as cstr = "@final\nclass SealedConfig:\n    public var id as i32\n\nclass ExtendedConfig(SealedConfig):\n    public var extra as i32\n" to cstr
@@ -166,6 +175,7 @@ fn test_final_class_inheritance_diagnostic() as bool:
     assert_true(has_err, "Expected E0317 when subclassing @final class" to cstr)
     printf("  [PASS] Subclassing @final class correctly rejected (E0317).\n" to cstr)
     return True
+
 
 fn test_final_method_override_diagnostic() as bool:
     printf("[TEST] Testing E0318: Final Method Overriding Detection...\n" to cstr)
@@ -175,6 +185,7 @@ fn test_final_method_override_diagnostic() as bool:
     printf("  [PASS] Overriding @final method correctly rejected (E0318).\n" to cstr)
     return True
 
+
 fn test_private_member_access_diagnostic() as bool:
     printf("[TEST] Testing E0320: Private Member Access Violation Detection...\n" to cstr)
     let src as cstr = "class BankAccount:\n    private var balance as i32\n    fn init_acc(self):\n        (deref self).balance = 1000\n\nfn test_hacker():\n    var b as BankAccount = BankAccount(balance = 500)\n    let stolen as i32 = b.balance\n" to cstr
@@ -182,6 +193,7 @@ fn test_private_member_access_diagnostic() as bool:
     assert_true(has_err, "Expected E0320 when accessing private field outside defining class" to cstr)
     printf("  [PASS] Accessing private member from outside class correctly rejected (E0320).\n" to cstr)
     return True
+
 
 fn test_protected_member_access_diagnostic() as bool:
     printf("[TEST] Testing E0319: Protected Member Access Violation Detection...\n" to cstr)
@@ -197,7 +209,8 @@ fn test_protected_member_access_diagnostic() as bool:
     printf("  [PASS] Protected member access correctly permitted in subclasses and rejected outside (E0319).\n" to cstr)
     return True
 
-// ── Main Entry ───────────────────────────────────────────────────────────
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main() -> i32:
     printf("============================================================\n" to cstr)
     printf("Running OOP @override, @final & Access Modifiers Test Suite\n" to cstr)

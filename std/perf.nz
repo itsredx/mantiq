@@ -1,13 +1,16 @@
 // std/perf.nz — Performance monitoring: high-resolution timing + memory tracking
 // Provides clock_gettime and getrusage wrappers for Nizam programs.
 
+
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 extern fn printf(format as cstr, ...) as i32
 extern fn fflush(stream as ptr) as i32
 
+
 struct TimeSpec:
     public var tv_sec as i64
     public var tv_nsec as i64
+
 
 struct RUsage:
     public var ru_utime as TimeSpec
@@ -27,13 +30,16 @@ struct RUsage:
     public var ru_nvcsw as i64
     public var ru_nivcsw as i64
 
+
 extern fn clock_gettime(clk_id as i32, tp as ptr[TimeSpec]) as i32
 extern fn getrusage(who as i32, usage as ptr[RUsage]) as i32
+
 
 fn get_time_ns() as i64:
     var ts as TimeSpec = TimeSpec(tv_sec = 0, tv_nsec = 0)
     let _rc as i32 = clock_gettime(1 to i32, ref ts)
     return ts.tv_sec * 1000000000 to i64 + ts.tv_nsec
+
 
 fn get_rss_bytes() as i64:
     var ru as RUsage = RUsage(
@@ -47,15 +53,19 @@ fn get_rss_bytes() as i64:
     let _rc as i32 = getrusage(0 to i32, ref ru)
     return ru.ru_maxrss * 1024 to i64
 
+
 struct PerfClock:
     public var start_ns as i64
     public var label as String
 
+
 fn start_clock(label as String) as PerfClock:
     return PerfClock(start_ns = get_time_ns(), label = label)
 
+
 fn elapsed_ns(clock as PerfClock) as i64:
-    return get_time_ns() - clock.start_ns
+    return get_time_ns() -clock.start_ns
+
 
 struct PhaseReport:
     public var name as String
@@ -63,11 +73,13 @@ struct PhaseReport:
     public var rss_before as i64
     public var rss_after as i64
 
+
 struct PerfReport:
     public var phases as List[PhaseReport]
     public var total_start_ns as i64
     public var total_rss_start as i64
     public var total_time_ns as i64
+
 
 fn make_perf_report() as PerfReport:
     return PerfReport(
@@ -77,8 +89,10 @@ fn make_perf_report() as PerfReport:
         total_time_ns = 0
     )
 
+
 fn begin_phase(report as ptr[PerfReport], name as String) as PerfClock:
     return start_clock(name)
+
 
 fn end_phase(report as ptr[PerfReport], clock as PerfClock):
     let elapsed as i64 = elapsed_ns(clock)
@@ -91,8 +105,10 @@ fn end_phase(report as ptr[PerfReport], clock as PerfClock):
     )
     (deref report).phases.append(phase)
 
+
 fn finish_report(report as ptr[PerfReport]):
-    (deref report).total_time_ns = get_time_ns() - (deref report).total_start_ns
+    (deref report).total_time_ns = get_time_ns() -(deref report).total_start_ns
+
 
 fn fmt_time(ns as i64) as String:
     let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
@@ -106,6 +122,7 @@ fn fmt_time(ns as i64) as String:
         let _ as i32 = sprintf(buf, "%ld.%ld s" to cstr, ns / 1000000000 to i64, (ns % 1000000000 to i64) / 100000000 to i64)
     return String(buf to cstr, strlen(buf to cstr))
 
+
 fn fmt_bytes(bytes as i64) as String:
     let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
     if bytes < 1024 to i64:
@@ -116,7 +133,9 @@ fn fmt_bytes(bytes as i64) as String:
         let _ as i32 = sprintf(buf, "%ld.%ld MB" to cstr, bytes / 1048576 to i64, (bytes % 1048576 to i64) * 10 to i64 / 1048576 to i64)
     return String(buf to cstr, strlen(buf to cstr))
 
+
 extern fn strlen(s as cstr) as usize
+
 
 fn print_report(report as PerfReport):
     let _f0 as i32 = printf("\n" to cstr)

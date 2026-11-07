@@ -1,30 +1,33 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
+from std.collections import List
 import std.string
 from std.string import String, StringBuilder
-from std.collections import List
-import symbols
-from symbols import Node, NodeType, Span, make_node, node_kind, node_declarations, node_params, node_return_names, node_body
-import lower
-from lower import Lowerer, make_lowerer_mantiq_from_cstr
-import sema
-from sema import Sema
-import types
-from types import Type, TypeKind, make_type
-import typecheck
-from typecheck import TypeChecker
+
 import borrowck
 from borrowck import BorrowChecker
 import codegen
 from codegen import LLVMCodegen
+import lower
+from lower import Lowerer, make_lowerer_mantiq_from_cstr
+import sema
+from sema import Sema
+import symbols
+from symbols import Node, NodeType, Span, make_node, node_body, node_declarations, node_kind, node_params, node_return_names
+import typecheck
+from typecheck import TypeChecker
+import types
+from types import Type, TypeKind, make_type
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn memset(s as ptr, c as i32, n as usize) as ptr
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
 
-// ── Test Helpers ─────────────────────────────────────────────────────────
+
+// ── Test Helpers ─────────────────────────────────────────────────────────────
 fn gen_ir(source as cstr, file as cstr) as String:
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(source, file)
     let root as ptr[Node] = (deref lr).lower_source()
@@ -42,7 +45,8 @@ fn gen_ir(source as cstr, file as cstr) as String:
     (deref cg).init_cg()
     return cg.generate(root)
 
-// ── Test Cases ───────────────────────────────────────────────────────────
+
+// ── Test Cases ───────────────────────────────────────────────────────────────
 fn test_param_block_lowering() as bool:
     let code as cstr = "fn compute() as i64:\n    var a as i32 = 5\n    var b as i32 = 10\n    block (a as i32, b as i32) as (res_a as i64, res_b as i64):\n        return (a to i64) * 2, (b to i64) * 3\n    return res_a + res_b\n"
     let lr as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(code, "test_pb.mq" to cstr)
@@ -74,6 +78,7 @@ fn test_param_block_lowering() as bool:
         return False
     return True
 
+
 fn test_param_block_codegen() as bool:
     let code as cstr = "fn compute() as i64:\n    var a as i32 = 5\n    var b as i32 = 10\n    block (a as i32, b as i32) as (res_a as i64, res_b as i64):\n        return (a to i64) * 2, (b to i64) * 3\n    return res_a + res_b\n"
     let ir as String = gen_ir(code, "test_pb_cg.mq" to cstr)
@@ -93,7 +98,8 @@ fn test_param_block_codegen() as bool:
         return False
     return True
 
-// ── Main Entry ───────────────────────────────────────────────────────────
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     printf("Running ParamBlockStmt tests...\n" to cstr)
     let t1 as bool = test_param_block_lowering()
@@ -101,13 +107,11 @@ fn main():
         printf("  [PASS] test_param_block_lowering\n" to cstr)
     else:
         printf("  [FAIL] test_param_block_lowering\n" to cstr)
-
     let t2 as bool = test_param_block_codegen()
     if t2:
         printf("  [PASS] test_param_block_codegen\n" to cstr)
     else:
         printf("  [FAIL] test_param_block_codegen\n" to cstr)
-
     if t1 and t2:
         printf("All ParamBlockStmt tests PASSED!\n" to cstr)
     else:

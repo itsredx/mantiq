@@ -1,6 +1,7 @@
-// ── Phase 4: Negative Test for @nogil GIL Violation [E0450] ──────────
+// ── Phase 4: Negative Test for @nogil GIL Violation [E0450] ──────────────────
 
 extern fn PyRun_SimpleString(cmd as cstr) as i32
+
 
 @nogil
 fn invalid_nogil_function() as i32:

@@ -1,23 +1,26 @@
-// ── Quantum DCE Test Suite (Spec 0023) ──────────────────────────────────
+// ── Quantum DCE Test Suite (Spec 0023) ───────────────────────────────────────
 import std.quantum
 from std.string import String
+
+import codegen
+from codegen import LLVMCodegen
+import dce
+from dce import DeadCodeEliminator
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
 from sema import Sema
-import typecheck
-from typecheck import TypeChecker
-import dce
-from dce import DeadCodeEliminator
-import codegen
-from codegen import LLVMCodegen
 import symbols
 from symbols import Node
+import typecheck
+from typecheck import TypeChecker
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn fflush(stream as ptr) as i32
 extern fn exit(code as i32)
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
+
 
 fn assert_true(cond as bool, msg as cstr):
     let _ as i32 = fflush(0 to ptr)
@@ -25,6 +28,7 @@ fn assert_true(cond as bool, msg as cstr):
         printf("Assertion failed: %s\n" to cstr, msg)
         let _2 as i32 = fflush(0 to ptr)
         exit(1)
+
 
 fn test_quantum_primitives():
     printf("[TEST] Testing Quantum Primitives (qbit, H, measure)...\n" to cstr)
@@ -39,6 +43,7 @@ fn test_quantum_primitives():
     assert_true(m1 == 0 or m1 == 1, "measure(H(0)) is in {0, 1}" to cstr)
     printf("  [PASS] Quantum primitives verified.\n" to cstr)
 
+
 fn test_quantum_gates_and_ket():
     printf("[TEST] Testing Quantum Gates (X, Y, Z, CNOT) & Ket Notation...\n" to cstr)
     let q_x as qbit = X(|0>)
@@ -46,8 +51,8 @@ fn test_quantum_gates_and_ket():
     printf("  measure(X(|0>)) = %d\n" to cstr, m_x)
     assert_true(m_x == 1, "X(|0>) flips to |1>" to cstr)
 
-    let q_ctrl as qbit = |1>
-    let q_tgt as qbit = |0>
+    let q_ctrl as qbit =|1>
+    let q_tgt as qbit =|0>
     CNOT(q_ctrl, q_tgt)
     let m_tgt as i32 = measure(q_tgt)
     printf("  measure(CNOT(|1>, |0>)) = %d\n" to cstr, m_tgt)
@@ -56,6 +61,7 @@ fn test_quantum_gates_and_ket():
     let q_z as qbit = Z(|1>)
     let q_y as qbit = Y(|0>)
     printf("  [PASS] Quantum gates and ket notation verified.\n" to cstr)
+
 
 fn test_quantum_dce_tree_shaking():
     printf("[TEST] Testing Compile-time Quantum Tree-shaking (DCE)...\n" to cstr)
@@ -82,6 +88,7 @@ fn test_quantum_dce_tree_shaking():
     assert_true(ir.data != None to ptr[u8], "IR generated successfully" to cstr)
     printf("  [PASS] Quantum tree-shaking verified (std.quantum pruned when unused).\n" to cstr)
 
+
 fn test_constant_branch_folding():
     printf("[TEST] Testing Constant Boolean Branch Folding...\n" to cstr)
     let src as cstr = "fn compute() -> i32:\n    if True:\n        return 10\n    else:\n        return 20\n" to cstr
@@ -104,6 +111,7 @@ fn test_constant_branch_folding():
     let ir as String = (deref cg).generate(root)
     assert_true(ir.data != None to ptr[u8], "IR generated successfully" to cstr)
     printf("  [PASS] Constant branch folding verified.\n" to cstr)
+
 
 fn main() -> i32:
     printf("=== Starting Quantum DCE Test Suite (Spec 0023) ===\n" to cstr)

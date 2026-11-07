@@ -1,116 +1,115 @@
 import std.collections
+from std.collections import Dict, List
 from std.string import String
-from std.collections import List, Dict
-import symbols
-from symbols import Node, NodeType, TypeAnnotation, LanguageMode, Span, Symbol, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_auto_drops, set_node_auto_drops
+
+import borrowck
+from borrowck import BorrowChecker
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
 import sema
 from sema import Sema
+import symbols
+from symbols import LanguageMode, Node, NodeType, Span, Symbol, TypeAnnotation, node_auto_drops, node_body, node_declarations, node_kind, node_left, node_name, node_params, node_right, set_node_auto_drops
+import typecheck
+from typecheck import ListWrapper, TypeChecker, option_has_value, option_value
 import types
 from types import Type, TypeKind, is_copy_type
-import typecheck
-from typecheck import TypeChecker, option_has_value, option_value, ListWrapper
-import borrowck
-from borrowck import BorrowChecker
+
 
 extern fn printf(format as cstr, val as cstr) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
 
 fn main() -> i32:
     // Test Scenario 1: Move on assignment, then use → use-after-move error
     let src1 as cstr = "fn f():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
     let lowerer1 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src1, "test_borrow1.nz" to cstr)
     let root1 as ptr[Node] = lowerer1.lower_source()
-    
+
     let bc1 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc1.init_bc()
     (deref bc1).current_file = String.make("test_borrow1.nz" to cstr)
     bc1.walk_ast(root1)
-    
+
     if (deref bc1).errors.length() > 0 to i64:
         let r as i32 = printf("Test 8 (Use-After-Move Detection): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 8 (Use-After-Move Detection): FAILED (no error detected)!\n" to cstr, "" to cstr)
-
     // Test Scenario 2: No move violation - clean usage
     let src2 as cstr = "fn g():\n    let x = 42\n    let y = x\n" to cstr
     let lowerer2 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src2, "test_borrow2.nz" to cstr)
     let root2 as ptr[Node] = lowerer2.lower_source()
-    
+
     let bc2 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc2.init_bc()
     (deref bc2).current_file = String.make("test_borrow2.nz" to cstr)
     bc2.walk_ast(root2)
-    
+
     if (deref bc2).errors.length() == 0 to i64:
         let r as i32 = printf("Test 9 (No False Positives): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 9 (No False Positives): FAILED (false positive)!\n" to cstr, "" to cstr)
-
     // Test Scenario 3: Move on assignment, then reassignment (should be ok - new owned value)
     let src3 as cstr = "fn h():\n    let x = 42\n    let y = x\n    let x = 10\n" to cstr
     let lowerer3 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src3, "test_borrow3.nz" to cstr)
     let root3 as ptr[Node] = lowerer3.lower_source()
-    
+
     let bc3 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc3.init_bc()
     (deref bc3).current_file = String.make("test_borrow3.nz" to cstr)
     bc3.walk_ast(root3)
-    
+
     if (deref bc3).errors.length() == 0 to i64:
         let r as i32 = printf("Test 10 (Move then Redeclare): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 10 (Move then Redeclare): FAILED (unexpected borrow error)!\n" to cstr, "" to cstr)
-
     // Test Scenario 4: Copy type (i32) - multiple uses should NOT trigger move error
     // Run type checker so inferred_type is set on nodes
     let src4 as cstr = "fn k():\n    let x = 42\n    let y = x\n    let z = x\n" to cstr
     let lowerer4 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src4, "test_borrow4.nz" to cstr)
     let root4 as ptr[Node] = lowerer4.lower_source()
-    
+
     let s4 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     s4.init_sema("test_borrow4.nz" to cstr)
     s4.declare_pass(root4)
     s4.resolve_pass(root4)
-    
+
     let tc4 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc4.init_tc(s4)
     tc4.typecheck_node(root4)
-    
+
     let bc4 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc4.init_bc()
     (deref bc4).current_file = String.make("test_borrow4.nz" to cstr)
     bc4.walk_ast(root4)
-    
+
     if (deref bc4).errors.length() == 0 to i64:
         let r as i32 = printf("Test 11 (Copy Type No Move): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 11 (Copy Type No Move): FAILED (false positive on i32)!\n" to cstr, "" to cstr)
-
     // Test Scenario 13: Auto-drops injection
     let src13 as cstr = "fn f():\n    let x as String = String()\n    let y as i32 = 42\n" to cstr
     let lowerer13 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src13, "test_borrow13.nz" to cstr)
     let root13 as ptr[Node] = lowerer13.lower_source()
-    
+
     let s13 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     s13.init_sema("test_borrow13.nz" to cstr)
     s13.declare_pass(root13)
     s13.resolve_pass(root13)
-    
+
     let tc13 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc13.init_tc(s13)
     tc13.typecheck_node(root13)
-    
+
     let bc13 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc13.init_bc()
     (deref bc13).sema = s13
     (deref bc13).current_file = String.make("test_borrow13.nz" to cstr)
     bc13.walk_ast(root13)
-    
+
     let fundecl as ptr[Node] = node_declarations(root13)[0]
     let body13 as ptr[Node] = node_body(fundecl)
-    
+
     var pass13 as bool = False
     if (deref bc13).auto_drops.has(body13 to usize):
         let drops as List[ptr[Symbol]] = (deref bc13).auto_drops[body13 to usize]
@@ -119,32 +118,30 @@ fn main() -> i32:
             let s_name as String = (deref sym).name
             if strcmp(s_name.data to cstr, "x" to cstr) == 0:
                 pass13 = True
-                
     if pass13:
         let r as i32 = printf("Test 13 (Auto-Drops Injection): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 13 (Auto-Drops Injection): FAILED!\n" to cstr, "" to cstr)
-
     // Test Scenario 14: Context manager with-stmt
     let src14 as cstr = "fn open() as i32:\n    return 0\n\nfn f():\n    with open() as resource:\n        let x = 10\n" to cstr
     let lowerer14 as ptr[Lowerer] = make_lowerer_mantiq_from_cstr(src14, "test_borrow14.nz" to cstr)
     let root14 as ptr[Node] = lowerer14.lower_source()
-    
+
     let s14 as ptr[Sema] = make[Sema](1 to usize) to ptr[Sema]
     s14.init_sema("test_borrow14.nz" to cstr)
     s14.declare_pass(root14)
     s14.resolve_pass(root14)
-    
+
     let tc14 as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc14.init_tc(s14)
     tc14.typecheck_node(root14)
-    
+
     let bc14 as ptr[BorrowChecker] = make[BorrowChecker](1 to usize) to ptr[BorrowChecker]
     bc14.init_bc()
     (deref bc14).sema = s14
     (deref bc14).current_file = String.make("test_borrow14.nz" to cstr)
     bc14.walk_ast(root14)
-    
+
     let fundecl_f as ptr[Node] = node_declarations(root14)[1]
     let f_body as ptr[Node] = node_body(fundecl_f)
     var with_stmt as ptr[Node] = None to ptr[Node]
@@ -152,7 +149,6 @@ fn main() -> i32:
         with_stmt = f_body
     else:
         with_stmt = node_declarations(f_body)[0]
-    
     var pass14 as bool = False
     if (deref bc14).auto_drops.has(with_stmt to usize):
         let drops as List[ptr[Symbol]] = (deref bc14).auto_drops[with_stmt to usize]
@@ -161,10 +157,8 @@ fn main() -> i32:
             let s_name as String = (deref sym).name
             if strcmp(s_name.data to cstr, "resource" to cstr) == 0 and (deref sym).is_context_manager:
                 pass14 = True
-                
     if pass14:
         let r as i32 = printf("Test 14 (Context Manager Auto-Drop): PASSED!\n" to cstr, "" to cstr)
     else:
         let r as i32 = printf("Test 14 (Context Manager Auto-Drop): FAILED!\n" to cstr, "" to cstr)
-
     return 0

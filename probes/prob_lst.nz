@@ -3,11 +3,14 @@
 // usage in src/borrowck.nz (update_borrows_liveness / check_borrow_creation).
 from std.string import String
 
+
 extern fn printf(format as cstr, ...) as i32
+
 
 struct Rec:
     var nm as String
     var row as i32
+
 
 fn check(lst as ptr[List[Rec]], pass as i64):
     let cnt as i64 = (deref lst).length()
@@ -17,6 +20,7 @@ fn check(lst as ptr[List[Rec]], pass as i64):
         let r as Rec = (deref lst)[i]
         let _d as i32 = printf("pass=%lld i=%lld nm=%s row=%d\n" to cstr, pass, i, r.nm.data to cstr, r.row)
         i = i + 1 to i64
+
 
 fn main():
     let lst as List[Rec] = List[Rec]()

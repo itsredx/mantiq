@@ -1,18 +1,21 @@
-// ── Test Extended Float and Integer Widths ────────────────────────────────
+// ── Test Extended Float and Integer Widths ───────────────────────────────────
 import std.collections
 from std.string import String
 
+
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
+
 
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         printf("ASSERTION FAILED: %s\n" to cstr, msg)
         exit(1 to i32)
 
+
 fn test_extended_integers():
     printf("[TEST] Testing Extended Integer Widths (i256, i512, i1024)...\n" to cstr)
-    
+
     // i256
     var a256 as i256 = 100 to i256
     var b256 as i256 = 250 to i256
@@ -81,6 +84,7 @@ fn test_extended_integers():
 
     printf("  [PASS] Extended Integer Widths verified successfully.\n" to cstr)
 
+
 fn test_extended_floats():
     printf("[TEST] Testing Extended Float Widths (f16, bf16, f128)...\n" to cstr)
 
@@ -130,6 +134,7 @@ fn test_extended_floats():
     assert_true((quad_to_int1024 to i64) == 500 to i64, "i1024 -> f128 -> i1024 cast" to cstr)
 
     printf("  [PASS] Extended Float Widths verified successfully.\n" to cstr)
+
 
 fn main():
     printf("=== Starting Extended Types Test Suite ===\n" to cstr)

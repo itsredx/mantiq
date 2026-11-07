@@ -1,43 +1,55 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String, StringBuilder
 from std.collections import List
 from std.collections import Dict
-from std.option import Option, Empty
-import symbols
-from symbols import Node, TypeAnnotation, Span, Symbol, Scope, SymbolKind, LanguageMode, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, set_node_declarations, node_params, node_params_ptr, node_declarations_ptr, node_op, node_cond, node_then_branch, node_else_branch, node_val, node_str_val, node_is_async, node_is_extern, node_is_variadic, node_return_type_annot, node_is_mut, node_type_annots, node_auto_drops, node_target, node_imported_symbols, node_alias, node_import_kind, node_span, node_inferred_type, set_node_inferred_type, set_node_name, set_node_left, set_node_body, set_node_auto_drops, set_node_module_name, node_file_path, ImportKind, node_return_names, add_captured_var, node_captured_vars, node_is_nogil, set_node_is_nogil, node_is_gil_independent, set_node_is_gil_independent, node_access_modifier, node_is_python_extern, node_python_module
+from std.option import Empty, Option
+from std.string import String, StringBuilder
+
+import error
+from error import Diagnostic, DiagnosticEngine, Severity
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
+import symbols
+from symbols import ImportKind, LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, add_captured_var, node_access_modifier, node_alias, node_auto_drops, node_body, node_captured_vars, node_cond, node_declarations, node_declarations_ptr, node_else_branch, node_file_path, node_import_kind, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_gil_independent, node_is_mut, node_is_nogil, node_is_python_extern, node_is_variadic, node_kind, node_left, node_name, node_op, node_params, node_params_ptr, node_python_module, node_return_names, node_return_type_annot, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_auto_drops, set_node_body, set_node_declarations, set_node_inferred_type, set_node_is_gil_independent, set_node_is_nogil, set_node_left, set_node_module_name, set_node_name
 import types
 from types import Type, TypeKind, make_type
-import error
-from error import DiagnosticEngine, Diagnostic, Severity
+
 
 extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
 extern fn free(p as ptr)
+
 
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
 
+
 fn option_has_value(opt as ptr[u8]) as bool:
     let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref lay).has_val == 1 to u8
+
 
 fn option_value(opt as ptr[u8]) as ptr[u8]:
     let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref lay).val_ptr
 
-// ── Scope & Symbol Creators ─────────────────────────────────────────────
-fn make_scope_with_capacity(parent as ptr[Scope], closure_node as ptr[Node], capacity as i32) as ptr[Scope]:
+
+// ── Scope & Symbol Creators ──────────────────────────────────────────────────
+fn make_scope_with_capacity(
+    parent as ptr[Scope],
+    closure_node as ptr[Node],
+    capacity as i32,
+) as ptr[Scope]:
     let s as ptr[Scope] = make_ast[Scope](1 to usize) to ptr[Scope]
     (deref s).parent = parent
     (deref s).symbols = Dict[String, ptr[Symbol]](capacity)
     (deref s).closure_node = closure_node
     return s
 
+
 fn make_scope(parent as ptr[Scope], closure_node as ptr[Node]) as ptr[Scope]:
     return make_scope_with_capacity(parent, closure_node, 8 to i32)
+
 
 fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as ptr[Symbol]:
     let sym as ptr[Symbol] = make_ast[Symbol](1 to usize) to ptr[Symbol]
@@ -49,6 +61,7 @@ fn make_symbol(name as String, kind as SymbolKind, decl_node as ptr[Node]) as pt
     (deref sym).resolved_type = None to ptr[Type]
     return sym
 
+
 fn read_file_to_str(path as cstr) as String:
     extern fn fopen(path as cstr, mode as cstr) as ptr
     extern fn fseek(stream as ptr, offset as isize, whence as i32) as i32
@@ -57,23 +70,23 @@ fn read_file_to_str(path as cstr) as String:
     extern fn fread(ptr as ptr, size as usize, nmemb as usize, stream as ptr) as usize
     extern fn fclose(stream as ptr) as i32
     extern fn mantiq_malloc_raw(size as i64) as ptr
-    
+
     let f as ptr = fopen(path, "rb" to cstr)
     if f == None to ptr:
         return String.make("" to cstr)
-        
     let SEEK_END as i32 = 2
     let dummy1 as i32 = fseek(f, 0 to isize, SEEK_END)
     let file_size as isize = ftell(f)
     rewind(f)
-    
+
     let cap as usize = file_size to usize + 1 to usize
     let buf as ptr[u8] = mantiq_malloc_raw(cap to i64) to ptr[u8]
     let read_bytes as usize = fread(buf to ptr, 1 to usize, file_size to usize, f)
     buf[read_bytes] = 0 to u8
-    
+
     let dummy2 as i32 = fclose(f)
     return String(data = buf, len = read_bytes, capacity = cap)
+
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
@@ -81,11 +94,16 @@ extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn printf(format as cstr, ...) as i32
 extern fn strdup(s as cstr) as cstr
 
-// ── GIL Safety Helper Functions ──────────────────────────────────────────
-fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node as ptr[ptr[Node]], out_viol_reason as ptr[String]) as bool:
+
+// ── GIL Safety Helper Functions ──────────────────────────────────────────────
+fn scan_node_for_gil(
+    n as ptr[Node],
+    calls as ptr[List[String]],
+    out_viol_node as ptr[ptr[Node]],
+    out_viol_reason as ptr[String],
+) as bool:
     if n == None to ptr[Node]:
         return False
-
     let nt as NodeType = node_kind(n)
 
     if nt == NodeType.CallExpr:
@@ -111,7 +129,6 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
                         return True
             if scan_node_for_gil(callee, calls, out_viol_node, out_viol_reason):
                 return True
-
         let args_p as ptr[List[ptr[Node]]] = node_params_ptr(n)
         if args_p == None to ptr[List[ptr[Node]]]:
             return False
@@ -122,7 +139,6 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
                 return True
             ai = ai + 1 to i64
         return False
-
     elif nt == NodeType.Identifier:
         let id_name as String = node_name(n)
         if id_name.data != None to ptr[u8]:
@@ -132,7 +148,6 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
                 deref out_viol_reason = String.make("references PyObject" to cstr)
                 return True
         return False
-
     elif nt == NodeType.BlockStmt or nt == NodeType.Program:
         let decls_p as ptr[List[ptr[Node]]] = node_declarations_ptr(n)
         if decls_p == None to ptr[List[ptr[Node]]]:
@@ -144,7 +159,6 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
                 return True
             di = di + 1 to i64
         return False
-
     elif nt == NodeType.IfStmt:
         if scan_node_for_gil(node_cond(n), calls, out_viol_node, out_viol_reason):
             return True
@@ -157,45 +171,38 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
             if scan_node_for_gil(eb, calls, out_viol_node, out_viol_reason):
                 return True
         return False
-
     elif nt == NodeType.WhileStmt:
         if scan_node_for_gil(node_cond(n), calls, out_viol_node, out_viol_reason):
             return True
         if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.ForStmt or nt == NodeType.WithStmt:
         if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
             return True
         if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.BinaryExpr:
         if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
             return True
         if scan_node_for_gil(node_right(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.UnaryExpr or nt == NodeType.CastExpr or nt == NodeType.ReturnStmt or nt == NodeType.VarDecl or nt == NodeType.MemberExpr or nt == NodeType.SpawnStmt or nt == NodeType.AwaitExpr:
         if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.IndexExpr:
         if scan_node_for_gil(node_left(n), calls, out_viol_node, out_viol_reason):
             return True
         if scan_node_for_gil(node_right(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.ParamBlockStmt:
         if scan_node_for_gil(node_body(n), calls, out_viol_node, out_viol_reason):
             return True
         return False
-
     elif nt == NodeType.InterpolatedString or nt == NodeType.ListLiteral:
         let decls_p2 as ptr[List[ptr[Node]]] = node_declarations_ptr(n)
         if decls_p2 == None to ptr[List[ptr[Node]]]:
@@ -207,8 +214,8 @@ fn scan_node_for_gil(n as ptr[Node], calls as ptr[List[String]], out_viol_node a
                 return True
             di2 = di2 + 1 to i64
         return False
-
     return False
+
 
 fn check_sig_has_py_types(fn_node as ptr[Node]) as bool:
     let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(fn_node)
@@ -216,7 +223,6 @@ fn check_sig_has_py_types(fn_node as ptr[Node]) as bool:
         let r_name as cstr = (deref ret_annot).name.data to cstr
         if strstr(r_name, "PyObject" to cstr) != None to cstr or strstr(r_name, "Py_buffer" to cstr) != None to cstr:
             return True
-
     // NOTE: node_params returns a by-value shallow copy of the List; a local
     // copy would be auto-dropped at scope exit, freeing the buffer shared
     // with FunDeclData.params and leaving it dangling for later passes
@@ -248,7 +254,7 @@ fn check_sig_has_py_types(fn_node as ptr[Node]) as bool:
     return False
 
 
-// ── Sema ───────────────────────────────────────────────────────────────
+// ── Sema ─────────────────────────────────────────────────────────────────────
 struct Sema:
     public var current_scope as ptr[Scope]
     public var global_scope as ptr[Scope]
@@ -295,11 +301,11 @@ struct Sema:
         (deref self).loaded_module_paths = List[String]()
         (deref self).active_closure_depth = 0 to i32
         (deref self).needs_drop_types = Dict[String, bool]()
-        
+
         let gs as ptr[Scope] = make_scope_with_capacity(None to ptr[Scope], None to ptr[Node], 512 to i32)
         (deref self).global_scope = gs
         (deref self).current_scope = gs
-        
+
         (deref gs).symbols[String.make("printf")] = make_symbol(String.make("printf"), SymbolKind.Function, None to ptr[Node])
         (deref gs).symbols[String.make("String")] = make_symbol(String.make("String"), SymbolKind.Struct, None to ptr[Node])
         (deref gs).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, None to ptr[Node])
@@ -329,29 +335,51 @@ struct Sema:
     public fn report_error(self as ptr[Sema], msg as String, span as Span):
         self.report_error_with_code("E0101" to cstr, msg, (deref self).current_file, span)
 
-    public fn report_error_with_code(self as ptr[Sema], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_error_with_code(
+        self as ptr[Sema],
+        code as cstr,
+        msg as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         let cap as usize = msg.len + file_path.len + 64 to usize
         let buf as ptr[u8] = make(cap) to ptr[u8]
         extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
         let len as i32 = snprintf(buf, cap, "%s:%d:%d: error: %s" to cstr, file_path.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
-        
+
         if (deref self).engine != None to ptr[DiagnosticEngine]:
             return (deref (deref self).engine).report_error(code, msg, file_path, span)
         else:
             let r as i32 = printf("%s\n" to cstr, buf to cstr)
         return None to ptr[Diagnostic]
 
-    public fn report_error_node(self as ptr[Sema], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+    public fn report_error_node(
+        self as ptr[Sema],
+        code as cstr,
+        msg as String,
+        node as ptr[Node],
+    ) as ptr[Diagnostic]:
         let file_path as String = node_file_path(node, (deref self).current_file)
         return self.report_error_with_code(code, msg, file_path, node_span(node))
 
-    public fn report_warning_with_code(self as ptr[Sema], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_warning_with_code(
+        self as ptr[Sema],
+        code as cstr,
+        msg as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         if (deref self).engine != None to ptr[DiagnosticEngine]:
             return (deref (deref self).engine).report_warning(code, msg, file_path, span)
         return None to ptr[Diagnostic]
 
-    public fn report_warning_node(self as ptr[Sema], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+    public fn report_warning_node(
+        self as ptr[Sema],
+        code as cstr,
+        msg as String,
+        node as ptr[Node],
+    ) as ptr[Diagnostic]:
         let file_path as String = node_file_path(node, (deref self).current_file)
         return self.report_warning_with_code(code, msg, file_path, node_span(node))
 
@@ -378,21 +406,17 @@ struct Sema:
     public fn check_closure_capture(self as ptr[Sema], name as String, sym as ptr[Symbol]):
         if (deref self).active_closure_depth == 0 to i32:
             return
-
         let decl_node as ptr[Node] = (deref sym).decl_node
         if decl_node == None to ptr[Node]:
             return
-
         var curr as ptr[Scope] = (deref self).current_scope
 
         while curr != None to ptr[Scope]:
             if (deref curr).symbols.has(name):
                 break
-
             if (deref curr).closure_node != None to ptr[Node]:
                 // This scope belongs to a closure that crosses the variable's defining scope
                 add_captured_var((deref curr).closure_node, name)
-
             curr = (deref curr).parent
 
     public fn load_imported_module(self as ptr[Sema], node as ptr[Node]):
@@ -400,12 +424,10 @@ struct Sema:
         // Skip non-import nodes (e.g. `link` directives) that have empty targets
         if target.len == 0 to usize:
             return
-            
-        
         if strcmp(target.data to cstr, "std.option" to cstr) == 0:
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
-            
+
             let count as i64 = node_imported_symbols(node).length()
             var s_idx as i64 = 0 to i64
             while s_idx < count:
@@ -414,11 +436,10 @@ struct Sema:
                 (deref (deref self).current_scope).symbols[s_name] = builtin_sym
                 s_idx = s_idx + 1 to i64
             return
-        
         if strcmp(target.data to cstr, "std.result" to cstr) == 0:
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
-            
+
             let count as i64 = node_imported_symbols(node).length()
             var s_idx as i64 = 0 to i64
             while s_idx < count:
@@ -427,11 +448,10 @@ struct Sema:
                 (deref (deref self).current_scope).symbols[s_name] = builtin_sym
                 s_idx = s_idx + 1 to i64
             return
-        
         if strcmp(target.data to cstr, "std.quantum" to cstr) == 0:
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
-            
+
             let count as i64 = node_imported_symbols(node).length()
             var s_idx as i64 = 0 to i64
             while s_idx < count:
@@ -440,13 +460,12 @@ struct Sema:
                 (deref (deref self).current_scope).symbols[s_name] = builtin_sym
                 s_idx = s_idx + 1 to i64
             return
-        
         let module_key as String = target
         if (deref self).loaded_modules.has(module_key):
             let mod_scope as ptr[Scope] = (deref self).loaded_modules[module_key]
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
-            
+
             let count as i64 = node_imported_symbols(node).length()
             var s_idx as i64 = 0 to i64
             while s_idx < count:
@@ -458,7 +477,6 @@ struct Sema:
                     self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
                 s_idx = s_idx + 1 to i64
             return
-        
         let import_k as ImportKind = node_import_kind(node)
         if import_k == ImportKind.Python:
             var opt_al as Option[String] = node_alias(node)
@@ -479,7 +497,6 @@ struct Sema:
                 (deref imported_sym).resolved_type = make_type(TypeKind.PyObject)
                 (deref (deref self).current_scope).symbols[s_name] = imported_sym
                 s_idx = s_idx + 1 to i64
-
             var py_present as bool = False
             var dl_present as bool = False
             let l_cnt as i64 = (deref self).link_targets.length()
@@ -490,13 +507,12 @@ struct Sema:
                     py_present = True
                 elif strcmp(lt, "dl" to cstr) == 0:
                     dl_present = True
-                li = li + 1 to i64
+                li = li +1 to i64
             if not py_present:
                 (deref self).link_targets.append(String.make("python3.12" to cstr))
             if not dl_present:
                 (deref self).link_targets.append(String.make("dl" to cstr))
             return
-
         if import_k == ImportKind.C or import_k == ImportKind.Pkg:
             let t_cstr as cstr = target.data to cstr
             let t_len as usize = target.len
@@ -513,11 +529,10 @@ struct Sema:
                     if strcmp((deref self).link_targets[li].data to cstr, t_cstr) == 0:
                         already_present = True
                         break
-                    li = li + 1 to i64
+                    li = li +1 to i64
                 if not already_present:
                     (deref self).link_targets.append(String.make(t_cstr))
             return
-        
         // Resolve relative to the current file's directory
         let file_path as String = (deref self).current_file
         var last_slash as i64 = -1 to i64
@@ -526,7 +541,6 @@ struct Sema:
             if file_path.data[f_idx to usize] == 47 to u8: // '/'
                 last_slash = f_idx
             f_idx = f_idx + 1 to i64
-        
         var dir_prefix as cstr = "" to cstr
         if last_slash >= 0 to i64:
             let dir_len as usize = (last_slash + 1 to i64) to usize
@@ -537,7 +551,6 @@ struct Sema:
                 d_i = d_i + 1 to usize
             dir_buf[dir_len] = 0 to u8
             dir_prefix = dir_buf to cstr
-
         let path_buf as ptr[u8] = strdup(target.data to cstr) to ptr[u8]
         var idx as i64 = 0 to i64
         while path_buf[idx] != 0 to u8:
@@ -545,7 +558,6 @@ struct Sema:
                 let byte_ptr as ptr[u8] = path_buf
                 byte_ptr[idx] = 47 to u8 // '/' is ASCII 47
             idx = idx + 1 to i64
-            
         var content as String = String.make("" to cstr)
         var resolved_path as String = String.make("" to cstr)
 
@@ -596,7 +608,6 @@ struct Sema:
                                 pdir_nz.deinit()
                             pdir.deinit()
                     target_nz.deinit()
-
         if import_k == ImportKind.Vendor and content.len == 0 to usize:
             let sbv as StringBuilder = StringBuilder.make()
             sbv.append("vendor/" to cstr)
@@ -633,7 +644,6 @@ struct Sema:
                             vd_path.deinit()
                     vm_path.deinit()
                 v_path.deinit()
-        
         let sb1 as StringBuilder = StringBuilder.make()
         sb1.append("./" to cstr)
         sb1.append(path_buf to cstr)
@@ -645,7 +655,7 @@ struct Sema:
         sb1_mq.append(path_buf to cstr)
         sb1_mq.append(".mq" to cstr)
         let path1_mq as String = sb1_mq.to_string()
-        
+
         let sb2 as StringBuilder = StringBuilder.make()
         sb2.append("std/" to cstr)
         sb2.append(path_buf to cstr)
@@ -663,14 +673,14 @@ struct Sema:
         sb3_mq.append(path_buf to cstr)
         sb3_mq.append(".mq" to cstr)
         let path3_mq as String = sb3_mq.to_string()
-        
+
         let sb4 as StringBuilder = StringBuilder.make()
         sb4.append(dir_prefix)
         sb4.append("std/" to cstr)
         sb4.append(path_buf to cstr)
         sb4.append(".nz" to cstr)
         let path4 as String = sb4.to_string()
-        
+
         let sb5 as StringBuilder = StringBuilder.make()
         sb5.append("../" to cstr)
         sb5.append(path_buf to cstr)
@@ -682,7 +692,7 @@ struct Sema:
         sb5_mq.append(path_buf to cstr)
         sb5_mq.append(".mq" to cstr)
         let path5_mq as String = sb5_mq.to_string()
-        
+
         if content.len == 0 to usize:
             content = read_file_to_str(path1.data to cstr)
             if content.len > 0 to usize:
@@ -715,7 +725,6 @@ struct Sema:
                                         content = read_file_to_str(path5_mq.data to cstr)
                                         if content.len > 0 to usize:
                                             resolved_path = path5_mq
-
                 // If still not found, walk up from the source file looking for a project root
                 if content.len == 0 to usize:
                     extern fn free(p as ptr)
@@ -791,7 +800,7 @@ struct Sema:
                                     path_buf_new[path_len] = 0 to u8
                                     resolved_path = String(data = path_buf_new, len = path_len, capacity = path_len + 1 to usize)
                             free(probe_buf to ptr)
-                        
+
         extern fn free(p as ptr)
         free(path_buf to ptr)
         // Only deinit paths that are NOT the resolved_path (avoid use-after-free)
@@ -806,7 +815,7 @@ struct Sema:
         if resolved_path.data != path5.data:
             path5.deinit()
         // path6/path7 are already deinit'd inside the block if not resolved
-                        
+
         if content.len == 0 to usize:
             if strcmp(target.data to cstr, "std.mem" to cstr) == 0:
                 let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
@@ -821,7 +830,6 @@ struct Sema:
                 return
             self.report_error_with_code("E0103" to cstr, String.make("cannot find module" to cstr), node_file_path(node, (deref self).current_file), node_span(node))
             return
-            
         if (deref self).engine != None to ptr[DiagnosticEngine]:
             (deref (deref self).engine).register_source(resolved_path, content)
 
@@ -838,7 +846,6 @@ struct Sema:
             self.report_error_with_code("E0001" to cstr, String.make("compilation error in module" to cstr), resolved_path, node_span(node))
             content.deinit()
             return
-
         // Milestone M: snapshot this module's generic templates for the
         // post-declare monomorphisation re-run (main.nz). The template
         // spans index into THIS module's text, so record it per name.
@@ -860,28 +867,25 @@ struct Sema:
             (deref self).mod_generic_source[mf_k] = String.make(content.data to cstr)
             (deref self).mod_generic_path[mf_k] = resolved_path
             mg_i = mg_i + 1 to i64
-            
         let saved_scope as ptr[Scope] = (deref self).current_scope
         let saved_file as String = (deref self).current_file
-        
+
         let mod_scope as ptr[Scope] = make_scope(None to ptr[Scope], root_ast to ptr[Node])
         (deref self).current_scope = mod_scope
         (deref self).current_file = resolved_path
-        
+
         if strcmp(target.data to cstr, "std.collections" to cstr) == 0:
             (deref mod_scope).symbols[String.make("List")] = make_symbol(String.make("List"), SymbolKind.Struct, node)
             (deref mod_scope).symbols[String.make("Dict")] = make_symbol(String.make("Dict"), SymbolKind.Struct, node)
-        
         if strcmp(target.data to cstr, "std.mem" to cstr) == 0:
             (deref mod_scope).symbols[String.make("make")] = make_symbol(String.make("make"), SymbolKind.Function, node)
             (deref mod_scope).symbols[String.make("drop")] = make_symbol(String.make("drop"), SymbolKind.Function, node)
             (deref mod_scope).symbols[String.make("resize")] = make_symbol(String.make("resize"), SymbolKind.Function, node)
-        
         self.declare_pass(root_ast to ptr[Node])
         (deref self).loaded_modules[module_key] = mod_scope
         (deref self).module_asts[module_key] = root_ast
         (deref self).loaded_module_paths.append(resolved_path)
-        
+
         // Merge module declarations into root AST
         let root_prog as ptr[Node] = (deref self).root_ast
         if root_prog != None to ptr[Node] and node_kind(root_prog) == NodeType.Program:
@@ -894,12 +898,11 @@ struct Sema:
                     root_decls.append(mod_decls[di])
                     di = di + 1 to i64
                 set_node_declarations(root_prog, root_decls)
-        
         (deref self).current_scope = saved_scope
         (deref self).current_file = saved_file
         let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
         (deref (deref self).current_scope).symbols[target] = mod_sym
-        
+
         let count as i64 = node_imported_symbols(node).length()
         if count == 0 to i64 and (import_k == ImportKind.Path or import_k == ImportKind.Vendor):
             let mod_keys as List[String] = (deref mod_scope).symbols.keys()
@@ -920,13 +923,11 @@ struct Sema:
                 else:
                     self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
                 s_idx = s_idx + 1 to i64
-            
         content.deinit()
 
     public fn declare_pass(self as ptr[Sema], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
-            
         let nt as NodeType = node_kind(node)
         if nt == NodeType.Program:
             let count as i64 = node_declarations(node).length()
@@ -953,7 +954,6 @@ struct Sema:
                     let r_sym as ptr[Symbol] = make_symbol(String.make(r_cstr), SymbolKind.Variable, node)
                     (deref (deref self).current_scope).symbols[String.make(r_cstr)] = r_sym
                 r_i = r_i + 1 to i64
-
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
             (deref child_scope).closure_node = node
@@ -969,10 +969,8 @@ struct Sema:
                 let p_sym as ptr[Symbol] = make_symbol(String.make(p_cstr), SymbolKind.Variable, p_node)
                 (deref child_scope).symbols[String.make(p_cstr)] = p_sym
                 p_idx = p_idx + 1 to i64
-
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
-
             let self_ref_pb as ptr[Sema] = self
             (deref self_ref_pb).current_scope = parent_scope
         elif nt == NodeType.VarDecl:
@@ -982,7 +980,6 @@ struct Sema:
             else:
                 let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Variable, node)
                 (deref (deref self).current_scope).symbols[name] = sym
-            
             if node_left(node) != None to ptr[Node]:
                 self.declare_pass(node_left(node))
         elif nt == NodeType.FunDecl:
@@ -1003,7 +1000,7 @@ struct Sema:
                             py_present = True
                         elif strcmp(lt, "dl" to cstr) == 0:
                             dl_present = True
-                        li = li + 1 to i64
+                        li = li +1 to i64
                     if not py_present:
                         (deref self).link_targets.append(String.make("python3.12" to cstr))
                     if not dl_present:
@@ -1014,14 +1011,13 @@ struct Sema:
                 else:
                     let sym as ptr[Symbol] = make_symbol(name, SymbolKind.Function, node)
                     (deref (deref self).current_scope).symbols[name] = sym
-            
             // Only create child scope and register params if there's a body (non-extern)
             if not node_is_extern(node):
                 let parent_scope as ptr[Scope] = (deref self).current_scope
                 let child_scope as ptr[Scope] = make_scope(parent_scope, node)
                 (deref self).current_scope = child_scope
                 (deref self).fn_scopes[node to usize] = child_scope
-                
+
                 let param_list as List[ptr[Node]] = node_params(node)
                 let param_count as i64 = param_list.length()
                 var p_idx as i64 = 0 to i64
@@ -1034,7 +1030,6 @@ struct Sema:
                         let p_sym as ptr[Symbol] = make_symbol(String.make(p_name), SymbolKind.Variable, p_node)
                         (deref child_scope).symbols[String.make(p_name)] = p_sym
                     p_idx = p_idx + 1 to i64
-                
                 if node_body(node) != None to ptr[Node]:
                     self.declare_pass(node_body(node))
                 let self_ref_1 as ptr[Sema] = self
@@ -1059,7 +1054,6 @@ struct Sema:
                     let p_sym as ptr[Symbol] = make_symbol(String.make(p_name), SymbolKind.Variable, p_node)
                     (deref child_scope).symbols[String.make(p_name)] = p_sym
                 p_idx = p_idx + 1 to i64
-
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
             let self_ref_ce as ptr[Sema] = self
@@ -1217,10 +1211,8 @@ struct Sema:
             if var_name.len > 0 to usize:
                 let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
                 (deref child_scope).symbols[var_name] = sym
-
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
-
             let self_ref_f as ptr[Sema] = self
             (deref self_ref_f).current_scope = parent_scope
         elif nt == NodeType.ListComprehension:
@@ -1235,12 +1227,10 @@ struct Sema:
             if var_name.len > 0 to usize:
                 let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
                 (deref child_scope).symbols[var_name] = sym
-
             if node_cond(node) != None to ptr[Node]:
                 self.declare_pass(node_cond(node))
             if node_right(node) != None to ptr[Node]:
                 self.declare_pass(node_right(node))
-
             let self_ref_lc as ptr[Sema] = self
             (deref self_ref_lc).current_scope = parent_scope
         elif nt == NodeType.WithStmt:
@@ -1248,7 +1238,7 @@ struct Sema:
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
             (deref self).current_scope = child_scope
             (deref self).fn_scopes[node to usize] = child_scope
-            
+
             // Define the context variable in this scope with is_context_manager = True
             var var_name as String = node_name(node)
             if var_name.len == 0 to usize:
@@ -1259,11 +1249,10 @@ struct Sema:
                 let snprintf_len as i32 = snprintf(buf, cap, "_with_temp_%d" to cstr, node_span(node).start_byte)
                 var_name = String(data = buf, len = snprintf_len to usize, capacity = cap)
                 set_node_name(node, var_name)
-                
             let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
             (deref sym).is_context_manager = True
             (deref child_scope).symbols[var_name] = sym
-            
+
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
             let self_ref_w1 as ptr[Sema] = self
@@ -1275,12 +1264,11 @@ struct Sema:
             let child_scope as ptr[Scope] = make_scope(parent_scope, node)
             (deref self).current_scope = child_scope
             (deref self).fn_scopes[node to usize] = child_scope
-            
+
             let var_name as String = node_name(node)
             if var_name.len > 0 to usize and strcmp(var_name.data to cstr, "_" to cstr) != 0:
                 let sym as ptr[Symbol] = make_symbol(var_name, SymbolKind.Variable, node)
                 (deref child_scope).symbols[var_name] = sym
-            
             if node_body(node) != None to ptr[Node]:
                 self.declare_pass(node_body(node))
             let self_ref_t1 as ptr[Sema] = self
@@ -1313,7 +1301,6 @@ struct Sema:
                 if pat_node != None to ptr[Node]:
                     if node_kind(pat_node) == NodeType.BinaryExpr and strcmp(node_op(pat_node).data to cstr, "if" to cstr) == 0:
                         pat_node = node_left(pat_node)
-
                     if node_kind(pat_node) == NodeType.Identifier:
                         let pat_name as String = node_name(pat_node)
                         if strcmp(pat_name.data to cstr, "_" to cstr) != 0:
@@ -1338,10 +1325,8 @@ struct Sema:
                                     let sym as ptr[Symbol] = make_symbol(pa_name, SymbolKind.Variable, pa_n)
                                     (deref child_scope).symbols[pa_name] = sym
                             pa_i = pa_i + 1 to i64
-
                 if node_right(case_node) != None to ptr[Node]:
                     self.declare_pass(node_right(case_node))
-
                 let self_ref_mc as ptr[Sema] = self
                 (deref self_ref_mc).current_scope = parent_scope
                 ci = ci + 1 to i64
@@ -1360,7 +1345,6 @@ struct Sema:
     public fn resolve_pass(self as ptr[Sema], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
-            
         let nt as NodeType = node_kind(node)
         if nt == NodeType.Program:
             let decls as List[ptr[Node]] = node_declarations(node)
@@ -1385,7 +1369,6 @@ struct Sema:
 
                 if node_body(node) != None to ptr[Node]:
                     self.resolve_pass(node_body(node))
-
                 (deref self).active_closure_depth = (deref self).active_closure_depth - 1 to i32
                 let self_ref_pb2 as ptr[Sema] = self
                 (deref self_ref_pb2).current_scope = parent_scope
@@ -1401,7 +1384,7 @@ struct Sema:
             let parent_scope as ptr[Scope] = (deref self).current_scope
             let child_scope as ptr[Scope] = (deref self).fn_scopes[node to usize]
             (deref self).current_scope = child_scope
-                
+
             if node_body(node) != None to ptr[Node]:
                 self.resolve_pass(node_body(node))
             let self_ref_2 as ptr[Sema] = self
@@ -1443,7 +1426,7 @@ struct Sema:
                 if node_kind(left) == NodeType.Identifier and node_kind(right) == NodeType.Identifier:
                     let mod_name as cstr = node_name(left).data to cstr
                     let sym_name as cstr = node_name(right).data to cstr
-                    
+
                     let mod_sym as ptr[Symbol] = self.lookup_symbol(String.make(mod_name))
                     if mod_sym != None to ptr[Symbol]:
                         if (deref mod_sym).kind == SymbolKind.Module:
@@ -1644,10 +1627,8 @@ struct Sema:
                             // Is pattern: do not resolve left identifier (it's declared variable)
                         elif node_kind(pat_wrapper) != NodeType.Identifier:
                             self.resolve_pass(pat_wrapper)
-
                     if node_right(case_node) != None to ptr[Node]:
                         self.resolve_pass(node_right(case_node))
-
                     let self_ref_m2 as ptr[Sema] = self
                     (deref self_ref_m2).current_scope = parent_scope
                 ci = ci + 1 to i64
@@ -1663,12 +1644,10 @@ struct Sema:
         elif nt == NodeType.SpreadExpr or nt == NodeType.SpawnStmt or nt == NodeType.AwaitExpr:
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
-
-    // ── GIL Safety Engine ──────────────────────────────────────────────────
+    // ── GIL Safety Engine ────────────────────────────────────────────────────────
     public fn analyze_gil_safety(self as ptr[Sema], root as ptr[Node]):
         if root == None to ptr[Node]:
             return
-
         let decls as List[ptr[Node]] = node_declarations(root)
         let d_cnt as i64 = decls.length()
 
@@ -1700,11 +1679,9 @@ struct Sema:
                                     fn_nodes.append(m)
                             mi = mi + 1 to i64
             di = di + 1 to i64
-
         let f_count as i64 = fn_names.length()
         if f_count == 0 to i64:
             return
-
         var direct_gil as List[bool] = List[bool]()
         var direct_viol_node as List[ptr[Node]] = List[ptr[Node]]()
         var call_caller_idx as List[i64] = List[i64]()
@@ -1729,16 +1706,13 @@ struct Sema:
                 else:
                     direct_gil.append(False)
                     direct_viol_node.append(None to ptr[Node])
-
                 let c_cnt as i64 = callees.length()
                 var ci as i64 = 0 to i64
                 while ci < c_cnt:
                     call_caller_idx.append(fi)
                     call_target_name.append(callees[ci])
                     ci = ci + 1 to i64
-
-            fi = fi + 1 to i64
-
+            fi = fi +1 to i64
         // Transitive reachability fixed-point propagation
         var trans_gil as List[bool] = List[bool]()
         var trans_viol_node as List[ptr[Node]] = List[ptr[Node]]()
@@ -1746,8 +1720,7 @@ struct Sema:
         while fi < f_count:
             trans_gil.append(direct_gil[fi])
             trans_viol_node.append(direct_viol_node[fi])
-            fi = fi + 1 to i64
-
+            fi = fi +1 to i64
         let total_calls as i64 = call_caller_idx.length()
         var changed as bool = True
         while changed:
@@ -1773,7 +1746,6 @@ struct Sema:
                                         break
                                 ti = ti + 1 to i64
                 ci = ci + 1 to i64
-
         // Enforcement & annotation setting
         fi = 0 to i64
         while fi < f_count:
@@ -1795,8 +1767,7 @@ struct Sema:
                         self.report_warning_node("W0041" to cstr, wmsg, f_node)
             else:
                 set_node_is_gil_independent(f_node, True)
-
-            fi = fi + 1 to i64
+            fi = fi +1 to i64
 
     public fn check_and_register_struct_drop(self as ptr[Sema], node as ptr[Node]):
         let name as String = node_name(node)
@@ -1809,7 +1780,6 @@ struct Sema:
         if strcmp(s_cstr, "String" to cstr) == 0 or strcmp(s_cstr, "List" to cstr) == 0 or strcmp(s_cstr, "Dict" to cstr) == 0 or strcmp(s_cstr, "StringBuilder" to cstr) == 0 or strcmp(s_cstr, "Set" to cstr) == 0:
             (deref self).needs_drop_types[String.make(s_cstr)] = True
             return
-
         var needs_drop as bool = False
         let body as ptr[Node] = node_body(node)
         if body != None to ptr[Node]:
@@ -1847,6 +1817,5 @@ struct Sema:
                                     if strncmp(an, "String" to cstr, 6 to usize) == 0 or strncmp(an, "List" to cstr, 4 to usize) == 0 or strncmp(an, "Dict" to cstr, 4 to usize) == 0 or strncmp(an, "StringBuilder" to cstr, 13 to usize) == 0 or (deref self).needs_drop_types.has(String.make(an)):
                                         needs_drop = True
                 i = i + 1 to i64
-
         if needs_drop:
             (deref self).needs_drop_types[String.make(s_cstr)] = True

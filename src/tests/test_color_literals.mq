@@ -1,37 +1,44 @@
-import string
-from string import String
 import error
 from error import DiagnosticEngine
-import symbols
-from symbols import Node, NodeType, LanguageMode, node_kind, node_val, node_color_r, node_color_g, node_color_b, node_color_a
 import lower
 from lower import Lowerer, make_lowerer_mantiq_from_cstr
-import types
-from types import Type, TypeKind
 import sema
 from sema import Sema
+import string
+from string import String
+import symbols
+from symbols import LanguageMode, Node, NodeType, node_color_a, node_color_b, node_color_g, node_color_r, node_kind, node_val
 import typecheck
 from typecheck import TypeChecker
+import types
+from types import Type, TypeKind
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn exit(code as i32)
+
 
 fn assert_true(cond as bool, msg as cstr):
     if not cond:
         let _ as i32 = printf("FAIL: %s\n" to cstr, msg)
         exit(1 to i32)
 
+
 fn get_red(c as color) as u32:
     return ((c to u32) >> 16 to u32) & 255 to u32
+
 
 fn get_green(c as color) as u32:
     return ((c to u32) >> 8 to u32) & 255 to u32
 
+
 fn get_blue(c as color) as u32:
     return (c to u32) & 255 to u32
 
+
 fn get_alpha(c as color) as u32:
     return ((c to u32) >> 24 to u32) & 255 to u32
+
 
 fn test_ast_lowering_and_sema():
     let src as cstr = "let c1 = #000\nlet c2 = #FFF\nlet c3 = #FF5733\nlet c4 = #FF000080\n" to cstr
@@ -56,6 +63,7 @@ fn test_ast_lowering_and_sema():
     tc.typecheck_node(ast_root)
     assert_true((deref engine).diagnostics.length() == 0 to i64, "Typecheck root must succeed" to cstr)
     let _ as i32 = printf("  PASS: Color AST lowering, sema, and typecheck\n" to cstr)
+
 
 fn test_color_values():
     // 3-digit hex literals (#RGB -> #RRGGBB with Alpha = 255)
@@ -119,6 +127,7 @@ fn test_color_values():
 
     printf("  PASS: Color Literal Runtime Values & Channel Extraction\n" to cstr)
 
+
 fn test_reflection_on_color():
     let c as color = #FF5733
     let boxed as Any = c to Any
@@ -131,6 +140,7 @@ fn test_reflection_on_color():
             matched = False
     assert_true(matched, "Match downcast on color must succeed" to cstr)
     printf("  PASS: Reflection / Match Downcast on Color Type\n" to cstr)
+
 
 fn main() as i32:
     printf("=== Running Hex Color Literals Test Suite ===\n" to cstr)

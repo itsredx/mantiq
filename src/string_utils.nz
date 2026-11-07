@@ -1,12 +1,14 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
 from std.mem import make
+from std.string import String
 
-// ── C FFI Allocator Declarations ─────────────────────────────────────────
+
+// ── C FFI Allocator Declarations ─────────────────────────────────────────────
 extern fn free(p as ptr)
 
-// ── String Helpers ──────────────────────────────────────────────────────
+
+// ── String Helpers ───────────────────────────────────────────────────────────
 fn cstr_to_string(c as cstr) as ptr:
     let s as ptr[String] = make[String](1 to usize) to ptr[String]
     if c == None to cstr:
@@ -14,6 +16,7 @@ fn cstr_to_string(c as cstr) as ptr:
     else:
         (deref s) = String.make(c)
     return s to ptr
+
 
 fn free_cstr(c as cstr):
     if c != None to cstr:

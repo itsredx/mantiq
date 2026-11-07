@@ -1,19 +1,21 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
-from std.collections import List, Dict
-from std.option import Option, Empty
+from std.collections import Dict, List
 from std.mem import make
-import symbols
-from symbols import Node, Symbol, Scope, SymbolKind, Span, NodeType, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_op, node_cond, node_then_branch, node_else_branch, node_span, node_inferred_type, set_node_inferred_type, set_node_auto_drops, node_file_path
-import types
-from types import Type, TypeKind, is_copy_type
-import sema
-from sema import Sema, make_symbol
-import error
-from error import DiagnosticEngine, Diagnostic
+from std.option import Empty, Option
+from std.string import String
+
 import cfg
 from cfg import CFGAnalyzer, ControlFlowGraph, Point
+import error
+from error import Diagnostic, DiagnosticEngine
+import sema
+from sema import Sema, make_symbol
+import symbols
+from symbols import Node, NodeType, Scope, Span, Symbol, SymbolKind, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_inferred_type, node_kind, node_left, node_name, node_op, node_params, node_right, node_span, node_then_branch, set_node_auto_drops, set_node_inferred_type
+import types
+from types import Type, TypeKind, is_copy_type
+
 
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn printf(format as cstr, ...) as i32
@@ -24,22 +26,26 @@ struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
 
+
 fn option_has_value(opt as ptr[u8]) as bool:
     let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref lay).has_val == 1 to u8
+
 
 fn option_value(opt as ptr[u8]) as ptr[u8]:
     let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref lay).val_ptr
 
-// ── ObjectState ────────────────────────────────────────────────────────
+
+// ── ObjectState ──────────────────────────────────────────────────────────────
 enum ObjectState:
     Owned
     Moved
     Dropped
     Borrowed
 
-// ── BorrowRecord ───────────────────────────────────────────────────────
+
+// ── BorrowRecord ─────────────────────────────────────────────────────────────
 struct BorrowRecord:
     public var borrower_name as String
     public var source_name as String
@@ -49,12 +55,14 @@ struct BorrowRecord:
     public var last_use_row as u32
     public var is_active as u8
 
-// ── VariableInfo ───────────────────────────────────────────────────────
+
+// ── VariableInfo ─────────────────────────────────────────────────────────────
 struct VarInfo:
     public var state as ObjectState
     public var var_type as ptr[Type]
 
-// ── BorrowChecker ──────────────────────────────────────────────────────
+
+// ── BorrowChecker ────────────────────────────────────────────────────────────
 struct BorrowChecker:
     public var errors as List[String]
     public var current_file as String
@@ -103,7 +111,13 @@ struct BorrowChecker:
     public fn report_error(self as ptr[BorrowChecker], msg as String, span as Span):
         self.report_error_with_code("E0401" to cstr, msg, (deref self).current_file, span)
 
-    public fn report_error_with_code(self as ptr[BorrowChecker], code as cstr, msg as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_error_with_code(
+        self as ptr[BorrowChecker],
+        code as cstr,
+        msg as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
         extern fn memset(s as ptr, c as i32, n as usize) as ptr
         let cap as usize = msg.len + file_path.len + 128 to usize
@@ -111,7 +125,7 @@ struct BorrowChecker:
         let dummy_memset as ptr = memset(buf to ptr, 0 to i32, cap to i32)
         let len as i32 = snprintf(buf, cap, "%s:%d:%d: borrow error: %s" to cstr, file_path.data to cstr, span.start_row + 1 to u32, span.start_col + 1 to u32, msg.data to cstr)
         (deref self).errors.append(String(data = buf, len = len to usize, capacity = cap))
-        
+
         if (deref self).sema != None to ptr[Sema]:
             let s_ptr as ptr[Sema] = (deref self).sema
             if (deref s_ptr).engine != None to ptr[DiagnosticEngine]:
@@ -120,7 +134,12 @@ struct BorrowChecker:
             let r as i32 = printf("%s\n" to cstr, buf to cstr)
         return None to ptr[Diagnostic]
 
-    public fn report_error_node(self as ptr[BorrowChecker], code as cstr, msg as String, node as ptr[Node]) as ptr[Diagnostic]:
+    public fn report_error_node(
+        self as ptr[BorrowChecker],
+        code as cstr,
+        msg as String,
+        node as ptr[Node],
+    ) as ptr[Diagnostic]:
         let file_path as String = node_file_path(node, (deref self).current_file)
         return self.report_error_with_code(code, msg, file_path, node_span(node))
 
@@ -174,7 +193,11 @@ struct BorrowChecker:
     public fn var_infos_equal(self as ptr[BorrowChecker], a as VarInfo, b as VarInfo) as bool:
         return (a.state == b.state) and (a.var_type == b.var_type)
 
-    public fn merge_branch_states(self as ptr[BorrowChecker], then_s as Dict[String, VarInfo], else_s as Dict[String, VarInfo]):
+    public fn merge_branch_states(
+        self as ptr[BorrowChecker],
+        then_s as Dict[String, VarInfo],
+        else_s as Dict[String, VarInfo],
+    ):
         let ss_ref as ptr[Dict[String, VarInfo]] = ref (deref self).symbol_states
         let t_keys as List[String] = then_s.keys()
         let t_count as i64 = t_keys.length()
@@ -214,7 +237,6 @@ struct BorrowChecker:
             let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
             let s_ptr as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[depth - 1]
             (deref s_ptr).append(sym)
-
     // Returns True when the symbol's DECL initializer is an aliasing read
     // (IndexExpr element read or a deref). Such a binding does NOT own its
     // buffer: the collection/list still owns the String, and byval reads of
@@ -247,11 +269,10 @@ struct BorrowChecker:
         let depth as i64 = (deref self).scope_depth to i64
         if depth <= 0 to i64:
             return
-            
         let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
         let current_scope as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[depth - 1]
         let sym_count as i64 = (deref current_scope).length()
-        
+
         let drops as List[ptr[Symbol]] = List[ptr[Symbol]]()
         var i as i64 = 0 to i64
         while i < sym_count:
@@ -266,7 +287,6 @@ struct BorrowChecker:
                             drops.append(sym)
                             (deref self).symbol_states[name] = VarInfo(state = ObjectState.Dropped, var_type = t)
             i = i + 1 to i64
-            
         if drops.length() > 0 to i64:
             (deref self).auto_drops[node to usize] = drops
             // Also write drop names to the node itself for codegen consumption
@@ -277,7 +297,6 @@ struct BorrowChecker:
                 drop_names.append((deref drop_sym).name)
                 d_idx = d_idx + 1 to i64
             set_node_auto_drops(node, drop_names)
-            
         // Remove the popped scope's entries from symbol_states. Without
         // this the map accumulates every variable declared anywhere in
         // the program, and snapshot_symbol_states (called 3x per IfStmt,
@@ -294,10 +313,8 @@ struct BorrowChecker:
             if (deref self).symbol_states.has(r_nm):
                 let _rm as bool = (deref self).symbol_states.remove(r_nm)
             r_idx = r_idx + 1 to i64
-            
         let dummy_sep2 as i32 = 0
         (deref self).scope_depth = (deref self).scope_depth - 1 to i32
-
     // Check identifier for use-after-move, then mark as moved only if it's a move type
     public fn is_local(self as ptr[BorrowChecker], name as String) as bool:
         let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
@@ -321,13 +338,12 @@ struct BorrowChecker:
         let nt as NodeType = node_kind(node)
         let span_val as Span = node_span(node)
         let row as u32 = span_val.start_row + 1 to u32
-        
+
         if nt == NodeType.Identifier:
             let id_name as String = node_name(node)
             if id_name.len > 0 to usize:
                 let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
                 (deref lu_ref)[id_name] = row
-        
         if nt == NodeType.Program or nt == NodeType.BlockStmt or nt == NodeType.ParamBlockStmt:
             let decls_raw as List[ptr[Node]] = node_declarations(node)
             let decls as ptr[List[ptr[Node]]] = ref decls_raw
@@ -399,10 +415,16 @@ struct BorrowChecker:
                 (deref bp).is_active = active
             idx = idx + 1 to i64
 
-    public fn check_borrow_creation(self as ptr[BorrowChecker], borrower_name as String, source_name as String, is_mut as u8, span as Span):
+    public fn check_borrow_creation(
+        self as ptr[BorrowChecker],
+        borrower_name as String,
+        source_name as String,
+        is_mut as u8,
+        span as Span,
+    ):
         let row as u32 = span.start_row + 1 to u32
         self.update_borrows_liveness(row)
-        
+
         let ab_ref as ptr[List[ptr[BorrowRecord]]] = ref (deref self).active_borrows
         let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
         let sm_ref as ptr[Dict[String, String]] = ref (deref self).var_source_map
@@ -426,11 +448,9 @@ struct BorrowChecker:
                         if d != None to ptr[Diagnostic]:
                             d.set_explanation(String.make("A variable cannot be borrowed as immutable while an active mutable reference exists." to cstr))
             idx = idx + 1 to i64
-            
         var last_use as u32 = row
         if (deref lu_ref).has(borrower_name):
             last_use = (deref lu_ref)[borrower_name]
-            
         // Heap-box the record (make[BorrowRecord]). The box owns its copy of
         // the caller Strings (deep-copied below) and is never freed (leak by
         // design — same policy as AST nodes). No byval struct copies remain
@@ -447,7 +467,11 @@ struct BorrowChecker:
         (deref ab_ref).append(bp_new)
         (deref sm_ref)[borrower_name] = source_name
 
-    public fn is_borrow_active_at_node(self as ptr[BorrowChecker], b as ptr[BorrowRecord], node as ptr[Node]) as bool:
+    public fn is_borrow_active_at_node(
+        self as ptr[BorrowChecker],
+        b as ptr[BorrowRecord],
+        node as ptr[Node],
+    ) as bool:
         if node != None to ptr[Node] and (deref self).cfg_analyzer != None to ptr[CFGAnalyzer]:
             let ca as ptr[CFGAnalyzer] = (deref self).cfg_analyzer
             let k as usize = node to usize
@@ -456,7 +480,6 @@ struct BorrowChecker:
                 if (deref (deref ca).fact_engine).loan_liveness.length() > 0 to i64:
                     return ca.is_borrower_loan_live((deref b).borrower_name, pt)
             return ca.is_borrower_live((deref b).borrower_name, node)
-
         let row as u32 = if node != None to ptr[Node]: node_span(node).start_row + 1 to u32 else: (deref self).current_row
         let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
         var last_use as u32 = (deref b).last_use_row
@@ -474,7 +497,7 @@ struct BorrowChecker:
         let name as String = node_name(left)
         let row as u32 = node_span(left).start_row + 1 to u32
         self.update_borrows_liveness(row)
-        
+
         let ab_ref as ptr[List[ptr[BorrowRecord]]] = ref (deref self).active_borrows
         let count as i64 = (deref ab_ref).length()
         var idx as i64 = 0 to i64
@@ -487,7 +510,11 @@ struct BorrowChecker:
                         d.set_explanation(String.make("Cannot mutate a variable while shared references to it exist under Non-Lexical Lifetimes." to cstr))
             idx = idx + 1 to i64
 
-    public fn check_return_reference(self as ptr[BorrowChecker], return_val as ptr[Node], ret_node as ptr[Node]):
+    public fn check_return_reference(
+        self as ptr[BorrowChecker],
+        return_val as ptr[Node],
+        ret_node as ptr[Node],
+    ):
         if return_val == None to ptr[Node]:
             return
         let nt as NodeType = node_kind(return_val)
@@ -522,7 +549,7 @@ struct BorrowChecker:
         let name as String = node_name(node)
         let row as u32 = node_span(node).start_row + 1 to u32
         self.update_borrows_liveness(row)
-        
+
         // Check if variable is currently borrowed by an active reference
         let ab_ref as ptr[List[ptr[BorrowRecord]]] = ref (deref self).active_borrows
         let count as i64 = (deref ab_ref).length()
@@ -535,7 +562,6 @@ struct BorrowChecker:
                     d.set_explanation(String.make("Values cannot be moved or transferred while references to them are still active." to cstr))
                     d.add_help(String.make("Wait until the reference's non-lexical lifetime has ended before moving." to cstr))
             idx = idx + 1 to i64
-
         // First check for use-after-move regardless of type
         self.check_identifier_use(node)
         // Only mark as moved if it's a local variable (not a module/global constant)
@@ -591,12 +617,10 @@ struct BorrowChecker:
     public fn walk_ast(self as ptr[BorrowChecker], node as ptr[Node]):
         if node == None to ptr[Node]:
             return
-        
         let nt as NodeType = node_kind(node)
         let row as u32 = node_span(node).start_row + 1 to u32
         if row > 0 to u32:
             self.update_borrows_liveness(row)
-        
         if nt == NodeType.Program: // Program
             self.scan_last_uses(node)
             let decls_raw as List[ptr[Node]] = node_declarations(node)
@@ -607,7 +631,6 @@ struct BorrowChecker:
                 let decl as ptr[Node] = (deref decls)[i]
                 self.walk_ast(decl)
                 i = i + 1 to i64
-                
         elif nt == NodeType.BlockStmt: // BlockStmt
             self.push_scope()
             let decls_raw as List[ptr[Node]] = node_declarations(node)
@@ -618,7 +641,6 @@ struct BorrowChecker:
                 self.walk_ast((deref decls)[i])
                 i = i + 1 to i64
             self.pop_scope(node)
-
         elif nt == NodeType.ParamBlockStmt: // ParamBlockStmt
             let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
             if (deref lu_ref).length() == 0 to i64:
@@ -630,7 +652,6 @@ struct BorrowChecker:
                 if (deref sema_ptr).fn_scopes.has(node to usize):
                     let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
                     (deref sema_ptr).current_scope = child_scope
-
             self.push_scope()
 
             let params_raw as List[ptr[Node]] = node_params(node)
@@ -655,13 +676,11 @@ struct BorrowChecker:
                 (deref dd_ref)[param_name] = (deref self).scope_depth
                 self.add_symbol_to_current_scope(sym)
                 p_idx = p_idx + 1 to i64
-
             self.walk_ast(node_body(node))
 
             self.pop_scope(node)
             if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
                 (deref sema_ptr).current_scope = parent_scope
-                
         elif nt == NodeType.FunDecl: // FunDecl
             let lu_ref as ptr[Dict[String, u32]] = ref (deref self).var_last_use
             if (deref lu_ref).length() == 0 to i64:
@@ -673,9 +692,8 @@ struct BorrowChecker:
                 if (deref sema_ptr).fn_scopes.has(node to usize):
                     let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
                     (deref sema_ptr).current_scope = child_scope
-            
             self.push_scope()
-            
+
             let params_raw as List[ptr[Node]] = node_params(node)
             let params as ptr[List[ptr[Node]]] = ref params_raw
             let param_count as i64 = (deref params).length()
@@ -698,18 +716,16 @@ struct BorrowChecker:
                 (deref dd_ref)[param_name] = (deref self).scope_depth
                 self.add_symbol_to_current_scope(sym)
                 p_idx = p_idx + 1 to i64
-                
             self.walk_ast(node_body(node))
-            
+
             self.pop_scope(node)
             if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
                 (deref sema_ptr).current_scope = parent_scope
-                
         elif nt == NodeType.VarDecl: // VarDecl
             let name as String = node_name(node)
             let dd_ref as ptr[Dict[String, i32]] = ref (deref self).var_decl_depth
             (deref dd_ref)[name] = (deref self).scope_depth
-            
+
             var var_type as ptr[Type] = node_inferred_type(node)
             // If VarDecl inferred_type is Void, try the init node's type
             if var_type != None to ptr[Type]:
@@ -720,7 +736,7 @@ struct BorrowChecker:
                         if node_inferred_type(init_check) != None to ptr[Type]:
                             var_type = node_inferred_type(init_check)
             self.mark_owned(name, var_type)
-            
+
             let sema_ptr as ptr[Sema] = (deref self).sema
             var sym as ptr[Symbol] = None to ptr[Symbol]
             if sema_ptr != None to ptr[Sema]:
@@ -728,7 +744,7 @@ struct BorrowChecker:
             if sym == None to ptr[Symbol]:
                 sym = make_symbol(name, SymbolKind.Variable, node)
             self.add_symbol_to_current_scope(sym)
-                    
+
             let init as ptr[Node] = node_left(node)
             if init != None to ptr[Node]:
                 if node_kind(init) == NodeType.UnaryExpr:
@@ -743,7 +759,6 @@ struct BorrowChecker:
                     self.move_identifier(init)
                 else:
                     self.walk_ast(init)
-                    
         elif nt == NodeType.CallExpr: // CallExpr
             let callee as ptr[Node] = node_left(node)
             self.walk_ast(callee)
@@ -788,7 +803,6 @@ struct BorrowChecker:
                 else:
                     self.walk_ast(arg)
                 a_idx = a_idx + 1 to i64
-                
         elif nt == NodeType.ReturnStmt: // ReturnStmt
             let return_val as ptr[Node] = node_left(node)
             if return_val != None to ptr[Node]:
@@ -797,7 +811,6 @@ struct BorrowChecker:
                     self.move_identifier(return_val)
                 else:
                     self.walk_ast(return_val)
-                    
             // Collect drops from all active scopes on the stack
             let drops as List[ptr[Symbol]] = List[ptr[Symbol]]()
             let scopes_ref as ptr[List[ptr[List[ptr[Symbol]]]]] = ref (deref self).scopes
@@ -824,7 +837,6 @@ struct BorrowChecker:
                                         drops.append(sym)
                     i = i + 1 to i64
                 s_idx = s_idx - 1 to i64
-                
             if drops.length() > 0 to i64:
                 (deref self).auto_drops[node to usize] = drops
                 // Also write drop names to the node for codegen
@@ -835,7 +847,6 @@ struct BorrowChecker:
                     drop_names.append((deref drop_sym).name)
                     d_idx = d_idx + 1 to i64
                 set_node_auto_drops(node, drop_names) // Write drop names to the ReturnStmt node for codegen
-                    
         elif nt == NodeType.BinaryExpr: // BinaryExpr
             let op as String = node_op(node)
             let is_assign as bool = strcmp(op.data to cstr, "=" to cstr) == 0 or strcmp(op.data to cstr, "+=" to cstr) == 0 or strcmp(op.data to cstr, "-=" to cstr) == 0 or strcmp(op.data to cstr, "*=" to cstr) == 0 or strcmp(op.data to cstr, "/=" to cstr) == 0
@@ -861,28 +872,23 @@ struct BorrowChecker:
             else:
                 self.walk_ast(node_left(node))
                 self.walk_ast(node_right(node))
-                
         elif nt == NodeType.WhileStmt: // WhileStmt
             self.walk_ast(node_cond(node))
             self.walk_ast(node_body(node))
-            
         elif nt == NodeType.ForStmt: // ForStmt
             let iter_name as String = node_name(node)
             if iter_name.len > 0 to usize:
                 self.mark_owned(iter_name, None to ptr[Type])
             self.walk_ast(node_left(node))
             self.walk_ast(node_body(node))
-            
         elif nt == NodeType.MemberExpr: // MemberExpr
             self.walk_ast(node_left(node))
-            
         elif nt == NodeType.WithStmt: // WithStmt
             let expr as ptr[Node] = node_left(node)
             if expr != None to ptr[Node]:
                 self.walk_ast(expr)
                 if node_kind(expr) == NodeType.Identifier:
                     self.move_identifier(expr)
-            
             let sema_ptr as ptr[Sema] = (deref self).sema
             var parent_scope as ptr[Scope] = None to ptr[Scope]
             if sema_ptr != None to ptr[Sema]:
@@ -890,29 +896,25 @@ struct BorrowChecker:
                 if (deref sema_ptr).fn_scopes.has(node to usize):
                     let child_scope as ptr[Scope] = (deref sema_ptr).fn_scopes[node to usize]
                     (deref sema_ptr).current_scope = child_scope
-                    
             self.push_scope()
-            
+
             let name as String = node_name(node)
             if name.len > 0 to usize:
                 var var_type as ptr[Type] = None to ptr[Type]
                 if expr != None to ptr[Node]:
                     var_type = node_inferred_type(expr)
                 self.mark_owned(name, var_type)
-                
+
                 if sema_ptr != None to ptr[Sema]:
                     let sym as ptr[Symbol] = (deref sema_ptr).lookup_symbol(name)
                     if sym != None to ptr[Symbol]:
                         self.add_symbol_to_current_scope(sym)
-            
             let body as ptr[Node] = node_body(node)
             if body != None to ptr[Node]:
                 self.walk_ast(body)
-                
             self.pop_scope(node)
             if sema_ptr != None to ptr[Sema] and parent_scope != None to ptr[Scope]:
                 (deref sema_ptr).current_scope = parent_scope
-            
         elif nt == NodeType.IfStmt: // IfStmt
             self.walk_ast(node_cond(node))
             let pre_if as Dict[String, VarInfo] = self.snapshot_symbol_states()

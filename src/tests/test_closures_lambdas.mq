@@ -1,16 +1,19 @@
-// ── Test Closures & Lambdas ──────────────────────────────────────────
+// ── Test Closures & Lambdas ──────────────────────────────────────────────────
 // Spec: Lambdas / Closures (x) => expr with lexical environment heap capture
+
 
 fn apply_op(f as fn(i32) as i32, val as i32) as i32:
     return f(val)
 
+
 fn apply_binary(f as fn(i32, i32) as i32, a as i32, b as i32) as i32:
     return f(a, b)
+
 
 fn main() as i32:
     print("[TEST SUITE] Lambdas & Closures ((x) => expr, lexical capture, currying)")
 
-    // ── Test 1: Basic Expression Lambda (no captures) ────────────────
+    // ── Test 1: Basic Expression Lambda (no captures) ────────────────────────────
     let double_it = (x as i32) => x * 2
     let res1 as i32 = double_it(21)
     if res1 != 42:
@@ -18,7 +21,7 @@ fn main() as i32:
         return 1
     print("  PASS: Basic Expression Lambda")
 
-    // ── Test 2: Multi-parameter Lambda ───────────────────────────────
+    // ── Test 2: Multi-parameter Lambda ───────────────────────────────────────────
     let add_fn = (a as i32, b as i32) => a + b
     let res2 as i32 = add_fn(17, 25)
     if res2 != 42:
@@ -26,7 +29,7 @@ fn main() as i32:
         return 1
     print("  PASS: Multi-Parameter Lambda")
 
-    // ── Test 3: Lexical Environment Heap Capture ─────────────────────
+    // ── Test 3: Lexical Environment Heap Capture ─────────────────────────────────
     let factor as i32 = 10
     let offset as i32 = 5
     let scale_and_offset = (x as i32) => x * factor + offset
@@ -36,14 +39,13 @@ fn main() as i32:
         return 1
     print("  PASS: Lexical Environment Heap Capture")
 
-    // ── Test 4: Higher-Order Functions (Passing Closures) ─────────────
+    // ── Test 4: Higher-Order Functions (Passing Closures) ────────────────────────
     let multiplier as i32 = 3
     let triple_with_cap = (n as i32) => n * multiplier
     let res4 as i32 = apply_op(triple_with_cap, 14)
     if res4 != 42:
         print("  FAIL: Higher-order function application expected 42")
         return 1
-    
     let sum_bin = (x as i32, y as i32) => x + y
     let res4_bin as i32 = apply_binary(sum_bin, 20, 22)
     if res4_bin != 42:
@@ -51,7 +53,7 @@ fn main() as i32:
         return 1
     print("  PASS: Higher-Order Function Application")
 
-    // ── Test 5: Nested Closures / Currying ────────────────────────────
+    // ── Test 5: Nested Closures / Currying ───────────────────────────────────────
     let base as i32 = 100
     let make_adder = (a as i32) => (b as i32) => base + a + b
     let add50 = make_adder(50)
@@ -61,13 +63,12 @@ fn main() as i32:
         return 1
     print("  PASS: Nested Closures & Multi-Level Lexical Capture")
 
-    // ── Test 6: Anonymous Function Syntax (fn ... => expr) ───────────
+    // ── Test 6: Anonymous Function Syntax (fn ... => expr) ───────────────────────
     let anon_expr = fn(x as i32) as i32 => x * 7
     let res6 as i32 = anon_expr(6)
     if res6 != 42:
         print("  FAIL: Anonymous fn expression expected 42")
         return 1
-
     let anon_block = fn(x as i32) as i32:
         let y as i32 = x + 10
         return y * 2
@@ -77,7 +78,7 @@ fn main() as i32:
         return 1
     print("  PASS: Anonymous Function Syntax (expr & block)")
 
-    // ── Test 7: Multiple Closures Sharing Lexical State ───────────────
+    // ── Test 7: Multiple Closures Sharing Lexical State ──────────────────────────
     let shared_state as i32 = 50
     let sub_closure = (x as i32) => shared_state - x
     let add_closure = (x as i32) => shared_state + x

@@ -1,8 +1,10 @@
 // Probe: minimal Tuple from_list + get path.
+from std.collections import List, Tuple
 from std.string import String
-from std.collections import Tuple, List
+
 
 extern fn printf(format as cstr, ...) as i32
+
 
 fn main():
     var t as Tuple[i64] = Tuple[i64]()

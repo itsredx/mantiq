@@ -1,28 +1,30 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
 from std.collections import List
-from types import Type, TypeKind, make_type, make_ptr_type
-from layout import Target, Endianness, get_size, get_align
-from abi import PassMode, ABISignature, get_arg_abi, get_ret_abi
+from std.string import String
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+from abi import ABISignature, PassMode, get_arg_abi, get_ret_abi
+from layout import Endianness, Target, get_align, get_size
+from types import Type, TypeKind, make_ptr_type, make_type
+
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 
-// ── Main Unit Test Runner ────────────────────────────────────────────────
+
+// ── Main Unit Test Runner ────────────────────────────────────────────────────
 fn main() -> i32:
     let _h as i32 = printf("=== Running test_abi.nz (ABI & Layout Parity Tests) ===\n\n" to cstr)
 
     let target as Target = Target.x86_64_linux()
 
-    // ── Test 1: Target Constants ──────────────────────────────────────────
+    // ── Test 1: Target Constants ─────────────────────────────────────────────────
     if target.pointer_size == 8 to usize and target.endianness == Endianness.Little:
         let _r as i32 = printf("Test 1 (Target Constants): PASSED!\n" to cstr)
     else:
         let _r as i32 = printf("Test 1 (Target Constants): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 2: Primitive Layout Sizes & Alignments ────────────────────────
+    // ── Test 2: Primitive Layout Sizes & Alignments ──────────────────────────────
     let t_i32 as ptr[Type] = make_type(TypeKind.I32)
     let t_f64 as ptr[Type] = make_type(TypeKind.F64)
     let t_bool as ptr[Type] = make_type(TypeKind.Boolean)
@@ -41,8 +43,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 2 (Primitive Layout Sizes and Alignment): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 3: String & Collection Sizes ─────────────────────────────────
+    // ── Test 3: String & Collection Sizes ────────────────────────────────────────
     let t_str as ptr[Type] = make_type(TypeKind.String)
     let t_opt as ptr[Type] = make_type(TypeKind.Option)
     let t_res as ptr[Type] = make_type(TypeKind.Result)
@@ -56,8 +57,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 3 (String and Collection Sizes): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 4: Argument ABI Classification ───────────────────────────────
+    // ── Test 4: Argument ABI Classification ──────────────────────────────────────
     let abi_i32 as ABISignature = get_arg_abi(t_i32, target)
     let abi_opt as ABISignature = get_arg_abi(t_opt, target)
     let abi_res as ABISignature = get_arg_abi(t_res, target)
@@ -70,8 +70,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 4 (Argument ABI Classification): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 5 (Return ABI Classification) ─────────────────────────────────
+    // ── Test 5 (Return ABI Classification) ───────────────────────────────────────
     let ret_f64 as ABISignature = get_ret_abi(t_f64, target)
     let ret_opt as ABISignature = get_ret_abi(t_opt, target)
     let ret_res as ABISignature = get_ret_abi(t_res, target)
@@ -81,8 +80,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 5 (Return ABI Classification): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 6: WASM32 Target Constants & Sizing ──────────────────────────
+    // ── Test 6: WASM32 Target Constants & Sizing ─────────────────────────────────
     let wasm_t as Target = Target.wasm32_wasi()
     let t_usize as ptr[Type] = make_type(TypeKind.USize)
     let t_isize as ptr[Type] = make_type(TypeKind.ISize)
@@ -99,8 +97,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 6 (WASM32 Target Constants and 32-bit Sizing): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 7: Target Triple Parser & Query Helpers ──────────────────────
+    // ── Test 7: Target Triple Parser & Query Helpers ─────────────────────────────
     let parsed_wasm as Target = Target.from_triple("wasm32-unknown-wasi" to cstr)
     let parsed_linux as Target = Target.from_triple("x86_64-unknown-linux-gnu" to cstr)
     if parsed_wasm.pointer_size == 4 to usize and parsed_linux.pointer_size == 8 to usize:
@@ -108,6 +105,5 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 7 (Target Triple Parser and Helpers): FAILED!\n" to cstr)
         return 1 to i32
-
     let _done as i32 = printf("\n[PASS] All test_abi.nz tests passed successfully!\n" to cstr)
     return 0 to i32

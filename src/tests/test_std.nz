@@ -1,21 +1,23 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-import std.string
+from std.collections import Dict, List
 import std.mem
+from std.mem import drop, make
+import std.string
 from std.string import String
-from std.collections import List, Dict
-from std.mem import make, drop
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strlen(s as cstr) as usize
 
-// ── Main Standard Library Test Runner ─────────────────────────────────────
+
+// ── Main Standard Library Test Runner ────────────────────────────────────────
 fn main() -> i32:
     let _h as i32 = printf("=== Running test_std.nz (Standard Library Parity Tests) ===\n\n" to cstr)
 
-    // ── Test 1: String Creation, Length & Comparison ─────────────────────
+    // ── Test 1: String Creation, Length & Comparison ─────────────────────────────
     let s1 as String = String.make("Hello" to cstr)
     let s2 as String = String.make("World" to cstr)
     let s3 as String = String.make("Hello" to cstr)
@@ -25,8 +27,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 1 (String Creation, Length & Comparison): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 2: List Operations (Append, Length, Indexing) ────────────────
+    // ── Test 2: List Operations (Append, Length, Indexing) ───────────────────────
     let list as List[i64] = List[i64]()
     list.append(10 to i64)
     list.append(20 to i64)
@@ -37,22 +38,19 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 2 (List Operations - Append, Length, Indexing): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 3: List Iteration & Aggregation ──────────────────────────────
+    // ── Test 3: List Iteration & Aggregation ─────────────────────────────────────
     var sum as i64 = 0 to i64
     var idx as i64 = 0 to i64
     let cnt as i64 = list.length()
     while idx < cnt:
         sum = sum + list[idx]
         idx = idx + 1 to i64
-
     if sum == 60 to i64:
         let _r as i32 = printf("Test 3 (List Iteration & Sum Aggregation): PASSED!\n" to cstr)
     else:
         let _r as i32 = printf("Test 3 (List Iteration & Sum Aggregation): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 4: Dynamic Memory Allocation (make & drop) ──────────────────
+    // ── Test 4: Dynamic Memory Allocation (make & drop) ──────────────────────────
     let raw_buf as ptr[i32] = make[i32](4 to usize) to ptr[i32]
     raw_buf[0] = 100 to i32
     raw_buf[1] = 200 to i32
@@ -65,13 +63,12 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 4 (Memory Allocation - make & drop): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 5: String Buffer Manipulation ────────────────────────────────
+    // ── Test 5: String Buffer Manipulation ───────────────────────────────────────
     let str_buf as ptr[u8] = make[u8](16 to usize) to ptr[u8]
-    str_buf[0] = 78 to u8  // 'N'
+    str_buf[0] = 78 to u8 // 'N'
     str_buf[1] = 105 to u8 // 'i'
     str_buf[2] = 122 to u8 // 'z'
-    str_buf[3] = 97 to u8  // 'a'
+    str_buf[3] = 97 to u8 // 'a'
     str_buf[4] = 109 to u8 // 'm'
     str_buf[5] = 0 to u8
 
@@ -81,8 +78,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 5 (String Buffer Construction): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 6: String Methods (startswith, endswith, lower, upper, strip) ──
+    // ── Test 6: String Methods (startswith, endswith, lower, upper, strip) ───────
     let test_str as String = String.make("NizamLang" to cstr)
     let has_prefix as bool = test_str.startswith("Niz" to cstr)
     let has_suffix as bool = test_str.endswith("Lang" to cstr)
@@ -100,8 +96,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 6 (String startswith/endswith/lower/upper/strip): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 7: String replace, split and join ────────────────────────────
+    // ── Test 7: String replace, split and join ───────────────────────────────────
     let orig_msg as String = String.make("foo_bar_baz" to cstr)
     let rep_msg as String = orig_msg.replace("bar" to cstr, "qux" to cstr)
 
@@ -114,8 +109,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 7 (String replace, split, join): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 8: Set Operations (update and discard) ────────────────────────
+    // ── Test 8: Set Operations (update and discard) ──────────────────────────────
     from std.collections import Set
     var set_a as Set[i64] = Set[i64]()
     set_a.init()
@@ -130,11 +124,15 @@ fn main() -> i32:
     set_a.update(ref set_b)
     set_a.discard(100 to i64)
 
-    if set_a.count() == 3 to i64 and not set_a.has(100 to i64) and set_a.has(200 to i64) and set_a.has(300 to i64) and set_a.has(400 to i64):
+    if set_a
+        .count() == 3 to i64 and not set_a
+        .has(100 to i64) and set_a
+        .has(200 to i64) and set_a
+        .has(300 to i64) and set_a
+        .has(400 to i64):
         let _r as i32 = printf("Test 8 (Set update and discard): PASSED!\n" to cstr)
     else:
         let _r as i32 = printf("Test 8 (Set update and discard): FAILED!\n" to cstr)
         return 1 to i32
-
     let _done as i32 = printf("\n[PASS] All test_std.nz tests passed successfully!\n" to cstr)
     return 0 to i32

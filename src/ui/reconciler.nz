@@ -1,31 +1,36 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
+from std.collections import Dict, List
+from std.mem import drop, make, resize
 from std.string import String, StringBuilder
-from std.collections import List, Dict
-from std.mem import make, drop, resize
+
 
 extern fn printf(format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strlen(s as cstr) as usize
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
 
-// ── String Helpers ──────────────────────────────────────────────────────
+
+// ── String Helpers ───────────────────────────────────────────────────────────
 fn str_eq(a as String, b as String) as bool:
     return strcmp(a.data to cstr, b.data to cstr) == 0
+
 
 fn str_ne(a as String, b as String) as bool:
     return strcmp(a.data to cstr, b.data to cstr) != 0
 
+
 fn safe_append(sb as ptr[StringBuilder], s as String):
     if s.data != None to ptr[u8]:
         sb.append(s.data to cstr)
+
 
 fn append_json_escaped(sb as ptr[StringBuilder], s as String):
     if s.data == None to ptr[u8] or s.len == 0 to usize:
         return
     let l as usize = s.len
     let d as ptr[u8] = s.data
-    let needed as usize = (deref sb).len + (l * (2 to usize)) + (2 to usize)
+    let needed as usize = (deref sb).len + (l * (2 to usize)) +(2 to usize)
     if needed >= (deref sb).capacity:
         let new_cap as usize = (needed + (1 to usize)) * (2 to usize)
         (deref sb).buffer = resize((deref sb).buffer to ptr, new_cap) to ptr[u8]
@@ -62,7 +67,8 @@ fn append_json_escaped(sb as ptr[StringBuilder], s as String):
     buf_ptr[cur_len] = 0 to u8
     (deref sb).len = cur_len
 
-// ── Data Structures ──────────────────────────────────────────────────────
+
+// ── Data Structures ──────────────────────────────────────────────────────────
 struct WidgetNode:
     public var id as String
     public var tag as String
@@ -70,8 +76,15 @@ struct WidgetNode:
     public var props as String
     public var children_ids as String
 
-    public fn init(id as String, tag as String, key as String, props as String, children_ids as String) as WidgetNode:
+    public fn init(
+        id as String,
+        tag as String,
+        key as String,
+        props as String,
+        children_ids as String,
+    ) as WidgetNode:
         return WidgetNode(id = id, tag = tag, key = key, props = props, children_ids = children_ids)
+
 
 struct RenderedNode:
     public var html_id as String
@@ -82,10 +95,12 @@ struct RenderedNode:
     public var parent_html_id as String
     public var parent_key as String
 
+
 struct Patch:
     public var action as String
     public var html_id as String
     public var payload as String
+
 
 fn make_patch(action as String, html_id as String, payload as String) as ptr[Patch]:
     let p as ptr[Patch] = make[Patch](1 to usize) to ptr[Patch]
@@ -94,11 +109,13 @@ fn make_patch(action as String, html_id as String, payload as String) as ptr[Pat
     (deref p).payload = payload
     return p
 
+
 struct DiffResult:
     public var patches as List[ptr[Patch]]
     public var new_rendered_map as Dict[String, RenderedNode]
 
-// ── JSON Parser & Serializer ─────────────────────────────────────────────
+
+// ── JSON Parser & Serializer ─────────────────────────────────────────────────
 struct JsonParser:
     public var src as String
     public var pos as usize
@@ -164,11 +181,15 @@ struct JsonParser:
         let _ as bool = self.consume(125 to u8)
         return props
 
-    public fn parse_node(self as ptr[JsonParser], parent_id as String, parent_k as String, node_map as Dict[String, RenderedNode]) as ptr[RenderedNode]:
+    public fn parse_node(
+        self as ptr[JsonParser],
+        parent_id as String,
+        parent_k as String,
+        node_map as Dict[String, RenderedNode],
+    ) as ptr[RenderedNode]:
         let ok as bool = self.consume(123 to u8)
         if not ok:
             return None to ptr[RenderedNode]
-
         var html_id as String = String.make("" to cstr)
         var wtype as String = String.make("div" to cstr)
         var key as String = String.make("" to cstr)
@@ -200,17 +221,14 @@ struct JsonParser:
                 let _ as bool = self.consume(93 to u8)
             else:
                 let _ as String = self.parse_string()
-
             if self.peek() == 44 to u8:
                 let _ as bool = self.consume(44 to u8)
             else:
                 break
-
         let _ as bool = self.consume(125 to u8)
 
         if key.len == 0 to usize:
             key = html_id
-
         let node_ptr as ptr[RenderedNode] = make[RenderedNode](1 to usize) to ptr[RenderedNode]
         (deref node_ptr).html_id = html_id
         (deref node_ptr).widget_type = wtype
@@ -222,6 +240,7 @@ struct JsonParser:
 
         node_map[key] = (deref node_ptr)
         return node_ptr
+
 
 fn patches_to_json(patches as List[ptr[Patch]]) as String:
     var sb as StringBuilder = StringBuilder.make()
@@ -243,7 +262,8 @@ fn patches_to_json(patches as List[ptr[Patch]]) as String:
     sb.append("]" to cstr)
     return sb.to_string()
 
-// ── Reconciler Implementation ───────────────────────────────────────────
+
+// ── Reconciler Implementation ────────────────────────────────────────────────
 struct Reconciler:
     public var id_counter as i64
 
@@ -257,7 +277,11 @@ struct Reconciler:
         (deref self).id_counter = (deref self).id_counter + 1
         return String.make(buf to cstr)
 
-    public fn diff_props_to_payload(self as ptr[Reconciler], old_props as Dict[String, String], new_props as Dict[String, String]) as String:
+    public fn diff_props_to_payload(
+        self as ptr[Reconciler],
+        old_props as Dict[String, String],
+        new_props as Dict[String, String],
+    ) as String:
         var sb as StringBuilder = StringBuilder.make()
         let old_keys as List[String] = old_props.keys()
         var has_any as bool = False
@@ -309,7 +333,13 @@ struct Reconciler:
         let _ as i32 = sprintf(buf, "<div id=\"%s\" data-type=\"%s\"></div>" to cstr, wid.data to cstr, wtype.data to cstr)
         return String.make(buf to cstr)
 
-    public fn find_next_stable_html_id(self as ptr[Reconciler], start_idx as i64, new_children_keys as List[String], old_key_to_index as Dict[String, i64], rendered_map as Dict[String, RenderedNode]) as String:
+    public fn find_next_stable_html_id(
+        self as ptr[Reconciler],
+        start_idx as i64,
+        new_children_keys as List[String],
+        old_key_to_index as Dict[String, i64],
+        rendered_map as Dict[String, RenderedNode],
+    ) as String:
         var si as i64 = start_idx
         let sc as i64 = new_children_keys.length()
         while si < sc:
@@ -320,7 +350,15 @@ struct Reconciler:
             si = si + 1
         return String.make("" to cstr)
 
-    public fn insert_node_recursive(self as ptr[Reconciler], widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode], new_map as Dict[String, RenderedNode]) as void:
+    public fn insert_node_recursive(
+        self as ptr[Reconciler],
+        widget as ptr[RenderedNode],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+        new_map as Dict[String, RenderedNode],
+    ) as void:
         if widget == None to ptr[RenderedNode]:
             return
         let new_html as String = self.generate_html_stub(widget)
@@ -337,7 +375,16 @@ struct Reconciler:
             child_parent = parent_key
         self.diff_children_recursive(List[String](), (deref widget).children_keys, child_parent, new_id, result, previous_map, new_map)
 
-    public fn diff_children_recursive(self as ptr[Reconciler], old_children_keys as List[String], new_children_keys as List[String], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode], new_map as Dict[String, RenderedNode]) as void:
+    public fn diff_children_recursive(
+        self as ptr[Reconciler],
+        old_children_keys as List[String],
+        new_children_keys as List[String],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+        new_map as Dict[String, RenderedNode],
+    ) as void:
         if old_children_keys.length() == 0 and new_children_keys.length() == 0:
             return
         var old_key_to_index as Dict[String, i64] = Dict[String, i64]()
@@ -415,7 +462,16 @@ struct Reconciler:
                 self.insert_node_recursive(new_stub, parent_html_id, parent_key, result, previous_map, new_map)
             ni = ni + 1
 
-    public fn diff_node_recursive(self as ptr[Reconciler], old_node_key as String, new_widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode], new_map as Dict[String, RenderedNode]) as void:
+    public fn diff_node_recursive(
+        self as ptr[Reconciler],
+        old_node_key as String,
+        new_widget as ptr[RenderedNode],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+        new_map as Dict[String, RenderedNode],
+    ) as void:
         if new_widget == None to ptr[RenderedNode]:
             return
         let new_key as String = (deref new_widget).html_id
@@ -450,7 +506,8 @@ struct Reconciler:
             child_parent = parent_key
         self.diff_children_recursive(old_data.children_keys, (deref new_widget).children_keys, child_parent, (deref new_widget).html_id, result, previous_map, new_map)
 
-// ── Exported C-Extension API ─────────────────────────────────────────────
+
+// ── Exported C-Extension API ─────────────────────────────────────────────────
 @nogil
 fn reconcile_json(old_tree_json as String, new_tree_json as String) as String:
     var old_map as Dict[String, RenderedNode] = Dict[String, RenderedNode]()
@@ -476,8 +533,8 @@ fn reconcile_json(old_tree_json as String, new_tree_json as String) as String:
         (deref r_ptr).patches.append(make_patch(String.make("REMOVE" to cstr), (deref old_root).html_id, String.make("" to cstr)))
     elif old_root != None to ptr[RenderedNode] and new_root != None to ptr[RenderedNode]:
         reconciler.diff_node_recursive((deref old_root).key, new_root, String.make("root" to cstr), String.make("root_k" to cstr), r_ptr, old_map, new_map)
-
     return patches_to_json((deref r_ptr).patches)
+
 
 fn reconcile_bench(node_count as i64) as i64:
     var reconciler as Reconciler = Reconciler()
@@ -508,12 +565,12 @@ fn reconcile_bench(node_count as i64) as i64:
         old_map[key_str3] = RenderedNode(html_id = key_str4, widget_type = String.make("item" to cstr), key = String.make(id_buf to cstr), props = p1, children_keys = List[String](), parent_html_id = String.make("root" to cstr), parent_key = String.make("root" to cstr))
         new_map[key_str5] = RenderedNode(html_id = key_str6, widget_type = String.make("item" to cstr), key = String.make(id_buf to cstr), props = p2, children_keys = List[String](), parent_html_id = String.make("root" to cstr), parent_key = String.make("root" to cstr))
         i = i + 1
-
     var result_node as DiffResult = DiffResult(patches = List[ptr[Patch]](), new_rendered_map = Dict[String, RenderedNode]())
     reconciler.diff_children_recursive(old_children, new_children, String.make("root" to cstr), String.make("root_k" to cstr), ref result_node, old_map, new_map)
     return result_node.patches.length()
 
-// ── Standalone Self-Verification ─────────────────────────────────────────
+
+// ── Standalone Self-Verification ─────────────────────────────────────────────
 fn main() as i32:
     printf("=== Nizam UI Reconciler Standalone Test ===\n" to cstr)
     let old_json as String = String.make("{\"id\":\"el_0\",\"type\":\"div\",\"key\":\"k0\",\"props\":{\"color\":\"red\"},\"children\":[{\"id\":\"el_1\",\"type\":\"span\",\"key\":\"k1\",\"props\":{\"text\":\"v1\"},\"children\":[]}]}" to cstr)

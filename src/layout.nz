@@ -1,16 +1,20 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.string
 from std.string import String
+
 from types import Type, TypeKind
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
-// ── Endianness & Target ─────────────────────────────────────────────────
+
+// ── Endianness & Target ──────────────────────────────────────────────────────
 enum Endianness:
     Little
     Big
+
 
 struct Target:
     public var arch as String
@@ -53,7 +57,6 @@ struct Target:
             return False
         return strcmp((deref self).abi.data to cstr, "abi3" to cstr) == 0
 
-
     public fn llvm_size_type(self as ptr[Target]) -> String:
         if (deref self).pointer_size == 4 to usize:
             return String.make("i32" to cstr)
@@ -64,25 +67,30 @@ struct Target:
             return String.make("i32" to cstr)
         return String.make("i64" to cstr)
 
+
 fn target_llvm_size_type(t as Target) as String:
     if t.pointer_size == 4 to usize:
         return String.make("i32" to cstr)
     return String.make("i64" to cstr)
+
 
 fn target_llvm_ptr_int(t as Target) as String:
     if t.pointer_size == 4 to usize:
         return String.make("i32" to cstr)
     return String.make("i64" to cstr)
 
+
 fn target_is_wasm(t as Target) as bool:
     return t.pointer_size == 4 to usize
+
 
 fn target_is_python_ext(t as Target) as bool:
     if t.abi.data == None to ptr[u8]:
         return False
     return strcmp(t.abi.data to cstr, "abi3" to cstr) == 0
 
-// ── Sizing & Alignment ───────────────────────────────────────────────────
+
+// ── Sizing & Alignment ───────────────────────────────────────────────────────
 fn get_align(t as ptr[Type], target as Target) as usize:
     if t == None to ptr[Type]:
         return target.pointer_size
@@ -100,6 +108,7 @@ fn get_align(t as ptr[Type], target as Target) as usize:
     elif k == TypeKind.I128 or k == TypeKind.U128 or k == TypeKind.F128:
         return 16 to usize
     return target.pointer_size
+
 
 fn get_size(t as ptr[Type], target as Target) as usize:
     if t == None to ptr[Type]:

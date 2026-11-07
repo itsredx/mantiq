@@ -11,9 +11,11 @@
 // The C math library is linked via "m" (the standard -lm flag on Unix).
 // ============================================================================
 
+
 // Link against the system math library (libm).
 // On Unix-like systems this is equivalent to `-lm`.
 link "m"
+
 
 // --- C math library externs ------------------------------------------------
 //
@@ -22,25 +24,29 @@ link "m"
 //
 // Domain errors (e.g. sqrt(-1), log(0)) produce NaN or inf as specified
 // by IEEE 754 and the C standard.
-extern fn sqrt(x as f64) as f64   // square root (√x)
-extern fn sin(x as f64) as f64   // sine (radians)
-extern fn cos(x as f64) as f64   // cosine (radians)
-extern fn tan(x as f64) as f64   // tangent (radians)
-extern fn ceil(x as f64) as f64  // smallest integer ≥ x
+extern fn sqrt(x as f64) as f64 // square root (√x)
+extern fn sin(x as f64) as f64 // sine (radians)
+extern fn cos(x as f64) as f64 // cosine (radians)
+extern fn tan(x as f64) as f64 // tangent (radians)
+extern fn ceil(x as f64) as f64 // smallest integer ≥ x
 extern fn floor(x as f64) as f64 // largest integer ≤ x
-extern fn pow(base as f64, exp as f64) as f64  // base^exp
-extern fn log(x as f64) as f64   // natural logarithm (ln x)
-extern fn exp(x as f64) as f64   // e^x
+extern fn pow(base as f64, exp as f64) as f64 // base^exp
+extern fn log(x as f64) as f64 // natural logarithm (ln x)
+extern fn exp(x as f64) as f64 // e^x
+
 
 // ============================================================================
 // Mathematical constants
 // ============================================================================
 
+
 // PI: the ratio of a circle's circumference to its diameter (π ≈ 3.14159...)
 let PI as f64 = 3.141592653589793
 
+
 // E: the base of the natural logarithm (e ≈ 2.71828...)
 let E as f64 = 2.718281828459045
+
 
 // ============================================================================
 // Generic polymorphic helpers
@@ -48,6 +54,7 @@ let E as f64 = 2.718281828459045
 // These functions work with any type T that supports the <, >, and unary -
 // operators.
 // ============================================================================
+
 
 // ---------------------------------------------------------------------------
 // min[T](a, b) -> T
@@ -62,6 +69,7 @@ fn min[T](a as T, b as T) as T:
     else:
         return b
 
+
 // ---------------------------------------------------------------------------
 // max[T](a, b) -> T
 //
@@ -75,6 +83,7 @@ fn max[T](a as T, b as T) as T:
     else:
         return b
 
+
 // ---------------------------------------------------------------------------
 // abs[T](a) -> T
 //
@@ -85,11 +94,12 @@ fn max[T](a as T, b as T) as T:
 // a positive i8).  Use care with unsigned types (abs is a no-op for
 // unsigned values since they are always non-negative).
 // ---------------------------------------------------------------------------
-fn abs[T](a as T) as T:
+fn abs [T](a as T) as T:
     if a < 0 to T:
         return -a
     else:
         return a
+
 
 // ============================================================================
 // Future additions (not yet implemented):

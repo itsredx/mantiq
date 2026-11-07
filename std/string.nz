@@ -13,12 +13,14 @@
 // drop) and on the C library for strlen/memcpy.
 // ============================================================================
 
+
 // Import memory management primitives from the std.mem module.
 //   make(size)    -> allocates a new buffer of `size` bytes
 //   drop(ptr)     -> frees a previously allocated buffer
 //   resize(ptr, size) -> resizes an allocation, possibly moving it
-from std.mem import make, drop, resize
-from std.collections import List, Dict
+from std.collections import Dict, List
+from std.mem import drop, make, resize
+
 
 // --- External (C library) functions ---
 //
@@ -30,6 +32,7 @@ extern fn strlen(s as cstr) as usize
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
 extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
+
 
 // ============================================================================
 // String
@@ -59,7 +62,13 @@ struct String:
     // Construct a new String from a C-style null-terminated string `s`,
     // or from pre-allocated raw parts.
     // -----------------------------------------------------------------
-    public fn __init__(self as ptr[String], s as cstr = None to cstr, data as ptr[u8] = None to ptr[u8], len as usize = 0, capacity as usize = 0):
+    public fn __init__(
+        self as ptr[String],
+        s as cstr = None to cstr,
+        data as ptr[u8] = None to ptr[u8],
+        len as usize = 0,
+        capacity as usize = 0,
+    ):
         if data to ptr != None:
             (deref self).data = data
             (deref self).len = len
@@ -76,7 +85,6 @@ struct String:
             (deref self).data = None to ptr[u8]
             (deref self).len = 0
             (deref self).capacity = 0
-
     // -----------------------------------------------------------------
     // String.__del__(self)
     //
@@ -86,7 +94,6 @@ struct String:
         if (deref self).data to ptr != None:
             drop((deref self).data to ptr)
             (deref self).data = None to ptr[u8]
-
     // -----------------------------------------------------------------
     // String.__getitem__(self, idx)
     //
@@ -100,7 +107,6 @@ struct String:
 
     fn deinit(self as ptr[String]):
         self.__del__()
-
     // -----------------------------------------------------------------
     // String.append(self, other)
     //
@@ -120,16 +126,14 @@ struct String:
     // -----------------------------------------------------------------
     fn append(self as ptr[String], other as ptr[String]):
         let new_len as usize = (deref self).len + (deref other).len
-        if new_len >= (deref self).capacity: 
+        if new_len >= (deref self).capacity:
             let new_cap as usize = (new_len + 1) * 2
             (deref self).data = resize((deref self).data to ptr, new_cap) to ptr[u8]
             (deref self).capacity = new_cap
-        
         let dest_ptr as ptr[u8] = ref (deref self).data[(deref self).len]
         memcpy(dest_ptr to ptr, (deref other).data to ptr, (deref other).len + 1)
         (deref self).len = new_len
-
-    // ── Case Conversions ──────────────────────────────────────────────────────
+    // ── Case Conversions ─────────────────────────────────────────────────────────
     public fn lower(self as String) as String:
         if self.len == 0 to usize:
             return String.make("" to cstr)
@@ -227,8 +231,7 @@ struct String:
             i = i + 1 to usize
         new_buf[self.len] = 0 to u8
         return String(data = new_buf, len = self.len, capacity = self.len + 1 to usize)
-
-    // ── Predicates ────────────────────────────────────────────────────────────
+    // ── Predicates ───────────────────────────────────────────────────────────────
     public fn isalnum(self as String) as bool:
         if self.len == 0 to usize:
             return False
@@ -366,9 +369,13 @@ struct String:
                 return False
             i = i + 1 to usize
         return True
-
-    // ── Search and Inspection ─────────────────────────────────────────────────
-    public fn find(self as String, sub as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as i64:
+    // ── Search and Inspection ────────────────────────────────────────────────────
+    public fn find(
+        self as String,
+        sub as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as i64:
         if sub to ptr == None or self.len == 0 to usize:
             return -1 to i64
         let sub_len as usize = strlen(sub)
@@ -376,7 +383,7 @@ struct String:
             return if start >= 0 to i64: start else: 0 to i64
         var s_start as i64 = start
         if s_start < 0 to i64:
-            s_start = (self.len to i64) + s_start
+            s_start = (self.len to i64) +s_start
             if s_start < 0 to i64:
                 s_start = 0 to i64
         if s_start >= (self.len to i64):
@@ -395,7 +402,12 @@ struct String:
             i = i + 1 to i64
         return -1 to i64
 
-    public fn rfind(self as String, sub as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as i64:
+    public fn rfind(
+        self as String,
+        sub as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as i64:
         if sub to ptr == None or self.len == 0 to usize:
             return -1 to i64
         let sub_len as usize = strlen(sub)
@@ -403,7 +415,7 @@ struct String:
             return if end_idx >= 0 to i64 and end_idx <= (self.len to i64): end_idx else: self.len to i64
         var s_start as i64 = start
         if s_start < 0 to i64:
-            s_start = (self.len to i64) + s_start
+            s_start = (self.len to i64) +s_start
             if s_start < 0 to i64:
                 s_start = 0 to i64
         if s_start >= (self.len to i64):
@@ -421,21 +433,36 @@ struct String:
             i = i - 1 to i64
         return -1 to i64
 
-    public fn index(self as String, sub as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as i64:
+    public fn index(
+        self as String,
+        sub as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as i64:
         return self.find(sub, start, end_idx)
 
-    public fn rindex(self as String, sub as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as i64:
+    public fn rindex(
+        self as String,
+        sub as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as i64:
         return self.rfind(sub, start, end_idx)
 
-    public fn count(self as String, sub as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as i64:
+    public fn count(
+        self as String,
+        sub as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as i64:
         if sub to ptr == None or self.len == 0 to usize:
             return 0 to i64
         let sub_len as usize = strlen(sub)
         if sub_len == 0 to usize:
-            return (self.len to i64) + 1 to i64
+            return (self.len to i64) +1 to i64
         var s_start as i64 = start
         if s_start < 0 to i64:
-            s_start = (self.len to i64) + s_start
+            s_start = (self.len to i64) +s_start
             if s_start < 0 to i64:
                 s_start = 0 to i64
         var s_end as i64 = end_idx
@@ -458,13 +485,18 @@ struct String:
     public fn contains(self as String, sub as cstr) as bool:
         return self.find(sub, 0 to i64, -1 to i64) >= 0 to i64
 
-    public fn startswith(self as String, prefix as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as bool:
+    public fn startswith(
+        self as String,
+        prefix as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as bool:
         if prefix to ptr == None:
             return False
         let p_len as usize = strlen(prefix)
         var s_start as i64 = start
         if s_start < 0 to i64:
-            s_start = (self.len to i64) + s_start
+            s_start = (self.len to i64) +s_start
             if s_start < 0 to i64:
                 s_start = 0 to i64
         var s_end as i64 = end_idx
@@ -478,13 +510,18 @@ struct String:
         let res as i32 = strncmp(ptr_i to cstr, prefix, p_len)
         return res == 0
 
-    public fn endswith(self as String, suffix as cstr, start as i64 = 0 to i64, end_idx as i64 = -1 to i64) as bool:
+    public fn endswith(
+        self as String,
+        suffix as cstr,
+        start as i64 = 0 to i64,
+        end_idx as i64 = -1 to i64,
+    ) as bool:
         if suffix to ptr == None:
             return False
         let s_len as usize = strlen(suffix)
         var s_start as i64 = start
         if s_start < 0 to i64:
-            s_start = (self.len to i64) + s_start
+            s_start = (self.len to i64) +s_start
             if s_start < 0 to i64:
                 s_start = 0 to i64
         var s_end as i64 = end_idx
@@ -498,8 +535,7 @@ struct String:
         let offset_ptr as ptr[u8] = ref self.data[offset]
         let res as i32 = strncmp(offset_ptr to cstr, suffix, s_len)
         return res == 0
-
-    // ── Trimming and Padding ──────────────────────────────────────────────────
+    // ── Trimming and Padding ─────────────────────────────────────────────────────
     public fn strip(self as String, chars as cstr = None to cstr) as String:
         let l as String = self.lstrip(chars)
         let res as String = l.rstrip(chars)
@@ -541,7 +577,7 @@ struct String:
     public fn rstrip(self as String, chars as cstr = None to cstr) as String:
         if self.len == 0 to usize:
             return String.make("" to cstr)
-        var end_idx as i64 = (self.len to i64) - 1 to i64
+        var end_idx as i64 = (self.len to i64) -1 to i64
         let is_custom as bool = (chars to ptr != None)
         while end_idx >= 0 to i64:
             let c as u8 = self.data[end_idx to usize]
@@ -563,7 +599,7 @@ struct String:
                 break
         if end_idx < 0 to i64:
             return String.make("" to cstr)
-        let sub_len as usize = (end_idx to usize) + 1 to usize
+        let sub_len as usize = (end_idx to usize) +1 to usize
         let new_buf as ptr[u8] = make[u8](sub_len + 1 to usize) to ptr[u8]
         memcpy(new_buf to ptr, self.data to ptr, sub_len)
         new_buf[sub_len] = 0 to u8
@@ -698,9 +734,12 @@ struct String:
             i = i + 1 to usize
         buf[b_len] = 0 to u8
         return String(data = buf, len = b_len, capacity = cap)
-
-    // ── Splitting and Partitioning ─────────────────────────────────────────────
-    public fn split(self as String, sep as cstr = None to cstr, maxsplit as i64 = -1 to i64) as List[String]:
+    // ── Splitting and Partitioning ───────────────────────────────────────────────
+    public fn split(
+        self as String,
+        sep as cstr = None to cstr,
+        maxsplit as i64 = -1 to i64,
+    ) as List[String]:
         var res as List[String] = List[String]()
         if self.len == 0 to usize:
             return res
@@ -740,14 +779,13 @@ struct String:
                 res.append(String(data = tmp, len = w_len, capacity = w_len + 1 to usize))
                 split_count = split_count + 1 to i64
             return res
-
         let sep_len as usize = strlen(sep)
         var cur_ptr as ptr[u8] = self.data
         let end_ptr as ptr[u8] = ref self.data[self.len]
         var s_cnt as i64 = 0 to i64
         while cur_ptr to usize < end_ptr to usize:
             if maxsplit >= 0 to i64 and s_cnt == maxsplit:
-                let rem_len as usize = (end_ptr to usize) - (cur_ptr to usize)
+                let rem_len as usize = (end_ptr to usize) -(cur_ptr to usize)
                 let tmp as ptr[u8] = make[u8](rem_len + 1 to usize) to ptr[u8]
                 memcpy(tmp to ptr, cur_ptr to ptr, rem_len)
                 tmp[rem_len] = 0 to u8
@@ -755,13 +793,13 @@ struct String:
                 break
             let found_match as cstr = strstr(cur_ptr to cstr, sep)
             if found_match to ptr == None:
-                let rem_len as usize = (end_ptr to usize) - (cur_ptr to usize)
+                let rem_len as usize = (end_ptr to usize) -(cur_ptr to usize)
                 let tmp as ptr[u8] = make[u8](rem_len + 1 to usize) to ptr[u8]
                 memcpy(tmp to ptr, cur_ptr to ptr, rem_len)
                 tmp[rem_len] = 0 to u8
                 res.append(String(data = tmp, len = rem_len, capacity = rem_len + 1 to usize))
                 break
-            let seg_len as usize = (found_match to usize) - (cur_ptr to usize)
+            let seg_len as usize = (found_match to usize) -(cur_ptr to usize)
             let tmp as ptr[u8] = make[u8](seg_len + 1 to usize) to ptr[u8]
             memcpy(tmp to ptr, cur_ptr to ptr, seg_len)
             tmp[seg_len] = 0 to u8
@@ -775,18 +813,21 @@ struct String:
                 break
         return res
 
-    public fn rsplit(self as String, sep as cstr = None to cstr, maxsplit as i64 = -1 to i64) as List[String]:
+    public fn rsplit(
+        self as String,
+        sep as cstr = None to cstr,
+        maxsplit as i64 = -1 to i64,
+    ) as List[String]:
         if maxsplit < 0 to i64 or self.len == 0 to usize:
             return self.split(sep, -1 to i64)
         if maxsplit == 0 to i64:
             var res as List[String] = List[String]()
             res.append(String.make(self.data to cstr))
             return res
-
         var rev_parts as List[String] = List[String]()
         let is_ws_split as bool = (sep to ptr == None or strlen(sep) == 0 to usize)
         if is_ws_split:
-            var cur as i64 = (self.len to i64) - 1 to i64
+            var cur as i64 = (self.len to i64) -1 to i64
             var s_cnt as i64 = 0 to i64
             while cur >= 0 to i64:
                 while cur >= 0 to i64:
@@ -798,7 +839,7 @@ struct String:
                 if cur < 0 to i64:
                     break
                 if s_cnt == maxsplit:
-                    let rem_len as usize = (cur to usize) + 1 to usize
+                    let rem_len as usize = (cur to usize) +1 to usize
                     let tmp as ptr[u8] = make[u8](rem_len + 1 to usize) to ptr[u8]
                     memcpy(tmp to ptr, self.data to ptr, rem_len)
                     tmp[rem_len] = 0 to u8
@@ -827,8 +868,8 @@ struct String:
                 let idx as i64 = self.rfind(sep, 0 to i64, end_pos)
                 if idx < 0 to i64:
                     break
-                let seg_start as usize = (idx to usize) + sep_len
-                let seg_len as usize = (end_pos to usize) - seg_start
+                let seg_start as usize = (idx to usize) +sep_len
+                let seg_len as usize = (end_pos to usize) -seg_start
                 let tmp as ptr[u8] = make[u8](seg_len + 1 to usize) to ptr[u8]
                 if seg_len > 0 to usize:
                     let src as ptr[u8] = ref self.data[seg_start]
@@ -843,9 +884,8 @@ struct String:
                 memcpy(tmp to ptr, self.data to ptr, rem_len)
             tmp[rem_len] = 0 to u8
             rev_parts.append(String(data = tmp, len = rem_len, capacity = rem_len + 1 to usize))
-
         var res as List[String] = List[String]()
-        var r_i as i64 = rev_parts.length() - 1 to i64
+        var r_i as i64 = rev_parts.length() -1 to i64
         while r_i >= 0 to i64:
             res.append(rev_parts[r_i])
             r_i = r_i - 1 to i64
@@ -872,7 +912,7 @@ struct String:
             b1[p1_len] = 0 to u8
             res.append(String(data = b1, len = p1_len, capacity = p1_len + 1 to usize))
             res.append(String.make(sep))
-            let p3_start as usize = (idx to usize) + sep_len
+            let p3_start as usize = (idx to usize) +sep_len
             let p3_len as usize = self.len - p3_start
             let b3 as ptr[u8] = make[u8](p3_len + 1 to usize) to ptr[u8]
             if p3_len > 0 to usize:
@@ -903,7 +943,7 @@ struct String:
             b1[p1_len] = 0 to u8
             res.append(String(data = b1, len = p1_len, capacity = p1_len + 1 to usize))
             res.append(String.make(sep))
-            let p3_start as usize = (idx to usize) + sep_len
+            let p3_start as usize = (idx to usize) +sep_len
             let p3_len as usize = self.len - p3_start
             let b3 as ptr[u8] = make[u8](p3_len + 1 to usize) to ptr[u8]
             if p3_len > 0 to usize:
@@ -960,7 +1000,6 @@ struct String:
             if i > 0 to i64:
                 total_len = total_len + self.len
             i = i + 1 to i64
-
         let out_buf as ptr[u8] = make[u8](total_len + 1 to usize) to ptr[u8]
         var out_idx as usize = 0
         i = 0
@@ -975,12 +1014,15 @@ struct String:
                 memcpy(dst_item to ptr, item.data to ptr, item.len)
                 out_idx = out_idx + item.len
             i = i + 1 to i64
-
         out_buf[total_len] = 0 to u8
         return String(data = out_buf, len = total_len, capacity = total_len + 1 to usize)
-
-    // ── Replacement and Affixes ───────────────────────────────────────────────
-    public fn replace(self as String, old_s as cstr, new_s as cstr, count as i64 = -1 to i64) as String:
+    // ── Replacement and Affixes ──────────────────────────────────────────────────
+    public fn replace(
+        self as String,
+        old_s as cstr,
+        new_s as cstr,
+        count as i64 = -1 to i64,
+    ) as String:
         if self.len == 0 to usize or old_s to ptr == None or count == 0 to i64:
             return String.make(self.data to cstr)
         let old_len as usize = strlen(old_s)
@@ -999,10 +1041,8 @@ struct String:
                 break
             total_matches = total_matches + 1 to usize
             p = (m to usize + old_len) to ptr[u8]
-
         if total_matches == 0 to usize:
             return String.make(self.data to cstr)
-
         let total_len as usize = self.len + total_matches * new_len - total_matches * old_len
         let out_buf as ptr[u8] = make[u8](total_len + 1 to usize) to ptr[u8]
         var out_idx as usize = 0
@@ -1011,19 +1051,19 @@ struct String:
 
         while p to usize < end_p to usize:
             if count >= 0 to i64 and repl_cnt == count:
-                let rem_len as usize = (end_p to usize) - (p to usize)
+                let rem_len as usize = (end_p to usize) -(p to usize)
                 let dst_rem as ptr[u8] = ref out_buf[out_idx]
                 memcpy(dst_rem to ptr, p to ptr, rem_len)
                 out_idx = out_idx + rem_len
                 break
             let m as cstr = strstr(p to cstr, old_s)
             if m to ptr == None:
-                let rem_len as usize = (end_p to usize) - (p to usize)
+                let rem_len as usize = (end_p to usize) -(p to usize)
                 let dst_rem as ptr[u8] = ref out_buf[out_idx]
                 memcpy(dst_rem to ptr, p to ptr, rem_len)
                 out_idx = out_idx + rem_len
                 break
-            let seg_len as usize = (m to usize) - (p to usize)
+            let seg_len as usize = (m to usize) -(p to usize)
             if seg_len > 0 to usize:
                 let dst_seg as ptr[u8] = ref out_buf[out_idx]
                 memcpy(dst_seg to ptr, p to ptr, seg_len)
@@ -1034,7 +1074,6 @@ struct String:
                 out_idx = out_idx + new_len
             repl_cnt = repl_cnt + 1 to i64
             p = (m to usize + old_len) to ptr[u8]
-
         out_buf[total_len] = 0 to u8
         return String(data = out_buf, len = total_len, capacity = total_len + 1 to usize)
 
@@ -1069,8 +1108,7 @@ struct String:
             buf[offset] = 0 to u8
             return String(data = buf, len = offset, capacity = offset + 1 to usize)
         return String.make(self.data to cstr)
-
-    // ── Encoding and Translation ──────────────────────────────────────────────
+    // ── Encoding and Translation ─────────────────────────────────────────────────
     public fn encode(self as String) as List[u8]:
         var bytes as List[u8] = List[u8]()
         var i as usize = 0
@@ -1120,8 +1158,7 @@ struct String:
             table[k] = v
             i = i + 1 to usize
         return table
-
-    // ── Formatting ────────────────────────────────────────────────────────────
+    // ── Formatting ───────────────────────────────────────────────────────────────
     public fn format_map(self as String, mapping as Dict[String, String]) as String:
         if self.len == 0 to usize:
             return String.make("" to cstr)
@@ -1183,8 +1220,7 @@ struct String:
                 i = i + 1 to usize
         fbuf[b_idx] = 0 to u8
         return String(data = fbuf, len = b_idx, capacity = fcap)
-
-    // ── str.format(*args) ─────────────────────────────────────────────────────
+    // ── str.format(*args) ────────────────────────────────────────────────────────
     //
     // Positional replacement-field formatting.  Supported syntax:
     //   {}          – automatic field numbering
@@ -1294,8 +1330,7 @@ struct String:
                 i = i + 1 to usize
         fbuf[b_idx] = 0 to u8
         return String(data = fbuf, len = b_idx, capacity = fcap)
-
-    // ── Dunders and Operators ─────────────────────────────────────────────────
+    // ── Dunders and Operators ────────────────────────────────────────────────────
     public fn __len__(self as String) as usize:
         return self.len
 
@@ -1340,6 +1375,7 @@ struct String:
         buf[total_len] = 0 to u8
         return String(data = buf, len = total_len, capacity = total_len + 1 to usize)
 
+
 // ============================================================================
 // StringBuilder
 //
@@ -1379,7 +1415,6 @@ struct StringBuilder:
         (deref self).buffer = buf
         (deref self).len = 0
         (deref self).capacity = cap
-
     // -----------------------------------------------------------------
     // StringBuilder.__del__(self)
     //
@@ -1408,7 +1443,6 @@ struct StringBuilder:
 
     fn deinit_builder(self as ptr[StringBuilder]):
         self.__del__()
-
     // -----------------------------------------------------------------
     // StringBuilder.append(self, s)
     //
@@ -1417,7 +1451,6 @@ struct StringBuilder:
     // -----------------------------------------------------------------
     fn append(self as ptr[StringBuilder], s as cstr):
         self.append_builder(s)
-
     // -----------------------------------------------------------------
     // StringBuilder.append_slice(self, data, add_len)
     //
@@ -1437,7 +1470,6 @@ struct StringBuilder:
         memcpy(dest_ptr to ptr, data to ptr, add_len)
         (deref self).len = new_len
         (deref self).buffer[new_len] = 0 to u8
-
     // -----------------------------------------------------------------
     // StringBuilder.append_char(self, c)
     //
@@ -1452,7 +1484,6 @@ struct StringBuilder:
         (deref self).buffer[(deref self).len] = c
         (deref self).buffer[new_len] = 0 to u8
         (deref self).len = new_len
-
     // -----------------------------------------------------------------
     // StringBuilder.append_builder(self, s)
     //
@@ -1463,7 +1494,6 @@ struct StringBuilder:
             return
         let add_len as usize = strlen(s)
         self.append_slice(s to ptr[u8], add_len)
-
     // -----------------------------------------------------------------
     // StringBuilder.to_string(self)
     //
@@ -1475,7 +1505,6 @@ struct StringBuilder:
     // -----------------------------------------------------------------
     fn to_string(self as ptr[StringBuilder]) as String:
         return self.builder_to_string()
-
     // -----------------------------------------------------------------
     // StringBuilder.builder_to_string(self)
     //
@@ -1488,6 +1517,7 @@ struct StringBuilder:
     // -----------------------------------------------------------------
     fn builder_to_string(self as ptr[StringBuilder]) as String:
         return String.make((deref self).buffer to cstr)
+
 
 // ============================================================================
 // Module-level documentation notes:

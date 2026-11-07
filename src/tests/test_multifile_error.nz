@@ -1,23 +1,25 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String, StringBuilder
-from std.collections import List, Dict
-from std.option import Option, Empty, Some
+from std.collections import Dict, List
 from std.mem import make
-import symbols
-from symbols import Node, NodeType, Span, Symbol, Scope, LanguageMode, make_node, node_kind, node_name, node_left, node_right, node_body, node_declarations, node_params, node_file_path
+from std.option import Empty, Option, Some
+from std.string import String, StringBuilder
+
+import error
+from error import Diagnostic, DiagnosticEngine
 import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import sema
-from sema import Sema, make_scope, make_symbol, Scope, Symbol, SymbolKind
-import types
-from types import Type, TypeKind, make_type
+from sema import Scope, Sema, Symbol, SymbolKind, make_scope, make_symbol
+import symbols
+from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, make_node, node_body, node_declarations, node_file_path, node_kind, node_left, node_name, node_params, node_right
 import typecheck
 from typecheck import TypeChecker
-import error
-from error import DiagnosticEngine, Diagnostic
+import types
+from types import Type, TypeKind, make_type
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn fopen(filename as cstr, mode as cstr) as ptr
 extern fn fclose(stream as ptr) as i32
@@ -27,7 +29,8 @@ extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
 extern fn remove(pathname as cstr) as i32
 
-// ── File Helper ──────────────────────────────────────────────────────────
+
+// ── File Helper ──────────────────────────────────────────────────────────────
 fn write_file(path as cstr, content as cstr):
     let f as ptr = fopen(path, "wb" to cstr)
     if f != None to ptr:
@@ -35,11 +38,12 @@ fn write_file(path as cstr, content as cstr):
         let _w as usize = fwrite(content to ptr, 1 to usize, l, f)
         fclose(f)
 
-// ── Main Entry ───────────────────────────────────────────────────────────
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main() -> i32:
     let _hdr as i32 = printf("=== Running Multi-File Error Location Tests ===\n\n" to cstr)
 
-    // ── Test 1: Type Mismatch in Imported Module ─────────────────────────
+    // ── Test 1: Type Mismatch in Imported Module ─────────────────────────────────
     let path_imp1 as cstr = "/tmp/mfe_imported1.nz" to cstr
     let src_imp1 as cstr = "fn compute_total(a as i32, b as i32) -> i32:\n    let s as String = \"not an int\"\n    return s\n" to cstr
     write_file(path_imp1, src_imp1)
@@ -72,13 +76,11 @@ fn main() -> i32:
         let file1 as cstr = (deref diag1).file_path.data to cstr
         if strstr(file1, "mfe_imported1.nz" to cstr) != None to cstr:
             test1_passed = True
-
     if test1_passed:
         let _p as i32 = printf("Test 1 (Type Mismatch in Imported Module File Attribution): PASSED!\n" to cstr)
     else:
         let _p as i32 = printf("Test 1 (Type Mismatch in Imported Module File Attribution): FAILED!\n" to cstr)
-
-    // ── Test 2: Strict Mode Missing Import in Imported Module ────────────
+    // ── Test 2: Strict Mode Missing Import in Imported Module ────────────────────
     let path_imp2 as cstr = "/tmp/mfe_imported2.nz" to cstr
     let src_imp2 as cstr = "fn create_date() -> i32:\n    let d as DateTime = 0 to i32\n    return 0\n" to cstr
     write_file(path_imp2, src_imp2)
@@ -111,13 +113,11 @@ fn main() -> i32:
         let file2 as cstr = (deref diag2).file_path.data to cstr
         if strstr(file2, "mfe_imported2.nz" to cstr) != None to cstr:
             test2_passed = True
-
     if test2_passed:
         let _p as i32 = printf("Test 2 (Strict Mode Missing Import Attribution): PASSED!\n" to cstr)
     else:
         let _p as i32 = printf("Test 2 (Strict Mode Missing Import Attribution): FAILED!\n" to cstr)
-
-    // ── Test 3: Transitive Multi-Hop Import Error Attribution ────────────
+    // ── Test 3: Transitive Multi-Hop Import Error Attribution ────────────────────
     let path_lib_b as cstr = "/tmp/mfe_lib_b.nz" to cstr
     let src_lib_b as cstr = "fn helper_b() -> i32:\n    let val as String = \"wrong\"\n    return val\n" to cstr
     write_file(path_lib_b, src_lib_b)
@@ -154,20 +154,17 @@ fn main() -> i32:
         let file3 as cstr = (deref diag3).file_path.data to cstr
         if strstr(file3, "mfe_lib_b.nz" to cstr) != None to cstr:
             test3_passed = True
-
     if test3_passed:
         let _p as i32 = printf("Test 3 (Transitive Multi-Hop Import Attribution): PASSED!\n" to cstr)
     else:
         let _p as i32 = printf("Test 3 (Transitive Multi-Hop Import Attribution): FAILED!\n" to cstr)
-
-    // ── Test 4: Visual Diagnostic Box Rendering on Multi-File Error ─────
+    // ── Test 4: Visual Diagnostic Box Rendering on Multi-File Error ──────────────
     if (deref engine1).diagnostics.length() > 0 to i64:
         engine1.emit_all_cached()
         let _p as i32 = printf("Test 4 (Multi-File Diagnostic Box Rendering): PASSED!\n\n" to cstr)
     else:
         let _p as i32 = printf("Test 4 (Multi-File Diagnostic Box Rendering): FAILED!\n\n" to cstr)
-
-    // ── Cleanup Temporary Fixture Files ──────────────────────────────────
+    // ── Cleanup Temporary Fixture Files ──────────────────────────────────────────
     let _c1 as i32 = remove(path_imp1)
     let _c2 as i32 = remove(path_ent1)
     let _c3 as i32 = remove(path_imp2)

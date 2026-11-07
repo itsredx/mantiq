@@ -4,12 +4,15 @@
 // check_borrow_creation) without the small-int field IR bug (probe 1).
 from std.string import String
 
+
 extern fn printf(format as cstr, ...) as i32
+
 
 struct RecX:
     var a as String
     var b as String
     var c as String
+
 
 fn check(lst as ptr[List[RecX]], pass as i64):
     let cnt as i64 = (deref lst).length()
@@ -19,6 +22,7 @@ fn check(lst as ptr[List[RecX]], pass as i64):
         let r as RecX = (deref lst)[i]
         let _d as i32 = printf("pass=%lld i=%lld a=%s len_a=%lld ptr=0x%llx\n" to cstr, pass, i, r.a.data to cstr, r.a.len to i64, r.a.data to i64)
         i = i + 1 to i64
+
 
 fn main():
     let lst as List[RecX] = List[RecX]()

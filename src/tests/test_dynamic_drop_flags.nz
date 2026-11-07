@@ -1,15 +1,18 @@
-// ── Dynamic Drop Flags Test Suite ─────────────────────────────────────────
+// ── Dynamic Drop Flags Test Suite ────────────────────────────────────────────
 import std.string
 from std.string import String
 
-// ── Externs ─────────────────────────────────────────────────────────────
+
+// ── Externs ──────────────────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
+
 
 // Helper function to consume a variable by value (triggering ownership move)
 fn take_value(s as String) as i64:
     return s.len to i64
 
-// ── Test 1: Branch Divergent Move in Then Branch ───────────────────────────
+
+// ── Test 1: Branch Divergent Move in Then Branch ─────────────────────────────
 fn test_branch_divergent_then():
     var s as String = String.make("dynamic_flag_then" to cstr)
     var cond as bool = True
@@ -18,7 +21,8 @@ fn test_branch_divergent_then():
     // At Join / Exit: drop flag is 0, so conditional drop skips destroying moved s!
     let _p as i32 = printf("  [PASS] Branch Divergent Move (Then branch move handled cleanly)\n" to cstr)
 
-// ── Test 2: Branch Divergent Move in Else Branch ───────────────────────────
+
+// ── Test 2: Branch Divergent Move in Else Branch ─────────────────────────────
 fn test_branch_divergent_else():
     var s as String = String.make("dynamic_flag_else" to cstr)
     var cond as bool = False
@@ -29,7 +33,8 @@ fn test_branch_divergent_else():
     // At Join / Exit: drop flag is 0, so conditional drop skips destroying moved s!
     let _p as i32 = printf("  [PASS] Branch Divergent Move (Else branch move handled cleanly)\n" to cstr)
 
-// ── Test 3: Unmoved Branch Drop Execution ─────────────────────────────────
+
+// ── Test 3: Unmoved Branch Drop Execution ────────────────────────────────────
 fn test_unmoved_branch_drop():
     var s as String = String.make("unmoved_var" to cstr)
     var cond as bool = False
@@ -39,7 +44,8 @@ fn test_unmoved_branch_drop():
     // At Exit: drop flag remains 1, so s is successfully dropped by conditional drop!
     let _p as i32 = printf("  [PASS] Unmoved Branch Variable (drop flag remains active)\n" to cstr)
 
-// ── Test 4: Reassignment After Move Resets Drop Flag ──────────────────────
+
+// ── Test 4: Reassignment After Move Resets Drop Flag ─────────────────────────
 fn test_reassignment_resets_drop_flag():
     var s as String = String.make("initial_value" to cstr)
     var cond as bool = True
@@ -49,7 +55,8 @@ fn test_reassignment_resets_drop_flag():
     // At Join / Exit: flag is 1, so the newly assigned value is dropped at exit!
     let _p as i32 = printf("  [PASS] Reassignment Resets Drop Flag (store i1 1 restores drop)\n" to cstr)
 
-// ── Test 5: Move in Both Sibling Branches (Static Join) ────────────────────
+
+// ── Test 5: Move in Both Sibling Branches (Static Join) ──────────────────────
 fn test_both_branches_moved():
     var s as String = String.make("both_branches" to cstr)
     var cond as bool = True
@@ -60,7 +67,8 @@ fn test_both_branches_moved():
     // Both branches move s. At join, flag is 0 in both paths!
     let _p as i32 = printf("  [PASS] Sibling Branch Move Convergence (no double drop at join)\n" to cstr)
 
-// ── Test 6: Early Loop Break After Move ────────────────────────────────────
+
+// ── Test 6: Early Loop Break After Move ──────────────────────────────────────
 fn test_loop_break_after_move():
     var s as String = String.make("loop_val" to cstr)
     var i as i32 = 0 to i32
@@ -72,7 +80,8 @@ fn test_loop_break_after_move():
     // S moved before break; loop exit drop skips s
     let _p as i32 = printf("  [PASS] Loop Break After Move (early exit honors cleared flag)\n" to cstr)
 
-// ── Main Entrypoint ────────────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     let _r0 as i32 = printf("=== Starting Dynamic Drop Flags Test Suite ===\n" to cstr)
     test_branch_divergent_then()

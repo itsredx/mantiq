@@ -1,10 +1,12 @@
-// ── WASM Collections Test ──────────────────────────────────────────────
+// ── WASM Collections Test ────────────────────────────────────────────────────
 
+from std.collections import Dict, List
 from std.string import String
-from std.collections import List, Dict
+
 
 extern fn printf(fmt as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
 
 fn test_string_ops() as bool:
     var s1 as String = String.make("Hello " to cstr)
@@ -15,6 +17,7 @@ fn test_string_ops() as bool:
         return True
     let _ = printf("  [FAIL] String append failed\n" to cstr)
     return False
+
 
 fn test_list_ops() as bool:
     var lst as List[i32] = List[i32]()
@@ -34,13 +37,17 @@ fn test_list_ops() as bool:
     let _ = printf("  [FAIL] List operations failed\n" to cstr)
     return False
 
+
 fn test_dict_ops() as bool:
     var d as Dict[String, i32] = Dict[String, i32]()
     d[String.make("alpha" to cstr)] = 100
     d[String.make("beta" to cstr)] = 200
     d[String.make("gamma" to cstr)] = 300
 
-    if d.has(String.make("alpha" to cstr)) and d.has(String.make("beta" to cstr)) and d.has(String.make("gamma" to cstr)):
+    if d
+        .has(String.make("alpha" to cstr)) and d
+        .has(String.make("beta" to cstr)) and d
+        .has(String.make("gamma" to cstr)):
         let v1 as i32 = d[String.make("alpha" to cstr)]
         let v2 as i32 = d[String.make("beta" to cstr)]
         let v3 as i32 = d[String.make("gamma" to cstr)]
@@ -49,6 +56,7 @@ fn test_dict_ops() as bool:
             return True
     let _ = printf("  [FAIL] Dict operations failed\n" to cstr)
     return False
+
 
 fn main() as i32:
     let _ = printf("=== Testing WASM 32-bit Collections ===\n" to cstr)
@@ -59,6 +67,5 @@ fn main() as i32:
         return 1
     if not test_dict_ops():
         return 1
-
     let _ = printf("\n[PASS] All WASM Collections tests passed!\n" to cstr)
     return 0

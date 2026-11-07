@@ -19,12 +19,14 @@
 // All encoding/decoding functions follow the Unicode 15.0 standard.
 // ============================================================================
 
+
 // ============================================================================
 // Section 1 — Lexer Helpers
 //
 // These predicates test individual ASCII characters and are typically
 // used by lexers/parsers to classify input tokens.
 // ============================================================================
+
 
 // ---------------------------------------------------------------------------
 // is_digit(c) -> bool
@@ -34,6 +36,7 @@
 fn is_digit(c as char) as bool:
     let b as u8 = c to u8
     return b >= 48 to u8 and b <= 57 to u8 // '0'..'9'
+
 
 // ---------------------------------------------------------------------------
 // is_alpha(c) -> bool
@@ -45,6 +48,7 @@ fn is_alpha(c as char) as bool:
     let b as u8 = c to u8
     return (b >= 65 to u8 and b <= 90 to u8) or (b >= 97 to u8 and b <= 122 to u8) or (b == 95 to u8) // 'A'..'Z', 'a'..'z', '_'
 
+
 // ---------------------------------------------------------------------------
 // is_alphanumeric(c) -> bool
 //
@@ -53,6 +57,7 @@ fn is_alpha(c as char) as bool:
 // ---------------------------------------------------------------------------
 fn is_alphanumeric(c as char) as bool:
     return is_alpha(c) or is_digit(c)
+
 
 // ---------------------------------------------------------------------------
 // is_whitespace(c) -> bool
@@ -67,6 +72,7 @@ fn is_whitespace(c as char) as bool:
     let b as u8 = c to u8
     return b == 32 to u8 or b == 9 to u8 or b == 10 to u8 or b == 13 to u8 // space, tab, newline, carriage return
 
+
 // ---------------------------------------------------------------------------
 // is_hex_digit(c) -> bool
 //
@@ -77,6 +83,7 @@ fn is_hex_digit(c as char) as bool:
     let b as u8 = c to u8
     return (b >= 48 to u8 and b <= 57 to u8) or (b >= 65 to u8 and b <= 70 to u8) or (b >= 97 to u8 and b <= 102 to u8) // '0'..'9', 'A'..'F', 'a'..'f'
 
+
 // ---------------------------------------------------------------------------
 // is_octal_digit(c) -> bool
 //
@@ -85,6 +92,7 @@ fn is_hex_digit(c as char) as bool:
 fn is_octal_digit(c as char) as bool:
     let b as u8 = c to u8
     return b >= 48 to u8 and b <= 55 to u8 // '0'..'7'
+
 
 // ============================================================================
 // Section 2 — Codepoint
@@ -106,6 +114,7 @@ struct Codepoint:
         (deref self).value = value
         (deref self).length = length
 
+
 // ============================================================================
 // Section 3 — UTF-8 Helpers
 //
@@ -118,6 +127,7 @@ struct Codepoint:
 // Continuation bytes always have the pattern 10xxxxxx.
 // Overlong sequences and surrogate halves are rejected by the validator.
 // ============================================================================
+
 
 // ---------------------------------------------------------------------------
 // utf8_char_length(first_byte) -> usize
@@ -144,6 +154,7 @@ fn utf8_char_length(first_byte as u8) as usize:
         return 4 to usize
     return 1 to usize // fallback/invalid
 
+
 // ---------------------------------------------------------------------------
 // utf8_decode(bytes, offset) -> Codepoint
 //
@@ -159,29 +170,29 @@ fn utf8_char_length(first_byte as u8) as usize:
 fn utf8_decode(bytes as ptr[u8], offset as usize) as Codepoint:
     let first as u8 = bytes[offset]
     let len as usize = utf8_char_length(first)
-    
+
     if len == 1:
-        return Codepoint(value=first to u32, length=1)
+        return Codepoint(value = first to u32, length = 1)
     if len == 2:
         let b1 as u32 = (first & 31 to u8) to u32
         let b2 as u32 = (bytes[offset + 1] & 63 to u8) to u32
         let val as u32 = (b1 << 6) | b2
-        return Codepoint(value=val, length=2)
+        return Codepoint(value = val, length = 2)
     if len == 3:
         let b1 as u32 = (first & 15 to u8) to u32
         let b2 as u32 = (bytes[offset + 1] & 63 to u8) to u32
         let b3 as u32 = (bytes[offset + 2] & 63 to u8) to u32
         let val as u32 = (b1 << 12) | (b2 << 6) | b3
-        return Codepoint(value=val, length=3)
+        return Codepoint(value = val, length = 3)
     if len == 4:
         let b1 as u32 = (first & 7 to u8) to u32
         let b2 as u32 = (bytes[offset + 1] & 63 to u8) to u32
         let b3 as u32 = (bytes[offset + 2] & 63 to u8) to u32
         let b4 as u32 = (bytes[offset + 3] & 63 to u8) to u32
         let val as u32 = (b1 << 18) | (b2 << 12) | (b3 << 6) | b4
-        return Codepoint(value=val, length=4)
-        
-    return Codepoint(value=0 to u32, length=1)
+        return Codepoint(value = val, length = 4)
+    return Codepoint(value = 0 to u32, length = 1)
+
 
 // ---------------------------------------------------------------------------
 // utf8_encode(codepoint, out_bytes) -> usize
@@ -216,6 +227,7 @@ fn utf8_encode(codepoint as u32, out_bytes as ptr[u8]) as usize:
         return 4 to usize
     return 0 to usize
 
+
 // ---------------------------------------------------------------------------
 // utf8_validate(bytes, len) -> bool
 //
@@ -237,10 +249,9 @@ fn utf8_validate(bytes as ptr[u8], len as usize) as bool:
     while i < len:
         let first as u8 = bytes[i]
         let char_len as usize = utf8_char_length(first)
-        
+
         if i + char_len > len:
             return False
-            
         // Validate continuation bytes and bounds
         if char_len == 1:
             // 0xxxxxxx – single byte: must have MSB clear
@@ -275,9 +286,9 @@ fn utf8_validate(bytes as ptr[u8], len as usize) as bool:
             let val as u32 = ((first & 7 to u8) to u32 << 18) | ((b2 & 63 to u8) to u32 << 12) | ((b3 & 63 to u8) to u32 << 6) | (b4 & 63 to u8) to u32
             if val < 65536 to u32 or val > 1114111 to u32: // overlong or out of bounds
                 return False
-                
         i = i + char_len
     return True
+
 
 // ---------------------------------------------------------------------------
 // utf8_count_codepoints(bytes, len) -> usize
@@ -304,6 +315,7 @@ fn utf8_count_codepoints(bytes as ptr[u8], len as usize) as usize:
         i = i + char_len
     return count
 
+
 // ============================================================================
 // Section 4 — ASCII Helpers
 //
@@ -311,6 +323,7 @@ fn utf8_count_codepoints(bytes as ptr[u8], len as usize) as usize:
 // These are simpler and faster than their UTF-8 counterparts because
 // ASCII is a fixed-width encoding (1 byte per character, MSB always 0).
 // ============================================================================
+
 
 // ---------------------------------------------------------------------------
 // ascii_char_length(first_byte) -> usize
@@ -320,6 +333,7 @@ fn utf8_count_codepoints(bytes as ptr[u8], len as usize) as usize:
 fn ascii_char_length(first_byte as u8) as usize:
     return 1 to usize
 
+
 // ---------------------------------------------------------------------------
 // ascii_decode(bytes, offset) -> Codepoint
 //
@@ -328,7 +342,8 @@ fn ascii_char_length(first_byte as u8) as usize:
 // ---------------------------------------------------------------------------
 fn ascii_decode(bytes as ptr[u8], offset as usize) as Codepoint:
     let first as u8 = bytes[offset]
-    return Codepoint(value=first to u32, length=1 to usize)
+    return Codepoint(value = first to u32, length = 1 to usize)
+
 
 // ---------------------------------------------------------------------------
 // ascii_encode(codepoint, out_bytes) -> usize
@@ -342,6 +357,7 @@ fn ascii_encode(codepoint as u32, out_bytes as ptr[u8]) as usize:
         out_bytes[0] = codepoint to u8
         return 1 to usize
     return 0 to usize
+
 
 // ---------------------------------------------------------------------------
 // ascii_validate(bytes, len) -> bool
@@ -359,6 +375,7 @@ fn ascii_validate(bytes as ptr[u8], len as usize) as bool:
         i = i + 1 to usize
     return True
 
+
 // ---------------------------------------------------------------------------
 // ascii_count_codepoints(bytes, len) -> usize
 //
@@ -367,6 +384,7 @@ fn ascii_validate(bytes as ptr[u8], len as usize) as bool:
 // ---------------------------------------------------------------------------
 fn ascii_count_codepoints(bytes as ptr[u8], len as usize) as usize:
     return len
+
 
 // ============================================================================
 // Section 5 — UTF-16 Helpers
@@ -379,6 +397,7 @@ fn ascii_count_codepoints(bytes as ptr[u8], len as usize) as usize:
 //   High surrogates: U+D800 – U+DBFF
 //   Low surrogates:  U+DC00 – U+DFFF
 // ============================================================================
+
 
 // ---------------------------------------------------------------------------
 // utf16_char_length(first_code_unit) -> usize
@@ -394,6 +413,7 @@ fn utf16_char_length(first_code_unit as u16) as usize:
         return 2 to usize
     return 1 to usize
 
+
 // ---------------------------------------------------------------------------
 // utf16_decode(words, offset) -> Codepoint
 //
@@ -408,10 +428,11 @@ fn utf16_decode(words as ptr[u16], offset as usize) as Codepoint:
     let first as u16 = words[offset]
     if first >= 55296 to u16 and first <= 56319 to u16:
         let high as u32 = (first - 55296 to u16) to u32
-        let low as u32 = (words[offset + 1 to usize] - 56320 to u16) to u32
-        let val as u32 = (high << 10) + low + 65536 to u32
-        return Codepoint(value=val, length=2 to usize)
-    return Codepoint(value=first to u32, length=1 to usize)
+        let low as u32 = (words[offset + 1 to usize] -56320 to u16) to u32
+        let val as u32 = (high << 10) +low + 65536 to u32
+        return Codepoint(value = val, length = 2 to usize)
+    return Codepoint(value = first to u32, length = 1 to usize)
+
 
 // ---------------------------------------------------------------------------
 // utf16_encode(codepoint, out_words) -> usize
@@ -433,6 +454,7 @@ fn utf16_encode(codepoint as u32, out_words as ptr[u16]) as usize:
         out_words[0] = (55296 to u32 | (cp_prime >> 10)) to u16
         out_words[1] = (56320 to u32 | (cp_prime & 1023 to u32)) to u16
         return 2 to usize
+
 
 // ---------------------------------------------------------------------------
 // utf16_validate(words, len) -> bool
@@ -462,6 +484,7 @@ fn utf16_validate(words as ptr[u16], len as usize) as bool:
             i = i + 1 to usize
     return True
 
+
 // ---------------------------------------------------------------------------
 // utf16_count_codepoints(words, len) -> usize
 //
@@ -482,6 +505,7 @@ fn utf16_count_codepoints(words as ptr[u16], len as usize) as usize:
         count = count + 1 to usize
     return count
 
+
 // ============================================================================
 // Section 6 — UTF-32 Helpers
 //
@@ -491,6 +515,7 @@ fn utf16_count_codepoints(words as ptr[u16], len as usize) as usize:
 // surrogate code points.
 // ============================================================================
 
+
 // ---------------------------------------------------------------------------
 // utf32_char_length(first_code_unit) -> usize
 //
@@ -499,6 +524,7 @@ fn utf16_count_codepoints(words as ptr[u16], len as usize) as usize:
 fn utf32_char_length(first_code_unit as u32) as usize:
     return 1 to usize
 
+
 // ---------------------------------------------------------------------------
 // utf32_decode(words, offset) -> Codepoint
 //
@@ -506,7 +532,8 @@ fn utf32_char_length(first_code_unit as u32) as usize:
 // ---------------------------------------------------------------------------
 fn utf32_decode(words as ptr[u32], offset as usize) as Codepoint:
     let val as u32 = words[offset]
-    return Codepoint(value=val, length=1 to usize)
+    return Codepoint(value = val, length = 1 to usize)
+
 
 // ---------------------------------------------------------------------------
 // utf32_encode(codepoint, out_words) -> usize
@@ -517,6 +544,7 @@ fn utf32_decode(words as ptr[u32], offset as usize) as Codepoint:
 fn utf32_encode(codepoint as u32, out_words as ptr[u32]) as usize:
     out_words[0] = codepoint
     return 1 to usize
+
 
 // ---------------------------------------------------------------------------
 // utf32_validate(words, len) -> bool
@@ -540,6 +568,7 @@ fn utf32_validate(words as ptr[u32], len as usize) as bool:
         i = i + 1 to usize
     return True
 
+
 // ---------------------------------------------------------------------------
 // utf32_count_codepoints(words, len) -> usize
 //
@@ -547,6 +576,7 @@ fn utf32_validate(words as ptr[u32], len as usize) as bool:
 // ---------------------------------------------------------------------------
 fn utf32_count_codepoints(words as ptr[u32], len as usize) as usize:
     return len
+
 
 // ============================================================================
 // Module-level notes:

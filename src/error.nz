@@ -1,13 +1,15 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
-from std.collections import List, Dict
-from std.option import Option, Empty, Some
+from std.collections import Dict, List
 from std.mem import make
+from std.option import Empty, Option, Some
+from std.string import String
+
 import symbols
 from symbols import Span
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn snprintf(str as ptr[u8], size as usize, format as cstr, ...) as i32
 extern fn malloc(size as usize) as ptr
@@ -22,71 +24,91 @@ extern fn fseek(stream as ptr, offset as isize, origin as i32) as i32
 extern fn ftell(stream as ptr) as isize
 extern fn fread(ptr as ptr, size as usize, count as usize, stream as ptr) as usize
 
-// ── Standard Error Code Catalog ──────────────────────────────────────────
+
+// ── Standard Error Code Catalog ──────────────────────────────────────────────
 // Syntax & Grammar
 fn err_syntax() as cstr:
-    return "E0001" to cstr
+    return"E0001" to cstr
+
 
 fn err_strict_mode() as cstr:
-    return "E0002" to cstr
+    return"E0002" to cstr
+
 
 // Name Resolution & Scoping
 fn err_undefined_var() as cstr:
-    return "E0101" to cstr
+    return"E0101" to cstr
+
 
 fn err_duplicate_decl() as cstr:
-    return "E0102" to cstr
+    return"E0102" to cstr
+
 
 fn err_module_not_found() as cstr:
-    return "E0103" to cstr
+    return"E0103" to cstr
+
 
 fn err_symbol_not_found() as cstr:
-    return "E0104" to cstr
+    return"E0104" to cstr
+
 
 // Types & Signatures
 fn err_type_mismatch() as cstr:
-    return "E0308" to cstr
+    return"E0308" to cstr
+
 
 fn err_return_mismatch() as cstr:
-    return "E0309" to cstr
+    return"E0309" to cstr
+
 
 fn err_missing_return() as cstr:
-    return "E0310" to cstr
+    return"E0310" to cstr
+
 
 fn err_unreachable_code() as cstr:
-    return "E0311" to cstr
+    return"E0311" to cstr
+
 
 fn err_arg_count_mismatch() as cstr:
-    return "E0314" to cstr
+    return"E0314" to cstr
+
 
 fn err_field_not_found() as cstr:
-    return "E0315" to cstr
+    return"E0315" to cstr
+
 
 fn err_explicit_import() as cstr:
-    return "E0316" to cstr
+    return"E0316" to cstr
+
 
 // Ownership & Borrowing
 fn err_use_of_moved() as cstr:
-    return "E0401" to cstr
+    return"E0401" to cstr
+
 
 fn err_use_of_dropped() as cstr:
-    return "E0402" to cstr
+    return"E0402" to cstr
+
 
 fn err_cannot_borrow_mut() as cstr:
-    return "E0403" to cstr
+    return"E0403" to cstr
+
 
 // Macros
 fn err_undefined_macro() as cstr:
-    return "E0501" to cstr
+    return"E0501" to cstr
+
 
 fn err_macro_arg_mismatch() as cstr:
-    return "E0502" to cstr
+    return"E0502" to cstr
+
 
 // Warnings
 fn warn_unused_var() as cstr:
-    return "W0012" to cstr
+    return"W0012" to cstr
 
-// ── File I/O Helper ──────────────────────────────────────────────────────
+
+// ── File I/O Helper ──────────────────────────────────────────────────────────
 fn read_file_content(path as cstr) as cstr:
     if path != None to cstr:
         let f as ptr = fopen(path, "rb" to cstr)
@@ -102,17 +124,20 @@ fn read_file_content(path as cstr) as cstr:
                 deref (end_ptr to ptr[u8]) = 0 to u8
                 return buf to cstr
             fclose(f)
-    return "" to cstr
+    return"" to cstr
 
-// ── Terminal Dimensions & Box Drawing Helpers ────────────────────────────
+
+// ── Terminal Dimensions & Box Drawing Helpers ────────────────────────────────
 struct WinSize:
     public var ws_row as u16
     public var ws_col as u16
     public var ws_xpixel as u16
     public var ws_ypixel as u16
 
+
 fn get_terminal_width() as i32:
     return nizam_get_terminal_width()
+
 
 fn visible_len(s as cstr) as i32:
     if s == None to cstr:
@@ -163,6 +188,7 @@ fn visible_len(s as cstr) as i32:
             i = i + 1 to usize
     return len
 
+
 fn visible_len_range(s as cstr, start as usize, end as usize) as i32:
     if s == None to cstr or start >= end:
         return 0 to i32
@@ -205,6 +231,7 @@ fn visible_len_range(s as cstr, start as usize, end as usize) as i32:
             i = i + 1 to usize
     return len
 
+
 fn print_range(s as cstr, start as usize, end as usize):
     if s == None to cstr or start >= end:
         return
@@ -214,17 +241,22 @@ fn print_range(s as cstr, start as usize, end as usize):
         let _r as i32 = printf("%c" to cstr, ch to i32)
         i = i + 1 to usize
 
-fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as cstr, use_color as bool, content_w as i32):
+
+fn render_wrapped_text_block(
+    text as cstr,
+    indent_spaces as i32,
+    text_color as cstr,
+    use_color as bool,
+    content_w as i32,
+):
     if text == None to cstr:
         return
     let slen as usize = strlen(text)
     if slen == 0 to usize:
         return
-
     var max_line_w as i32 = content_w - indent_spaces
     if max_line_w < 10 to i32:
         max_line_w = 10 to i32
-
     var line_start as usize = 0 to usize
     while line_start < slen:
         // Skip leading spaces on wrapped continuation lines
@@ -235,10 +267,8 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
                 line_start = line_start + 1 to usize
             else:
                 break
-
         if line_start >= slen:
             break
-
         var cur_pos as usize = line_start
         var last_good_break as usize = line_start
         var line_end as usize = line_start
@@ -252,7 +282,6 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
                 else:
                     line_end = last_good_break
                 break
-
             let ch_raw as u8 = deref ((text to usize + cur_pos) to ptr[u8])
             let ch as i32 = ch_raw to i32
 
@@ -260,7 +289,6 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
                 line_end = cur_pos
                 reached_newline = True
                 break
-
             if ch == 32 to i32 or ch == 9 to i32:
                 let vis as i32 = visible_len_range(text, line_start, cur_pos)
                 if vis <= max_line_w:
@@ -281,15 +309,12 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
                         if line_end == line_start:
                             line_end = cur_pos + 1 to usize
                     break
-
             cur_pos = cur_pos + 1 to usize
-
         let line_vis as i32 = visible_len_range(text, line_start, line_end)
         let line_content_vis as i32 = indent_spaces + line_vis
         var line_pad as i32 = content_w - line_content_vis
         if line_pad < 0 to i32:
             line_pad = 0 to i32
-
         if use_color:
             let _r1 as i32 = printf("  %s│%s  " to cstr, rgb_surface(), color_reset())
             print_spaces(indent_spaces)
@@ -304,7 +329,6 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
             print_range(text, line_start, line_end)
             print_spaces(line_pad)
             let _r2 as i32 = printf("│\n" to cstr)
-
         if reached_newline:
             line_start = line_end + 1 to usize
         else:
@@ -315,17 +339,21 @@ fn render_wrapped_text_block(text as cstr, indent_spaces as i32, text_color as c
                 if next_b == 32 to i32 or next_b == 9 to i32:
                     line_start = line_start + 1 to usize
 
-fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bool, content_w as i32):
+
+fn render_wrapped_gutter_block(
+    text as cstr,
+    text_color as cstr,
+    use_color as bool,
+    content_w as i32,
+):
     if text == None to cstr:
         return
     let slen as usize = strlen(text)
     if slen == 0 to usize:
         return
-
     var max_line_w as i32 = content_w - 6 to i32
     if max_line_w < 10 to i32:
         max_line_w = 10 to i32
-
     var line_start as usize = 0 to usize
     while line_start < slen:
         while line_start < slen:
@@ -335,10 +363,8 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
                 line_start = line_start + 1 to usize
             else:
                 break
-
         if line_start >= slen:
             break
-
         var cur_pos as usize = line_start
         var last_good_break as usize = line_start
         var line_end as usize = line_start
@@ -352,7 +378,6 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
                 else:
                     line_end = last_good_break
                 break
-
             let ch_raw as u8 = deref ((text to usize + cur_pos) to ptr[u8])
             let ch as i32 = ch_raw to i32
 
@@ -360,7 +385,6 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
                 line_end = cur_pos
                 reached_newline = True
                 break
-
             if ch == 32 to i32 or ch == 9 to i32:
                 let vis as i32 = visible_len_range(text, line_start, cur_pos)
                 if vis <= max_line_w:
@@ -381,14 +405,11 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
                         if line_end == line_start:
                             line_end = cur_pos + 1 to usize
                     break
-
             cur_pos = cur_pos + 1 to usize
-
         let line_vis as i32 = visible_len_range(text, line_start, line_end)
         var line_pad as i32 = content_w - 6 to i32 - line_vis
         if line_pad < 0 to i32:
             line_pad = 0 to i32
-
         if use_color:
             let _r1 as i32 = printf("  %s│%s     %s│%s  %s" to cstr, rgb_surface(), color_reset(), rgb_surface(), color_reset(), text_color)
             print_range(text, line_start, line_end)
@@ -400,7 +421,6 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
             print_range(text, line_start, line_end)
             print_spaces(line_pad)
             let _r2 as i32 = printf("│\n" to cstr)
-
         if reached_newline:
             line_start = line_end + 1 to usize
         else:
@@ -410,6 +430,7 @@ fn render_wrapped_gutter_block(text as cstr, text_color as cstr, use_color as bo
                 let next_b as i32 = next_raw to i32
                 if next_b == 32 to i32 or next_b == 9 to i32:
                     line_start = line_start + 1 to usize
+
 
 fn num_digits(n as u32) as i32:
     if n >= 100000 to u32:
@@ -424,11 +445,13 @@ fn num_digits(n as u32) as i32:
         return 2 to i32
     return 1 to i32
 
+
 fn print_dashes(count as i32):
     var i as i32 = 0 to i32
     while i < count:
         let _r as i32 = printf("─" to cstr)
         i = i + 1 to i32
+
 
 fn print_spaces(count as i32):
     var i as i32 = 0 to i32
@@ -436,48 +459,62 @@ fn print_spaces(count as i32):
         let _r as i32 = printf(" " to cstr)
         i = i + 1 to i32
 
-// ── NvChad / OpenCode 24-bit Truecolor Palette Tokens ──────────────────
+
+// ── NvChad / OpenCode 24-bit Truecolor Palette Tokens ────────────────────────
 fn color_reset() as cstr:
-    return "\x1b[0m" to cstr
+    return"\x1b[0m" to cstr
+
 
 fn color_bold() as cstr:
-    return "\x1b[1m" to cstr
+    return"\x1b[1m" to cstr
+
 
 fn color_dim() as cstr:
-    return "\x1b[2m" to cstr
+    return"\x1b[2m" to cstr
+
 
 // Catppuccin / NvChad Truecolor RGB Tokens
 fn rgb_red() as cstr:
-    return "\x1b[38;2;243;139;168m" to cstr // Coral / Red (#f38ba8)
+    return"\x1b[38;2;243;139;168m" to cstr // Coral / Red (#f38ba8)
+
 
 fn rgb_peach() as cstr:
-    return "\x1b[38;2;250;179;135m" to cstr // Peach / Warm Amber (#fab387)
+    return"\x1b[38;2;250;179;135m" to cstr // Peach / Warm Amber (#fab387)
+
 
 fn rgb_yellow() as cstr:
-    return "\x1b[38;2;249;226;175m" to cstr // Yellow / Gold (#f9e2af)
+    return"\x1b[38;2;249;226;175m" to cstr // Yellow / Gold (#f9e2af)
+
 
 fn rgb_green() as cstr:
-    return "\x1b[38;2;166;227;161m" to cstr // Mint Green (#a6e3a1)
+    return"\x1b[38;2;166;227;161m" to cstr // Mint Green (#a6e3a1)
+
 
 fn rgb_teal() as cstr:
-    return "\x1b[38;2;148;226;213m" to cstr // Teal / Cyan (#94e2d5)
+    return"\x1b[38;2;148;226;213m" to cstr // Teal / Cyan (#94e2d5)
+
 
 fn rgb_lavender() as cstr:
-    return "\x1b[38;2;180;190;254m" to cstr // Lavender (#b4befe)
+    return"\x1b[38;2;180;190;254m" to cstr // Lavender (#b4befe)
+
 
 fn rgb_mauve() as cstr:
-    return "\x1b[38;2;203;166;247m" to cstr // Mauve / Purple (#cba6f7)
+    return"\x1b[38;2;203;166;247m" to cstr // Mauve / Purple (#cba6f7)
+
 
 fn rgb_surface() as cstr:
-    return "\x1b[38;2;88;91;112m" to cstr // Surface Gray (#585b70)
+    return"\x1b[38;2;88;91;112m" to cstr // Surface Gray (#585b70)
+
 
 fn rgb_muted() as cstr:
-    return "\x1b[38;2;108;112;134m" to cstr // Overlay Gray (#6c7086)
+    return"\x1b[38;2;108;112;134m" to cstr // Overlay Gray (#6c7086)
+
 
 fn rgb_white() as cstr:
-    return "\x1b[38;2;205;214;244m" to cstr // Bright Text (#cdd6f4)
+    return"\x1b[38;2;205;214;244m" to cstr // Bright Text (#cdd6f4)
 
-// ── Diagnostic Severity ──────────────────────────────────────────────────
+
+// ── Diagnostic Severity ──────────────────────────────────────────────────────
 enum Severity:
     Error
     Warning
@@ -486,12 +523,14 @@ enum Severity:
     Panic
     ICE
 
-// ── Label Kind ───────────────────────────────────────────────────────────
+
+// ── Label Kind ───────────────────────────────────────────────────────────────
 enum LabelKind:
     Primary
     Secondary
 
-// ── Span Label ───────────────────────────────────────────────────────────
+
+// ── Span Label ───────────────────────────────────────────────────────────────
 struct Label:
     public var span as Span
     public var message as String
@@ -503,7 +542,8 @@ struct Label:
     public fn secondary(span as Span, message as String) as Label:
         return Label(span = span, message = message, kind = LabelKind.Secondary)
 
-// ── Code Suggestion ──────────────────────────────────────────────────────
+
+// ── Code Suggestion ──────────────────────────────────────────────────────────
 struct Suggestion:
     public var span as Span
     public var replacement as String
@@ -512,20 +552,24 @@ struct Suggestion:
     public fn make(span as Span, replacement as String, message as String) as Suggestion:
         return Suggestion(span = span, replacement = replacement, message = message)
 
+
 struct OptionLayout:
     public var has_val as u8
     public var val_ptr as ptr[u8]
 
+
 fn string_opt_has_value(opt as ptr[Option[String]]) as bool:
     let opt_ref as ptr[OptionLayout] = opt to ptr[OptionLayout]
     return (deref opt_ref).has_val == 1 to u8
+
 
 fn string_opt_unwrap(opt as ptr[Option[String]]) as String:
     let opt_ref as ptr[OptionLayout] = opt to ptr[OptionLayout]
     let s_ptr as ptr[String] = (deref opt_ref).val_ptr to ptr[String]
     return deref s_ptr
 
-// ── Diagnostic Struct ───────────────────────────────────────────────────
+
+// ── Diagnostic Struct ────────────────────────────────────────────────────────
 struct Diagnostic:
     public var severity as Severity
     public var code as Option[String]
@@ -538,7 +582,13 @@ struct Diagnostic:
     public var notes as List[String]
     public var suggestions as List[Suggestion]
 
-    public fn init_fields(self as ptr[Diagnostic], severity as Severity, message as String, file_path as String, span as Span):
+    public fn init_fields(
+        self as ptr[Diagnostic],
+        severity as Severity,
+        message as String,
+        file_path as String,
+        span as Span,
+    ):
         (deref self).severity = severity
         (deref self).code = Empty
         (deref self).message = message
@@ -571,10 +621,16 @@ struct Diagnostic:
     public fn add_note(self as ptr[Diagnostic], note as String):
         (deref self).notes.append(note)
 
-    public fn add_suggestion(self as ptr[Diagnostic], span as Span, replacement as String, message as String):
+    public fn add_suggestion(
+        self as ptr[Diagnostic],
+        span as Span,
+        replacement as String,
+        message as String,
+    ):
         (deref self).suggestions.append(Suggestion.make(span, replacement, message))
 
-// ── Diagnostic Engine ────────────────────────────────────────────────────
+
+// ── Diagnostic Engine ────────────────────────────────────────────────────────
 struct DiagnosticEngine:
     public var diagnostics as List[ptr[Diagnostic]]
     public var source_cache as Dict[String, String]
@@ -619,7 +675,13 @@ struct DiagnosticEngine:
     public fn has_errors(self as ptr[DiagnosticEngine]) as bool:
         return (deref self).error_count > 0 to u32 or (deref self).panic_count > 0 to u32
 
-    public fn report_error(self as ptr[DiagnosticEngine], code as cstr, message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_error(
+        self as ptr[DiagnosticEngine],
+        code as cstr,
+        message as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
         diag.init_fields(Severity.Error, message, file_path, span)
         if strlen(code) > 0 to usize:
@@ -627,7 +689,13 @@ struct DiagnosticEngine:
         self.add(diag)
         return diag
 
-    public fn report_warning(self as ptr[DiagnosticEngine], code as cstr, message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_warning(
+        self as ptr[DiagnosticEngine],
+        code as cstr,
+        message as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
         diag.init_fields(Severity.Warning, message, file_path, span)
         if strlen(code) > 0 to usize:
@@ -635,20 +703,33 @@ struct DiagnosticEngine:
         self.add(diag)
         return diag
 
-    public fn report_panic(self as ptr[DiagnosticEngine], message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_panic(
+        self as ptr[DiagnosticEngine],
+        message as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
         diag.init_fields(Severity.Panic, message, file_path, span)
         self.add(diag)
         return diag
 
-    public fn report_ice(self as ptr[DiagnosticEngine], message as String, file_path as String, span as Span) as ptr[Diagnostic]:
+    public fn report_ice(
+        self as ptr[DiagnosticEngine],
+        message as String,
+        file_path as String,
+        span as Span,
+    ) as ptr[Diagnostic]:
         let diag as ptr[Diagnostic] = make[Diagnostic](1 to usize) to ptr[Diagnostic]
         diag.init_fields(Severity.ICE, message, file_path, span)
         self.add(diag)
         return diag
-
-    // ── OpenCode / NvChad Modern Box UI Renderer ─────────────────────────
-    public fn render_diagnostic(self as ptr[DiagnosticEngine], diag as ptr[Diagnostic], source_code as cstr):
+    // ── OpenCode / NvChad Modern Box UI Renderer ─────────────────────────────────
+    public fn render_diagnostic(
+        self as ptr[DiagnosticEngine],
+        diag as ptr[Diagnostic],
+        source_code as cstr,
+    ):
         let color as bool = (deref self).use_color
         let width as i32 = get_terminal_width()
         let inner_w as i32 = width - 2 to i32
@@ -678,7 +759,6 @@ struct DiagnosticEngine:
             tag_color = rgb_red()
             tag_icon = "🪲" to cstr
             tag_name = "INTERNAL COMPILER ERROR" to cstr
-
         // 1. Top Rounded Border & Header Pill
         let tag_icon_vis as i32 = visible_len(tag_icon)
         let tag_name_vis as i32 = visible_len(tag_name)
@@ -686,7 +766,6 @@ struct DiagnosticEngine:
         if string_opt_has_value(ref (deref diag).code):
             let c_len as i32 = visible_len(string_opt_unwrap(ref (deref diag).code).data to cstr)
             code_len = c_len + 3 to i32
-            
         let msg_vis as i32 = visible_len((deref diag).message.data to cstr)
         let top_vis as i32 = 3 to i32 + tag_icon_vis + 1 to i32 + tag_name_vis + code_len + 3 to i32 + msg_vis + 1 to i32
         var top_dashes as i32 = inner_w - top_vis
@@ -698,7 +777,6 @@ struct DiagnosticEngine:
             top_dashes = inner_w - top_header_vis
             if top_dashes < 2 to i32:
                 top_dashes = 2 to i32
-
         if color:
             let _r1 as i32 = printf("  %s╭─  %s%s%s %s%s" to cstr, rgb_surface(), tag_color, color_bold(), tag_icon, tag_name, color_reset())
             if string_opt_has_value(ref (deref diag).code):
@@ -719,7 +797,6 @@ struct DiagnosticEngine:
                 let _r3 as i32 = printf(" " to cstr)
             print_dashes(top_dashes)
             let _r4 as i32 = printf("╮\n" to cstr)
-
         if not msg_in_header:
             render_wrapped_text_block((deref diag).message.data to cstr, 0 to i32, color_bold(), color, content_w)
             if color:
@@ -730,7 +807,6 @@ struct DiagnosticEngine:
                 let _r as i32 = printf("  ├" to cstr)
                 print_dashes(inner_w)
                 let _r2 as i32 = printf("┤\n" to cstr)
-
         // 2. Enhanced Location Block (File, Line, Column)
         let row as u32 = (deref diag).primary_span.start_row + 1 to u32
         let col as u32 = (deref diag).primary_span.start_col + 1 to u32
@@ -743,7 +819,6 @@ struct DiagnosticEngine:
         var loc1_pad as i32 = content_w - loc1_vis
         if loc1_pad < 0 to i32:
             loc1_pad = 0 to i32
-
         if color:
             let _r as i32 = printf("  %s│%s  %s📁 File:%s      %s%s%s" to cstr, rgb_surface(), color_reset(), rgb_lavender(), color_reset(), rgb_white(), (deref diag).file_path.data to cstr, color_reset())
             print_spaces(loc1_pad)
@@ -752,13 +827,11 @@ struct DiagnosticEngine:
             let _r as i32 = printf("  │  📁 File:      %s" to cstr, (deref diag).file_path.data to cstr)
             print_spaces(loc1_pad)
             let _r2 as i32 = printf("│\n" to cstr)
-
         // Line 2: 📍 Position:  Line <row>, Column <col> (📍 = 2 cols, " Position:  " = 12 cols -> 14 cols label)
         let loc2_vis as i32 = 28 to i32 + row_d + col_d
         var loc2_pad as i32 = content_w - loc2_vis
         if loc2_pad < 0 to i32:
             loc2_pad = 0 to i32
-
         if color:
             let _r as i32 = printf("  %s│%s  %s📍 Position:%s  %sLine %d%s, %sColumn %d%s" to cstr, rgb_surface(), color_reset(), rgb_mauve(), color_reset(), rgb_peach(), row, color_reset(), rgb_teal(), col, color_reset())
             print_spaces(loc2_pad)
@@ -772,7 +845,6 @@ struct DiagnosticEngine:
             let _r2 as i32 = printf("│\n  ├" to cstr)
             print_dashes(inner_w)
             let _r3 as i32 = printf("┤\n" to cstr)
-
         // 3. Source Snippet Rendering with Gutter Vertical Bars
         if source_code != None to cstr:
             var line_num as u32 = 1 to u32
@@ -784,7 +856,6 @@ struct DiagnosticEngine:
                     var line_end as usize = idx
                     while line_end < len and (deref (source_code to usize + line_end) to ptr[u8]) != 10 to u8:
                         line_end = line_end + 1 to usize
-
                     let line_end_i as i32 = line_end to i32
                     let idx_i as i32 = idx to i32
                     var code_vis_len as i32 = line_end_i - idx_i
@@ -793,13 +864,11 @@ struct DiagnosticEngine:
                         let _r as i32 = printf("  %s│%s  %s%2d%s %s│%s  " to cstr, rgb_surface(), color_reset(), rgb_muted(), line_num, color_reset(), rgb_surface(), color_reset())
                     else:
                         let _r as i32 = printf("  │  %2d │  " to cstr, line_num)
-
                     var p as usize = idx
                     while p < line_end:
                         let ch as u8 = deref ((source_code to usize + p) to ptr[u8])
                         let _r as i32 = printf("%c" to cstr, ch to i32)
                         p = p + 1 to usize
-
                     let code_content_vis as i32 = 6 to i32 + code_vis_len
                     var code_pad as i32 = content_w - code_content_vis
                     if code_pad < 0 to i32:
@@ -809,7 +878,6 @@ struct DiagnosticEngine:
                         let _r2 as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
                     else:
                         let _r2 as i32 = printf("│\n" to cstr)
-
                     // Caret waveform line
                     let col_i as i32 = col to i32
                     let sc_u32 as u32 = (deref diag).primary_span.start_col
@@ -825,25 +893,20 @@ struct DiagnosticEngine:
                             let _r as i32 = printf("  %s│%s     %s│%s  " to cstr, rgb_surface(), color_reset(), rgb_surface(), color_reset())
                         else:
                             let _r as i32 = printf("  │     │  " to cstr)
-
                         var space_i as u32 = 1 to u32
                         while space_i < col:
                             let _r as i32 = printf(" " to cstr)
                             space_i = space_i + 1 to u32
-
                         if color:
                             let _r as i32 = printf("%s%s" to cstr, tag_color, color_bold())
-
                         var caret_i as u32 = 0 to u32
                         while caret_i < span_len:
                             let _r as i32 = printf("▲" to cstr)
                             caret_i = caret_i + 1 to u32
-
                         if color:
                             let _r as i32 = printf(" %s%s%s" to cstr, tag_color, (deref diag).message.data to cstr, color_reset())
                         else:
                             let _r as i32 = printf(" %s" to cstr, (deref diag).message.data to cstr)
-
                         var caret_pad as i32 = content_w - caret_content_vis
                         if caret_pad < 0 to i32:
                             caret_pad = 0 to i32
@@ -857,23 +920,18 @@ struct DiagnosticEngine:
                             let _r as i32 = printf("  %s│%s     %s│%s  " to cstr, rgb_surface(), color_reset(), rgb_surface(), color_reset())
                         else:
                             let _r as i32 = printf("  │     │  " to cstr)
-
                         var space_i as u32 = 1 to u32
                         while space_i < col:
                             let _r as i32 = printf(" " to cstr)
                             space_i = space_i + 1 to u32
-
                         if color:
                             let _r as i32 = printf("%s%s" to cstr, tag_color, color_bold())
-
                         var caret_i as u32 = 0 to u32
                         while caret_i < span_len:
                             let _r as i32 = printf("▲" to cstr)
                             caret_i = caret_i + 1 to u32
-
                         if color:
                             let _r as i32 = printf("%s" to cstr, color_reset())
-
                         let caret_only_vis as i32 = 6 to i32 + col_i - 1 to i32 + span_i
                         var caret_only_pad as i32 = content_w - caret_only_vis
                         if caret_only_pad < 0 to i32:
@@ -883,14 +941,11 @@ struct DiagnosticEngine:
                             let _r_end as i32 = printf("%s│%s\n" to cstr, rgb_surface(), color_reset())
                         else:
                             let _r_end as i32 = printf("│\n" to cstr)
-
                         render_wrapped_gutter_block((deref diag).message.data to cstr, tag_color, color, content_w)
                     break
-                
                 if (deref (source_code to usize + idx) to ptr[u8]) == 10 to u8:
                     line_num = line_num + 1 to u32
                 idx = idx + 1 to usize
-
         // 4. Friendly Explanation Callout Block
         if string_opt_has_value(ref (deref diag).friendly_explanation):
             let expl_str as cstr = string_opt_unwrap(ref (deref diag).friendly_explanation).data to cstr
@@ -900,7 +955,6 @@ struct DiagnosticEngine:
             var sec_dashes as i32 = inner_w - sec_vis
             if sec_dashes < 2 to i32:
                 sec_dashes = 2 to i32
-
             if color:
                 let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_yellow(), title_str, rgb_surface())
                 print_dashes(sec_dashes)
@@ -909,9 +963,7 @@ struct DiagnosticEngine:
                 let _r as i32 = printf("  ├─ %s " to cstr, title_str)
                 print_dashes(sec_dashes)
                 let _r2 as i32 = printf("┤\n" to cstr)
-
             render_wrapped_text_block(expl_str, 2 to i32, rgb_white(), color, content_w)
-
         // 5. Help Hints ("How to fix")
         var h_idx as i64 = 0 to i64
         let h_count as i64 = (deref diag).help_hints.length()
@@ -924,7 +976,6 @@ struct DiagnosticEngine:
             var sec_dashes as i32 = inner_w - sec_vis
             if sec_dashes < 2 to i32:
                 sec_dashes = 2 to i32
-
             if color:
                 let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_teal(), title_str, rgb_surface())
                 print_dashes(sec_dashes)
@@ -933,10 +984,8 @@ struct DiagnosticEngine:
                 let _r as i32 = printf("  ├─ %s " to cstr, title_str)
                 print_dashes(sec_dashes)
                 let _r2 as i32 = printf("┤\n" to cstr)
-
             render_wrapped_text_block(hint_str, 2 to i32, rgb_white(), color, content_w)
             h_idx = h_idx + 1 to i64
-
         // 6. Notes
         var n_idx as i64 = 0 to i64
         let n_count as i64 = (deref diag).notes.length()
@@ -949,7 +998,6 @@ struct DiagnosticEngine:
             var sec_dashes as i32 = inner_w - sec_vis
             if sec_dashes < 2 to i32:
                 sec_dashes = 2 to i32
-
             if color:
                 let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_lavender(), title_str, rgb_surface())
                 print_dashes(sec_dashes)
@@ -958,10 +1006,8 @@ struct DiagnosticEngine:
                 let _r as i32 = printf("  ├─ %s " to cstr, title_str)
                 print_dashes(sec_dashes)
                 let _r2 as i32 = printf("┤\n" to cstr)
-
             render_wrapped_text_block(note_str, 2 to i32, rgb_white(), color, content_w)
             n_idx = n_idx + 1 to i64
-
         // 7. Suggestions ("Suggested Fix")
         var s_idx as i64 = 0 to i64
         let s_count as i64 = (deref diag).suggestions.length()
@@ -973,7 +1019,6 @@ struct DiagnosticEngine:
             var sec_dashes as i32 = inner_w - sec_vis
             if sec_dashes < 2 to i32:
                 sec_dashes = 2 to i32
-
             if color:
                 let _r as i32 = printf("  %s├─ %s%s %s" to cstr, rgb_surface(), rgb_peach(), title_str, rgb_surface())
                 print_dashes(sec_dashes)
@@ -982,7 +1027,6 @@ struct DiagnosticEngine:
                 let _r as i32 = printf("  ├─ %s " to cstr, title_str)
                 print_dashes(sec_dashes)
                 let _r2 as i32 = printf("┤\n" to cstr)
-
             let sug_msg_vis as i32 = visible_len(sug.message.data to cstr)
             let sug_repl_vis as i32 = visible_len(sug.replacement.data to cstr)
             let sug_content_vis as i32 = 2 to i32 + sug_msg_vis + 5 to i32 + sug_repl_vis + 1 to i32
@@ -991,7 +1035,6 @@ struct DiagnosticEngine:
                 var sug_pad as i32 = content_w - sug_content_vis
                 if sug_pad < 0 to i32:
                     sug_pad = 0 to i32
-
                 if color:
                     let _r3 as i32 = printf("  %s│%s    %s %s➜%s  `%s%s%s`" to cstr, rgb_surface(), color_reset(), sug.message.data to cstr, rgb_peach(), color_reset(), rgb_green(), sug.replacement.data to cstr, color_reset())
                     print_spaces(sug_pad)
@@ -1006,7 +1049,6 @@ struct DiagnosticEngine:
                 var repl_line_pad as i32 = content_w - repl_line_vis
                 if repl_line_pad < 0 to i32:
                     repl_line_pad = 0 to i32
-
                 if color:
                     let _r3 as i32 = printf("  %s│%s      %s➜%s  `%s%s%s`" to cstr, rgb_surface(), color_reset(), rgb_peach(), color_reset(), rgb_green(), sug.replacement.data to cstr, color_reset())
                     print_spaces(repl_line_pad)
@@ -1015,9 +1057,7 @@ struct DiagnosticEngine:
                     let _r3 as i32 = printf("  │      ➜  `%s`" to cstr, sug.replacement.data to cstr)
                     print_spaces(repl_line_pad)
                     let _r4 as i32 = printf("│\n" to cstr)
-
             s_idx = s_idx + 1 to i64
-
         // Bottom Rounded Footer Line
         if color:
             let _r as i32 = printf("  %s╰" to cstr, rgb_surface())

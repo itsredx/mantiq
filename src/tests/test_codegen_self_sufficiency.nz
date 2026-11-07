@@ -1,17 +1,20 @@
-// ── Test Codegen Self-Sufficiency ──────────────────────────────────────
+// ── Test Codegen Self-Sufficiency ────────────────────────────────────────────
 // Verifies that pure-Nizam fresh_temp, fresh_label, and native TempTracker
 // generate correct LLVM IR for complex SSA expressions, labels, and closures.
 import std.string
 from std.string import String
 
+
 extern fn printf(format as cstr, ...) as i32
 
-// ── Test 1: Complex Expression SSA Temporary Generation ─────────────────
+
+// ── Test 1: Complex Expression SSA Temporary Generation ──────────────────────
 fn compute_chained_expression(a as i32, b as i32, c as i32, d as i32) -> i32:
-    let step1 as i32 = (a * 7) + (b / 3) - (c % 5)
-    let step2 as i32 = (step1 * 2) + ((a + b) * (c - d))
+    let step1 as i32 = (a * 7) +(b / 3) -(c % 5)
+    let step2 as i32 = (step1 * 2) +((a + b) * (c - d))
     let step3 as i32 = (step2 ^ (a | b)) & 1023
     return step3
+
 
 fn test_chained_expressions() -> bool:
     let result as i32 = compute_chained_expression(10, 9, 8, 3)
@@ -23,7 +26,8 @@ fn test_chained_expressions() -> bool:
         return False
     return True
 
-// ── Test 2: Control Flow Labels & Loops ─────────────────────────────────
+
+// ── Test 2: Control Flow Labels & Loops ──────────────────────────────────────
 fn compute_nested_labels(iterations as i32) -> i32:
     var acc as i32 = 0
     var i as i32 = 0
@@ -36,6 +40,7 @@ fn compute_nested_labels(iterations as i32) -> i32:
             acc = acc - 1
         i = i + 1
     return acc
+
 
 fn test_control_flow_labels() -> bool:
     let res as i32 = compute_nested_labels(10)
@@ -54,7 +59,8 @@ fn test_control_flow_labels() -> bool:
         return False
     return True
 
-// ── Test 3: Temporaries with String Interpolation ────────────────────────
+
+// ── Test 3: Temporaries with String Interpolation ────────────────────────────
 fn test_string_temporaries() -> bool:
     var total_len as i64 = 0
     var k as i32 = 0
@@ -66,11 +72,13 @@ fn test_string_temporaries() -> bool:
         return False
     return True
 
-// ── Test 4: Multi-Branch Merging & Temporaries ───────────────────────────
+
+// ── Test 4: Multi-Branch Merging & Temporaries ───────────────────────────────
 fn compute_branch_temps(x as i32, y as i32) -> i32:
     let t1 as i32 = if x > 5: x * 3 + y else: y * 2 - x
     let t2 as i32 = if y < 10: t1 * 2 + x else: t1 - y
     return t1 + t2
+
 
 fn test_branch_temps() -> bool:
     let r1 as i32 = compute_branch_temps(10, 4)
@@ -81,6 +89,7 @@ fn test_branch_temps() -> bool:
         let _ as i32 = printf("FAILED: test_branch_temps expected 112, got %d\n" to cstr, r1)
         return False
     return True
+
 
 fn main() -> i32:
     let _h as i32 = printf("Running Codegen Self-Sufficiency Verification Suite...\n" to cstr)

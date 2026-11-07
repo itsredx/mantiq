@@ -1,11 +1,13 @@
-// ── Higher-Order Functions ───────────────────────────────────────────
+// ── Higher-Order Functions ───────────────────────────────────────────────────
 fn apply_op(f as fn(i32) as i32, val as i32) as i32:
     return f(val)
+
 
 fn apply_binary(f as fn(i32, i32) as i32, a as i32, b as i32) as i32:
     return f(a, b)
 
-// ── Main Entrypoint ──────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     print("=== Testing WASM Mantiq Closures & Lambdas ===")
 

@@ -1,16 +1,20 @@
 // Probe: Tuple[T] get() lowering — (deref self)._items[idx] inside a
 // method (the failing test_tuple_methods shape). The undefined extern
 // forces a link error so the .ll persists for inspection.
+from std.collections import List, Tuple
 from std.string import String
-from std.collections import Tuple, List
+
 
 extern fn printf(format as cstr, ...) as i32
+
 
 struct Box64:
     var items as List[i64]
 
+
 fn get_it(b as ptr[Box64], idx as i64) as i64:
     return (deref b).items[idx]
+
 
 fn main():
     var t as Tuple[i64] = Tuple[i64]()

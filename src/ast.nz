@@ -1,13 +1,15 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
 from std.collections import List
 from std.option import Option
+from std.string import String
 
-// ── Language Configurations ─────────────────────────────────────────────
+
+// ── Language Configurations ──────────────────────────────────────────────────
 enum LanguageMode:
     Nizam
     Mantiq
+
 
 struct Span:
     public var start_byte as u32
@@ -17,7 +19,8 @@ struct Span:
     public var end_row as u32
     public var end_col as u32
 
-// ── Type Annotations ───────────────────────────────────────────────────
+
+// ── Type Annotations ─────────────────────────────────────────────────────────
 struct TypeAnnotation:
     public var name as String
     public var is_ref as bool
@@ -27,7 +30,8 @@ struct TypeAnnotation:
     public var params as Option[List[TypeAnnotation]]
     public var return_type as ptr[TypeAnnotation]
 
-// ── NodeType Constants ─────────────────────────────────────────────────
+
+// ── NodeType Constants ───────────────────────────────────────────────────────
 // Program = 1
 // ImportDecl = 2
 // FunDecl = 3
@@ -62,7 +66,8 @@ struct TypeAnnotation:
 // UnionDecl = 34
 // FieldDecl = 35
 
-// ── Node ───────────────────────────────────────────────────────────────
+
+// ── Node ─────────────────────────────────────────────────────────────────────
 struct Node:
     public var node_type as i32
     public var span as Span

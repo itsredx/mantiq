@@ -1,9 +1,11 @@
-// ── Statement Temporaries & Memory Lifecycle Tests ─────────────────────
+// ── Statement Temporaries & Memory Lifecycle Tests ───────────────────────────
 
 extern fn printf(format as cstr, ...) as i32
 
+
 fn helper_alloc_string(idx as i32) as String:
     return f"helper_result_{idx * 3}"
+
 
 fn test_bound_interpolated_string() as bool:
     let a as i32 = 42
@@ -14,6 +16,7 @@ fn test_bound_interpolated_string() as bool:
     let _ as i32 = printf("Bound string: %s (len=%lld)\n" to cstr, s.data to cstr, s.len to i64)
     return True
 
+
 fn test_discarded_expression_statements() as bool:
     var i as i32 = 0
     while i < 100:
@@ -21,6 +24,7 @@ fn test_discarded_expression_statements() as bool:
         f"Intermediate loop string #{i} with number {i * 2}"
         i = i + 1
     return True
+
 
 fn test_discarded_fn_call() as bool:
     var j as i32 = 0
@@ -30,6 +34,7 @@ fn test_discarded_fn_call() as bool:
         j = j + 1
     return True
 
+
 fn test_discarded_list_literals() as bool:
     var k as i32 = 0
     while k < 30:
@@ -38,6 +43,7 @@ fn test_discarded_list_literals() as bool:
         k = k + 1
     return True
 
+
 fn test_nested_interpolations() as bool:
     var count as i32 = 0
     while count < 50:
@@ -45,6 +51,7 @@ fn test_nested_interpolations() as bool:
         if msg.len > 0 to usize:
             count = count + 1
     return count == 50
+
 
 fn main() as i32:
     let _1 as i32 = printf("Testing statement temporaries...\n" to cstr)

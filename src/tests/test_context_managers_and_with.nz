@@ -1,11 +1,13 @@
-// ── Context Managers and With Statements Test ─────────────────────────
+// ── Context Managers and With Statements Test ────────────────────────────────
 
 static var g_enter_order = 0 to i32
 static var g_exit_order = 0 to i32
 static var g_step = 0 to i32
 
+
 struct SimpleResource:
     var fd as i32
+
 
 struct ManagedResource:
     var id as i32
@@ -18,6 +20,7 @@ struct ManagedResource:
         g_step += 1 to i32
         g_exit_order = g_step
 
+
 struct NestResource:
     var level as i32
 
@@ -27,6 +30,7 @@ struct NestResource:
     fn __exit__(self as ptr[NestResource]):
         g_step += 1 to i32
 
+
 fn main() as i32:
     // 1. Basic struct context manager with 'as' binding
     let r1 = SimpleResource(fd = 42 to i32)
@@ -35,7 +39,6 @@ fn main() as i32:
         read_fd = f.fd
     if read_fd != 42 to i32:
         return 1 to i32
-
     // 2. Protocol lifecycle verification (__enter__ -> body -> __exit__)
     g_step = 0 to i32
     g_enter_order = 0 to i32
@@ -51,12 +54,10 @@ fn main() as i32:
         if m.id != 100 to i32:
             return 4 to i32
         body_executed = True
-
     if not body_executed:
         return 5 to i32
     if g_exit_order != 2 to i32:
         return 6 to i32
-
     // 3. Anonymous context manager (without 'as' clause)
     let anon_mgr = ManagedResource(id = 200 to i32)
     g_step = 0 to i32
@@ -67,7 +68,6 @@ fn main() as i32:
             return 7 to i32
     if g_exit_order != 2 to i32:
         return 8 to i32
-
     // 4. Nested context managers
     g_step = 0 to i32
     let outer = NestResource(level = 1 to i32)
@@ -84,7 +84,6 @@ fn main() as i32:
             return 12 to i32
     if g_step != 4 to i32:
         return 13 to i32
-
     // 5. Verification of user pattern: with _f + 'is Any' intrinsic check
     let _f = SimpleResource(fd = 7 to i32)
     with _f:
@@ -92,5 +91,4 @@ fn main() as i32:
     let _is as bool = _f is Any
     if not _is:
         return 14 to i32
-
     return 0 to i32

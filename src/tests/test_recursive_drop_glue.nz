@@ -1,17 +1,20 @@
-// ── Imports ─────────────────────────────────────────────────────────────
-from std.string import String, StringBuilder
+// ── Imports ──────────────────────────────────────────────────────────────────
 from std.collections import List
+from std.string import String, StringBuilder
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn puts(s as cstr) as i32
 
-// ── Global Counters for Drop Tracking ────────────────────────────────────
+
+// ── Global Counters for Drop Tracking ────────────────────────────────────────
 var g_inner_del_count as i32 = 0 to i32
 var g_outer_del_count as i32 = 0 to i32
 var g_custom_del_count as i32 = 0 to i32
 
-// ── Struct Definitions ───────────────────────────────────────────────────
+
+// ── Struct Definitions ───────────────────────────────────────────────────────
 struct Inner:
     public var tag as String
     public var value as i64
@@ -19,6 +22,7 @@ struct Inner:
     public fn __del__(self as ptr[Inner]):
         g_inner_del_count = g_inner_del_count + 1 to i32
         let _ = printf("  [Inner.__del__] tag=%s val=%ld\n" to cstr, (deref self).tag.data, (deref self).value)
+
 
 struct Outer:
     public var title as String
@@ -28,6 +32,7 @@ struct Outer:
         g_outer_del_count = g_outer_del_count + 1 to i32
         let _ = printf("  [Outer.__del__] title=%s\n" to cstr, (deref self).title.data)
 
+
 struct Resource:
     public var id as i32
 
@@ -35,7 +40,8 @@ struct Resource:
         g_custom_del_count = g_custom_del_count + 1 to i32
         let _ = printf("  [Resource.__del__] id=%d\n" to cstr, (deref self).id)
 
-// ── Test Cases ───────────────────────────────────────────────────────────
+
+// ── Test Cases ───────────────────────────────────────────────────────────────
 
 fn test_nested_struct_destruction():
     let _ = puts("--- test_nested_struct_destruction ---" to cstr)
@@ -51,6 +57,7 @@ fn test_nested_struct_destruction():
     // At scope exit, out_obj should be dropped via __nizam_drop_Outer:
     // Outer.__del__ called first, then inner dropped (Inner.__del__ then inner.tag), then out_obj.title dropped
 
+
 fn test_list_string_recursive_drop():
     let _ = puts("--- test_list_string_recursive_drop ---" to cstr)
     var list as List[String] = List[String]()
@@ -60,6 +67,7 @@ fn test_list_string_recursive_drop():
     let _ = printf("  List length: %ld\n" to cstr, list.length())
     // At scope exit, list drops each String via __nizam_drop_List(list, 24, @__nizam_drop_String)
 
+
 fn test_custom_destructor_call():
     let _ = puts("--- test_custom_destructor_call ---" to cstr)
     var r1 as Resource
@@ -67,11 +75,13 @@ fn test_custom_destructor_call():
     var r2 as Resource
     r2.id = 202 to i32
 
+
 fn make_inner(tag_str as cstr, val as i64) as Inner:
     var res as Inner
     res.tag = String.make(tag_str)
     res.value = val
     return res
+
 
 fn test_list_struct_recursive_drop():
     let _ = puts("--- test_list_struct_recursive_drop ---" to cstr)
@@ -79,6 +89,7 @@ fn test_list_struct_recursive_drop():
     list.append(make_inner("item_1" to cstr, 100 to i64))
     list.append(make_inner("item_2" to cstr, 200 to i64))
     let _ = printf("  List[Inner] length: %ld\n" to cstr, list.length())
+
 
 fn main() as i32:
     let _ = puts("=== Starting Recursive Drop Glue & Composite Destruction Tests ===" to cstr)
@@ -90,16 +101,13 @@ fn main() as i32:
     if g_inner_del_count != 1 to i32:
         let _ = printf("ERROR: g_inner_del_count expected 1, got %d\n" to cstr, g_inner_del_count)
         return 2 to i32
-
     test_list_string_recursive_drop()
 
     test_custom_destructor_call()
     if g_custom_del_count != 2 to i32:
         let _ = printf("ERROR: g_custom_del_count expected 2, got %d\n" to cstr, g_custom_del_count)
         return 3 to i32
-
     test_list_struct_recursive_drop()
 
     let _ = puts("=== All Recursive Drop Glue Tests Passed Successfully! ===" to cstr)
     return 0 to i32
-

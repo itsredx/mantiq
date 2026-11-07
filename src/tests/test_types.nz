@@ -1,19 +1,22 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
-from std.collections import List, Dict
-from std.option import Option
+from std.collections import Dict, List
 from std.mem import make
-from symbols import Span, TypeAnnotation, Node, Symbol, SymbolKind, Scope
-from sema import Sema
-from types import Type, TypeKind, make_type, make_ptr_type, make_struct_type, make_enum_type, make_union_type, is_copy_type, is_move_type
-from typecheck import TypeChecker
+from std.option import Option
+from std.string import String
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+from sema import Sema
+from symbols import Node, Scope, Span, Symbol, SymbolKind, TypeAnnotation
+from typecheck import TypeChecker
+from types import Type, TypeKind, is_copy_type, is_move_type, make_enum_type, make_ptr_type, make_struct_type, make_type, make_union_type
+
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn exit(code as i32)
 
-// ── Helper Annotation Creator ────────────────────────────────────────────
+
+// ── Helper Annotation Creator ────────────────────────────────────────────────
 fn make_annot(name_str as cstr) as ptr[TypeAnnotation]:
     let annot as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
     (deref annot).name = String.make(name_str)
@@ -23,14 +26,15 @@ fn make_annot(name_str as cstr) as ptr[TypeAnnotation]:
     (deref annot).generics = None to Option[List[TypeAnnotation]]
     return annot
 
-// ── Main Unit Test Runner ────────────────────────────────────────────────
+
+// ── Main Unit Test Runner ────────────────────────────────────────────────────
 fn main() -> i32:
     let _h as i32 = printf("=== Running test_types.nz (Type System Parity Tests) ===\n\n" to cstr)
-    
+
     let tc as ptr[TypeChecker] = make[TypeChecker](1 to usize) to ptr[TypeChecker]
     tc.init_tc(None to ptr[Sema])
 
-    // ── Test 1: Signed Integer Types ──────────────────────────────────────
+    // ── Test 1: Signed Integer Types ─────────────────────────────────────────────
     let t_i8 as ptr[Type] = tc.resolve_type_annotation(make_annot("i8" to cstr))
     let t_i16 as ptr[Type] = tc.resolve_type_annotation(make_annot("i16" to cstr))
     let t_i32 as ptr[Type] = tc.resolve_type_annotation(make_annot("i32" to cstr))
@@ -43,8 +47,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 1 (Signed Integers): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 2: Unsigned Integer Types ────────────────────────────────────
+    // ── Test 2: Unsigned Integer Types ───────────────────────────────────────────
     let t_u8 as ptr[Type] = tc.resolve_type_annotation(make_annot("u8" to cstr))
     let t_byte as ptr[Type] = tc.resolve_type_annotation(make_annot("byte" to cstr))
     let t_u16 as ptr[Type] = tc.resolve_type_annotation(make_annot("u16" to cstr))
@@ -58,8 +61,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 2 (Unsigned Integers): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 3: Floating-Point Types ──────────────────────────────────────
+    // ── Test 3: Floating-Point Types ─────────────────────────────────────────────
     let t_f16 as ptr[Type] = tc.resolve_type_annotation(make_annot("f16" to cstr))
     let t_bf16 as ptr[Type] = tc.resolve_type_annotation(make_annot("bf16" to cstr))
     let t_f32 as ptr[Type] = tc.resolve_type_annotation(make_annot("f32" to cstr))
@@ -71,8 +73,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 3 (Floats): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 4: String & Character Types ──────────────────────────────────
+    // ── Test 4: String & Character Types ─────────────────────────────────────────
     let t_bool as ptr[Type] = tc.resolve_type_annotation(make_annot("bool" to cstr))
     let t_char as ptr[Type] = tc.resolve_type_annotation(make_annot("char" to cstr))
     let t_str as ptr[Type] = tc.resolve_type_annotation(make_annot("String" to cstr))
@@ -84,8 +85,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 4 (Strings and Chars): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 5: Special & Quantum Types ───────────────────────────────────
+    // ── Test 5: Special & Quantum Types ──────────────────────────────────────────
     let t_void as ptr[Type] = tc.resolve_type_annotation(make_annot("void" to cstr))
     let t_any as ptr[Type] = tc.resolve_type_annotation(make_annot("Any" to cstr))
     let t_qbit as ptr[Type] = tc.resolve_type_annotation(make_annot("qbit" to cstr))
@@ -96,8 +96,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 5 (Special and Quantum Types): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 6: Copy/Move Classification ──────────────────────────────────
+    // ── Test 6: Copy/Move Classification ─────────────────────────────────────────
     let is_i32_copy as bool = is_copy_type(t_i32)
     let is_f64_copy as bool = is_copy_type(t_f64)
     let is_bool_copy as bool = is_copy_type(t_bool)
@@ -114,8 +113,7 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 6 (Copy/Move Classification): FAILED!\n" to cstr)
         return 1 to i32
-
-    // ── Test 7: Pointer & Composite Constructors ──────────────────────────
+    // ── Test 7: Pointer & Composite Constructors ─────────────────────────────────
     let t_ptr as ptr[Type] = make_ptr_type(t_i32)
     let t_struct as ptr[Type] = make_struct_type(String.make("Point" to cstr))
     let t_enum as ptr[Type] = make_enum_type(String.make("Color" to cstr))
@@ -129,6 +127,5 @@ fn main() -> i32:
     else:
         let _r as i32 = printf("Test 7 (Pointer and Composite Constructors): FAILED!\n" to cstr)
         return 1 to i32
-
     let _done as i32 = printf("\n[PASS] All test_types.nz tests passed successfully!\n" to cstr)
     return 0 to i32

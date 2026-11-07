@@ -1,14 +1,16 @@
-// ── Multiline Delimiters & Formatting Test Suite ──────────────────────────
+// ── Multiline Delimiters & Formatting Test Suite ─────────────────────────────
 import std.collections
+from std.collections import Dict, List
 import std.string
 from std.string import String, StringBuilder
-from std.collections import List, Dict
 
-// ── C FFI Declarations ───────────────────────────────────────────────────
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
 extern fn printf(format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
-// ── Multiline Function Declaration ───────────────────────────────────────
+
+// ── Multiline Function Declaration ───────────────────────────────────────────
 fn compute_sum(
     a as i32,
     b as i32,
@@ -18,7 +20,8 @@ fn compute_sum(
         b +
         c
 
-// ── Test 1: Multiline Calls and Expressions ──────────────────────────────
+
+// ── Test 1: Multiline Calls and Expressions ──────────────────────────────────
 fn test_multiline_calls() as bool:
     let result as i32 = compute_sum(
         10,
@@ -31,7 +34,8 @@ fn test_multiline_calls() as bool:
     printf("  [PASS] Multiline function declaration and call expressions\n" to cstr)
     return True
 
-// ── Test 2: Multiline Collections & Generics ─────────────────────────────
+
+// ── Test 2: Multiline Collections & Generics ─────────────────────────────────
 fn test_multiline_collections() as bool:
     var items as List[
         i32
@@ -47,7 +51,6 @@ fn test_multiline_collections() as bool:
     if second != 200:
         printf("  [FAIL] Multiline index expected 200, got %d\n" to cstr, second)
         return False
-
     var map as Dict[
         i32,
         i32,
@@ -59,33 +62,30 @@ fn test_multiline_collections() as bool:
     if map[10] != 100 or map[20] != 200:
         printf("  [FAIL] Multiline dict expected entries 100 and 200\n" to cstr)
         return False
-
     printf("  [PASS] Multiline lists, dicts, indexing, and generic parameters\n" to cstr)
     return True
 
-// ── Test 3: Multiline Binary & Logical Operators ─────────────────────────
+
+// ── Test 3: Multiline Binary & Logical Operators ─────────────────────────────
 fn test_multiline_chaining() as bool:
     let expr_val as i32 = 100 +
         200 -
         50 *
         2
-
     if expr_val != 200:
         printf("  [FAIL] Multiline binary operator expected 200, got %d\n" to cstr, expr_val)
         return False
-
     let cmp_val as bool = (100 > 50) and
         (200 > 100) and
         (50 == 50)
-
     if cmp_val == False:
         printf("  [FAIL] Multiline boolean operator expected True\n" to cstr)
         return False
-
     printf("  [PASS] Multiline binary and logical expressions\n" to cstr)
     return True
 
-// ── Test 4: Multiline String Interpolation ───────────────────────────────
+
+// ── Test 4: Multiline String Interpolation ───────────────────────────────────
 fn test_multiline_fstring() as bool:
     let num as i32 = 42
     let s as String = f"The value is {
@@ -95,16 +95,17 @@ fn test_multiline_fstring() as bool:
     if strcmp(s.data to cstr, "The value is 42 today" to cstr) != 0:
         printf("  [FAIL] Multiline f-string expected 'The value is 42 today', got '%s'\n" to cstr, s.data to cstr)
         return False
-
     printf("  [PASS] Multiline string interpolation\n" to cstr)
     return True
 
-// ── Test 5: CFG Drop Elaboration on Divergent Branch ─────────────────────
+
+// ── Test 5: CFG Drop Elaboration on Divergent Branch ─────────────────────────
 fn early_exit_helper(flag as bool) as i32:
     var s as String = String.make("cfg_test_resource" to cstr)
     if flag:
         return 1
     return 2
+
 
 fn test_cfg_drop_elaboration() as bool:
     let r1 as i32 = early_exit_helper(True)
@@ -115,7 +116,8 @@ fn test_cfg_drop_elaboration() as bool:
     printf("  [PASS] CFG Drop Elaboration on divergent return branches\n" to cstr)
     return True
 
-// ── Main Entrypoint ──────────────────────────────────────────────────────
+
+// ── Main Entrypoint ──────────────────────────────────────────────────────────
 fn main() as i32:
     printf("=== Running Multiline Delimiters & Formatting Test Suite ===\n" to cstr)
     var passed as bool = True

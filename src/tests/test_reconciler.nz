@@ -2,19 +2,24 @@
 // Nizam Reconciler — PyThra-style Virtual DOM Diffing
 // =============================================================================
 
+
 import std.collections
-from std.string import String
-from std.collections import List, Dict
+from std.collections import Dict, List
 from std.mem import make
+from std.string import String
+
 
 extern fn printf(format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
 
+
 fn str_eq(a as String, b as String) as bool:
     return strcmp(a.data to cstr, b.data to cstr) == 0
 
+
 fn str_ne(a as String, b as String) as bool:
     return strcmp(a.data to cstr, b.data to cstr) != 0
+
 
 struct RenderedNode:
     public var html_id as String
@@ -25,14 +30,17 @@ struct RenderedNode:
     public var parent_html_id as String
     public var parent_key as String
 
+
 struct Patch:
     public var action as String
     public var html_id as String
     public var data as Dict[String, String]
 
+
 struct DiffResult:
     public var patches as List[Patch]
     public var new_rendered_map as Dict[String, RenderedNode]
+
 
 struct Reconciler:
     public var id_counter as i64
@@ -47,7 +55,11 @@ struct Reconciler:
         (deref self).id_counter = (deref self).id_counter + 1
         return String.make(buf to cstr)
 
-    public fn diff_props(self as ptr[Reconciler], old_props as Dict[String, String], new_props as Dict[String, String]) as Dict[String, String]:
+    public fn diff_props(
+        self as ptr[Reconciler],
+        old_props as Dict[String, String],
+        new_props as Dict[String, String],
+    ) as Dict[String, String]:
         var changes as Dict[String, String] = Dict[String, String]()
         let old_keys as List[String] = old_props.keys()
         var i as i64 = 0
@@ -85,7 +97,13 @@ struct Reconciler:
         let _ as i32 = sprintf(buf, "<div id=\"%s\" data-type=\"%s\"></div>" to cstr, wid.data to cstr, wtype.data to cstr)
         return String.make(buf to cstr)
 
-    public fn find_next_stable_html_id(self as ptr[Reconciler], start_idx as i64, new_children_keys as List[String], old_key_to_index as Dict[String, i64], rendered_map as Dict[String, RenderedNode]) as String:
+    public fn find_next_stable_html_id(
+        self as ptr[Reconciler],
+        start_idx as i64,
+        new_children_keys as List[String],
+        old_key_to_index as Dict[String, i64],
+        rendered_map as Dict[String, RenderedNode],
+    ) as String:
         var si as i64 = start_idx
         let sc as i64 = new_children_keys.length()
         while si < sc:
@@ -96,7 +114,14 @@ struct Reconciler:
             si = si + 1
         return String.make("" to cstr)
 
-    public fn insert_node_recursive(self as ptr[Reconciler], widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+    public fn insert_node_recursive(
+        self as ptr[Reconciler],
+        widget as ptr[RenderedNode],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+    ) as void:
         if widget == None to ptr[RenderedNode]:
             return
         let new_html as String = self.generate_html_stub(widget)
@@ -115,7 +140,15 @@ struct Reconciler:
             child_parent = parent_key
         self.diff_children_recursive(List[String](), (deref widget).children_keys, child_parent, new_id, result, previous_map)
 
-    public fn diff_children_recursive(self as ptr[Reconciler], old_children_keys as List[String], new_children_keys as List[String], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+    public fn diff_children_recursive(
+        self as ptr[Reconciler],
+        old_children_keys as List[String],
+        new_children_keys as List[String],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+    ) as void:
         if old_children_keys.length() == 0 and new_children_keys.length() == 0:
             return
         var old_key_to_index as Dict[String, i64] = Dict[String, i64]()
@@ -178,7 +211,15 @@ struct Reconciler:
                 self.insert_node_recursive(new_stub, parent_html_id, parent_key, result, previous_map)
             ni = ni + 1
 
-    public fn diff_node_recursive(self as ptr[Reconciler], old_node_key as String, new_widget as ptr[RenderedNode], parent_html_id as String, parent_key as String, result as ptr[DiffResult], previous_map as Dict[String, RenderedNode]) as void:
+    public fn diff_node_recursive(
+        self as ptr[Reconciler],
+        old_node_key as String,
+        new_widget as ptr[RenderedNode],
+        parent_html_id as String,
+        parent_key as String,
+        result as ptr[DiffResult],
+        previous_map as Dict[String, RenderedNode],
+    ) as void:
         if new_widget == None to ptr[RenderedNode]:
             return
         let new_key as String = (deref new_widget).html_id
@@ -214,6 +255,7 @@ struct Reconciler:
             child_parent = parent_key
         self.diff_children_recursive(old_data.children_keys, (deref new_widget).children_keys, child_parent, (deref new_widget).html_id, result, previous_map)
 
+
 fn main() as i32:
     printf("=== Nizam Reconciler Tests ===\n" to cstr)
     var reconciler as ptr[Reconciler] = make[Reconciler](1 to usize) to ptr[Reconciler]
@@ -236,7 +278,6 @@ fn main() as i32:
             printf("Test 1 (Props Diff): FAILED! wrong value\n" to cstr)
     else:
         printf("Test 1 (Props Diff): FAILED! expected 1, got %ld\n" to cstr, changes1.length())
-
     // Test 2: Props diff — no changes
     printf("\n--- Test 2: Props Diff (no changes) ---\n" to cstr)
     let changes2 as Dict[String, String] = (deref reconciler).diff_props(new_p, new_p)
@@ -244,7 +285,6 @@ fn main() as i32:
         printf("Test 2 (No Changes): PASSED!\n" to cstr)
     else:
         printf("Test 2 (No Changes): FAILED! expected 0, got %ld\n" to cstr, changes2.length())
-
     // Test 3: Props diff — new key added
     printf("\n--- Test 3: Props Diff (new key added) ---\n" to cstr)
     var new_p3 as Dict[String, String] = Dict[String, String]()
@@ -256,7 +296,6 @@ fn main() as i32:
         printf("Test 3 (Key Added): PASSED!\n" to cstr)
     else:
         printf("Test 3 (Key Added): FAILED! expected 2, got %ld\n" to cstr, changes3.length())
-
     // Test 4: Props diff — key removed
     printf("\n--- Test 4: Props Diff (key removed) ---\n" to cstr)
     var new_p4 as Dict[String, String] = Dict[String, String]()
@@ -266,7 +305,6 @@ fn main() as i32:
         printf("Test 4 (Key Removed): PASSED!\n" to cstr)
     else:
         printf("Test 4 (Key Removed): FAILED! expected 1, got %ld\n" to cstr, changes4.length())
-
     // Test 5: Node diff — type mismatch triggers REPLACE
     printf("\n--- Test 5: Node Diff (type mismatch -> REPLACE) ---\n" to cstr)
     var r1 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
@@ -291,7 +329,6 @@ fn main() as i32:
             printf("Test 5 (Node Diff REPLACE): FAILED! wrong patch\n" to cstr)
     else:
         printf("Test 5 (Node Diff REPLACE): FAILED! expected 1, got %ld\n" to cstr, (deref r1).patches.length())
-
     // Test 6: Node diff — same type triggers UPDATE
     printf("\n--- Test 6: Node Diff (same type -> UPDATE) ---\n" to cstr)
     var r2 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
@@ -316,7 +353,6 @@ fn main() as i32:
             printf("Test 6 (Node Diff UPDATE): FAILED! action=%s\n" to cstr, p2.action.data to cstr)
     else:
         printf("Test 6 (Node Diff UPDATE): FAILED! expected 1, got %ld\n" to cstr, (deref r2).patches.length())
-
     // Test 7: Children diff — removal
     printf("\n--- Test 7: Children Diff (removal) ---\n" to cstr)
     var r3 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
@@ -335,7 +371,6 @@ fn main() as i32:
             printf("Test 7 (Children Removal): FAILED! wrong patch\n" to cstr)
     else:
         printf("Test 7 (Children Removal): FAILED! expected 1, got %ld\n" to cstr, (deref r3).patches.length())
-
     // Test 8: Children diff — insertion
     printf("\n--- Test 8: Children Diff (insertion) ---\n" to cstr)
     var r4 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
@@ -353,7 +388,6 @@ fn main() as i32:
             printf("Test 8 (Children Insertion): FAILED! action=%s\n" to cstr, p4.action.data to cstr)
     else:
         printf("Test 8 (Children Insertion): FAILED! expected 1, got %ld\n" to cstr, (deref r4).patches.length())
-
     // Test 9: Full pipeline — parent with new child
     printf("\n--- Test 9: Full Pipeline ---\n" to cstr)
     var r5 as ptr[DiffResult] = make[DiffResult](1 to usize) to ptr[DiffResult]
@@ -378,6 +412,5 @@ fn main() as i32:
             printf("Test 9 (Full Pipeline): FAILED! action=%s\n" to cstr, p5.action.data to cstr)
     else:
         printf("Test 9 (Full Pipeline): FAILED! expected 1, got %ld\n" to cstr, (deref r5).patches.length())
-
     printf("\n=== All Reconciler Tests Complete ===\n" to cstr)
     return 0

@@ -3,17 +3,21 @@ import[c] "stdio.h"
 import[c] "stdlib.h"
 import[c] "string.h"
 
+
 extern fn printf(fmt as cstr, ...) as i32
 extern fn puts(s as cstr) as i32
+
 
 struct Point:
     var x as i32
     var y as i32
 
+
 struct MixedRecord:
     var id as i32
     var val as i64
     var active as bool
+
 
 fn test_primitive_arithmetic() as bool:
     let a as i32 = 1000
@@ -26,6 +30,7 @@ fn test_primitive_arithmetic() as bool:
         return True
     return False
 
+
 fn test_struct_layout() as bool:
     let p as Point = Point(x = 10 to i32, y = 20 to i32)
     let m as MixedRecord = MixedRecord(id = 42 to i32, val = 10000000000 to i64, active = True)
@@ -33,11 +38,13 @@ fn test_struct_layout() as bool:
         return True
     return False
 
+
 fn test_string_operations() as bool:
     let greeting as String = String.make("Hello WebAssembly!" to cstr)
     if greeting.len == 18 to usize:
         return True
     return False
+
 
 fn main() as i32:
     puts("=== Testing WASM ABI & Data Layout ===" to cstr)

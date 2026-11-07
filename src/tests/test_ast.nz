@@ -1,8 +1,10 @@
 import std.collections
-from std.string import String
 from std.collections import List
 from std.mem import make
-from symbols import Node, NodeType, Span, make_node, set_node_name, set_node_left, set_node_right, set_node_val, node_kind, node_name, node_left, node_right
+from std.string import String
+
+from symbols import Node, NodeType, Span, make_node, node_kind, node_left, node_name, node_right, set_node_left, set_node_name, set_node_right, set_node_val
+
 
 fn main():
     let span as Span = Span(start_byte = 0 to u32, end_byte = 10 to u32, start_row = 1 to u32, start_col = 0 to u32, end_row = 1 to u32, end_col = 10 to u32)

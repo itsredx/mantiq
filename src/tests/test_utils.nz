@@ -1,11 +1,13 @@
-// ── Imports ─────────────────────────────────────────────────────────────
+// ── Imports ──────────────────────────────────────────────────────────────────
 import std.collections
-from std.string import String
 from std.collections import List
-from tree_sitter import ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_string_ptr, TSNode
-from string_utils import cstr_to_string, free_cstr
+from std.string import String
 
-// ── Main Entry ─────────────────────────────────────────────────────────
+from string_utils import cstr_to_string, free_cstr
+from tree_sitter import TSNode, tree_sitter_mantiq, ts_node_string_ptr, ts_parser_delete, ts_parser_new, ts_parser_parse_string, ts_parser_set_language, ts_tree_root_node_ptr
+
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     // Convert a plain C-string to Nizam String using our helper
     let raw_c as cstr = "Hello FFI" to cstr

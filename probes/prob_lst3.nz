@@ -4,18 +4,22 @@
 // to detect handle-offset corruption (fields 8-11 class).
 from std.string import String
 
+
 extern fn printf(format as cstr, ...) as i32
+
 
 struct RecX:
     var a as String
     var b as String
     var c as String
 
+
 struct Outer:
     var lst as List[RecX]
     var d1 as i64
     var d2 as i64
     var d3 as i64
+
 
 fn read_all(pl as ptr[List[RecX]], pass as i64):
     let cnt as i64 = (deref pl).length()
@@ -24,6 +28,7 @@ fn read_all(pl as ptr[List[RecX]], pass as i64):
         let r as RecX = (deref pl)[i]
         let _d as i32 = printf("pass=%lld i=%lld a=%s(0x%llx)\n" to cstr, pass, i, r.a.data to cstr, r.a.data to usize to i64)
         i = i + 1 to i64
+
 
 fn main():
     let o as Outer = Outer(lst = List[RecX](), d1 = 111, d2 = 222, d3 = 333)

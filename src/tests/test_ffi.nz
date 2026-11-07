@@ -1,30 +1,29 @@
-// ── Imports ─────────────────────────────────────────────────────────────
-from std.string import String
+// ── Imports ──────────────────────────────────────────────────────────────────
 from std.collections import List
-from tree_sitter import ts_parser_new, ts_parser_delete, tree_sitter_mantiq, ts_parser_set_language, ts_parser_parse_string, ts_tree_root_node_ptr, ts_node_type_ptr, TSNode
+from std.string import String
 
-// ── Main Entry ─────────────────────────────────────────────────────────
+from tree_sitter import TSNode, tree_sitter_mantiq, ts_node_type_ptr, ts_parser_delete, ts_parser_new, ts_parser_parse_string, ts_parser_set_language, ts_tree_root_node_ptr
+
+
+// ── Main Entry ───────────────────────────────────────────────────────────────
 fn main():
     // Initialize parser
     let parser as ptr = ts_parser_new()
     if parser == None:
         print("Failed to create tree-sitter parser")
         return
-
     // Get language grammar
     let language as ptr = tree_sitter_mantiq()
     if language == None:
         print("Failed to get mantiq language definition")
         ts_parser_delete(parser)
         return
-
     // Set language grammar on parser
     let ok as bool = ts_parser_set_language(parser, language)
     if not ok:
         print("Language version mismatch")
         ts_parser_delete(parser)
         return
-
     // Parse a small program code snippet
     let source as String = String.make("let x = 42" to cstr)
     // Convert String data to ptr[u8] for the parser FFI
@@ -33,14 +32,13 @@ fn main():
         print("Parsing failed")
         ts_parser_delete(parser)
         return
-
     // Get root node (via pointer parameter)
     var root as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
     ts_tree_root_node_ptr(tree, ref root)
 
     // Get type of root node
     let root_type as cstr = ts_node_type_ptr(ref root)
-    
+
     print("Parsed root node successfully!")
     print(root_type)
 
