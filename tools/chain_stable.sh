@@ -7,8 +7,8 @@
 #   runtime.c defs are weak as a collision safety net. Output: fixed7 built
 #   in one shot, zero runtime code inside.
 #   Gate: nm-sweep fixed7 for undefined mantiq symbols, then the FULL
-#   50-test suite with a FRESH journal (rt_nolink.state).
-#   Promote: only if 50/50.
+#   suite (TEST_FILES array) with a FRESH journal (rt_nolink.state).
+#   Promote: only if the full suite passes.
 set -u
 ROOT=/home/red-x/code/nizam-lang/mantiq
 TOOLS=/home/red-x/.local/share/nizam-tools
@@ -104,6 +104,7 @@ TEST_FILES=(
     "src/tests/test_multiline_delimiters.nz" "src/tests/test_dict_methods.nz"
     "src/tests/test_set_methods.nz" "src/tests/test_tuple_methods.nz"
     "src/tests/test_bytes_methods.nz" "src/tests/test_allocator_suite.nz"
+    "src/tests/test_method_chains.nz"
 )
 
 PASSED=0; FAILED=0
@@ -141,11 +142,11 @@ done
 log "suite tally: $PASSED passed, $FAILED failed (of ${#TEST_FILES[@]})"
 grep -a "\[FAILED\]" "$BIGLOG" | head -10 | while read -r l; do log "$l"; done
 
-# ── promote if 50/50 ──
-if [ "$FAILED" -eq 0 ] && [ "$PASSED" -eq 50 ]; then
+# ── promote if the full suite passes ──
+if [ "$FAILED" -eq 0 ] && [ "$PASSED" -eq "${#TEST_FILES[@]}" ]; then
     cp "$TOOLS/nizam-new" "$TOOLS/nizam-new-prev.bak" 2>/dev/null
     cp "$BIN" "$TOOLS/nizam-new" && log "PROMOTED nizam-new-fixed7 -> nizam-new (prev saved as nizam-new-prev.bak)"
 else
-    log "PROMOTION SKIPPED ($PASSED/50)"
+    log "PROMOTION SKIPPED ($PASSED/${#TEST_FILES[@]})"
 fi
-log "=== RT-UNLINK CHAIN COMPLETE ($PASSED/50) ==="
+log "=== RT-UNLINK CHAIN COMPLETE ($PASSED/${#TEST_FILES[@]}) ==="

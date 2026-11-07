@@ -1,0 +1,67 @@
+// ── Method-Chain Conformance (spec §7.2 + leading-dot grammar) ───────────────
+// Exercises the DOT_NEWLINE external token: hand-wrapped fluent chains
+// (break-before-dot, indent+4) must parse, typecheck and run identically
+// to their inline equivalents.
+
+
+import std.collections
+from std.collections import Set
+
+
+extern fn printf(format as cstr, ...) as i32
+extern fn exit(code as i32)
+
+
+fn assert_true(cond as bool, msg as cstr):
+    if not cond:
+        let _f as i32 = printf("ASSERTION FAILED: %s\n" to cstr, msg)
+        exit(1)
+
+
+// wrapped chain (§7.2 shape) — the continuation dots open their lines
+fn chain_wrapped(base as Set[i64], other as Set[i64]) as i64:
+    let joined = base
+        .union(other)
+        .difference(other)
+        .copy()
+    return joined.length()
+
+
+// inline equivalent of the same chain
+fn chain_inline(base as Set[i64], other as Set[i64]) as i64:
+    let joined = base.union(other).difference(other).copy()
+    return joined.length()
+
+
+// return-head wrapped chain
+fn chain_from_return(base as Set[i64], other as Set[i64]) as i64:
+    return base
+        .union(other)
+        .copy()
+        .length()
+
+
+fn main() as i32:
+    print("[TEST SUITE] Method-Chain Conformance")
+
+    let a as Set[i64] = Set[i64]()
+    a.init()
+    a.add(10 to i64)
+    a.add(20 to i64)
+    let b as Set[i64] = Set[i64]()
+    b.init()
+    b.add(20 to i64)
+
+    // a.union(b).difference(b) = {10}; length 1
+    let w as i64 = chain_wrapped(a, b)
+    let i as i64 = chain_inline(a, b)
+    assert_true(w == 1 to i64, "wrapped chain result")
+    assert_true(w == i, "wrapped == inline chain result")
+
+    // a.union(b) = {10, 20}; length 2
+    let r as i64 = chain_from_return(a, b)
+    assert_true(r == 2 to i64, "return-head wrapped chain result")
+    assert_true(r == a.union(b).length(), "return-head == inline result")
+
+    print("test_method_chains: OK")
+    return 0
