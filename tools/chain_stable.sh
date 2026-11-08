@@ -105,6 +105,7 @@ TEST_FILES=(
     "src/tests/test_set_methods.nz" "src/tests/test_tuple_methods.nz"
     "src/tests/test_bytes_methods.nz" "src/tests/test_allocator_suite.nz"
     "src/tests/test_method_chains.nz"
+    "src/tests/test_std_sys.nz"
 )
 
 PASSED=0; FAILED=0

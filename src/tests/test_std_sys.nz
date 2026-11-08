@@ -1,0 +1,148 @@
+// ── std.sys Slice-1 Conformance Test ─────────────────────────────────────────
+// Exercises: host introspection (os/arch/hostname), word size, topology,
+// env get/set/unset with the unset-vs-empty invariant, argv, process ids,
+// monotonic wall clocks, sleeping and RSS telemetry.
+// NOTE: exit()/abort() and TTY state are intentionally not asserted because
+// the gate harness captures stdio and cannot abort the runner process.
+
+
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+
+from std.collections import List
+import std.sys
+from std.sys import argv0
+from std.sys import cpu_count
+from std.sys import getenv_or_ref
+from std.sys import gid
+from std.sys import has_env_ref
+from std.sys import hostname
+from std.sys import is_64bit
+from std.sys import is_little_endian
+from std.sys import now_monotonic_ns
+from std.sys import now_realtime_sec
+from std.sys import os
+from std.sys import page_size
+from std.sys import pid
+from std.sys import ppid
+from std.sys import pointer_size
+from std.sys import rss_bytes
+from std.sys import setenv_ref
+from std.sys import sleep_ms
+from std.sys import terminal_columns
+from std.sys import uid
+from std.sys import unsetenv_ref
+from std.sys import arch
+from std.sys import args
+
+
+fn eq_c(s as String, c as cstr) as bool:
+    return strcmp(s.data to cstr, c) == 0 to i32
+
+
+fn main() as i32:
+    // 1. Host identifiers are non-empty and lowercase POSIX names.
+    let o as String = os()
+    if o.len == 0 to usize:
+        return 1 to i32
+    if eq_c(o, "linux") == False:
+        return 2 to i32
+    let a as String = arch()
+    if a.len == 0 to usize:
+        return 3 to i32
+    let h as String = hostname()
+    if h.len == 0 to usize:
+        return 4 to i32
+    // 2. Word size on the 64-bit gate host.
+    if is_64bit() == False:
+        return 5 to i32
+    if pointer_size() != 8 to usize:
+        return 6 to i32
+    if is_little_endian() == False:
+        return 7 to i32
+    // 3. Memory & core topology are sane.
+    if page_size() < 4096 to usize:
+        return 8 to i32
+    if cpu_count() < 1 to usize:
+        return 9 to i32
+    // 4. setenv_ref -> getenv round trip (via getenv_or_ref).
+    // NOTE: string literals passed as String args would arrive as raw C
+    // string pointers in today's codegen, so every String argument in this
+    // test (and in std.sys itself) is bound to a named local first.
+    let name_v as String = "NZ_SYS_TEST_V"
+    let val_v as String = "hello"
+    let fb_unset as String = "%%unset%%"
+    let rc1 as i32 = try setenv_ref(ref name_v, ref val_v) catch: -1 to i32
+    if rc1 != 0 to i32:
+        return 10 to i32
+    let got as String = getenv_or_ref(ref name_v, ref fb_unset)
+    if eq_c(got, "hello") == False:
+        return 11 to i32
+    // 5. Empty value must read as some zero-length string, NOT as unset:
+    //    presence must hold and the defaulted read must be empty.
+    let name_e as String = "NZ_SYS_TEST_E"
+    let val_e as String = ""
+    let rc2 as i32 = try setenv_ref(ref name_e, ref val_e) catch: -1 to i32
+    if rc2 != 0 to i32:
+        return 12 to i32
+    if has_env_ref(ref name_e) == False:
+        return 13 to i32
+    let got_empty as String = getenv_or_ref(ref name_e, ref fb_unset)
+    if got_empty.len != 0 to usize:
+        return 14 to i32
+    // 6. unsetenv makes the variable legitimately absent.
+    let rc3 as i32 = try unsetenv_ref(ref name_e) catch: -1 to i32
+    if rc3 != 0 to i32:
+        return 15 to i32
+    if has_env_ref(ref name_e):
+        return 16 to i32
+    // 7. Presence probes and defaults.
+    let nm_path as String = "PATH"
+    if has_env_ref(ref nm_path) == False:
+        return 17 to i32
+    let nm_miss as String = "NZ_SYS_MISSING_XYZ_9182"
+    if has_env_ref(ref nm_miss):
+        return 18 to i32
+    let fb_val as String = "fallback"
+    let fb as String = getenv_or_ref(ref nm_miss, ref fb_val)
+    if eq_c(fb, "fallback") == False:
+        return 19 to i32
+    // 8. argv plumbing.
+    let a0 as String = argv0()
+    if a0.len == 0 to usize:
+        return 20 to i32
+    let arg_list as List[String] = args()
+    let arg_list_len as i64 = (deref (ref arg_list)).length()
+    if arg_list_len < 1 to i64:
+        return 21 to i32
+    // 9. Process credentials.
+    if pid() <= 0 to i32:
+        return 22 to i32
+    if ppid() <= 0 to i32:
+        return 23 to i32
+    // 10. Monotonic clock ticks forward with ns-scale magnitude.
+    let t1 as u64 = now_monotonic_ns()
+    let t2 as u64 = now_monotonic_ns()
+    if t1 < 1000000 to u64:
+        return 24 to i32
+    if t2 < t1:
+        return 25 to i32
+    // 11. Wall clock is recent (post-2023).
+    if now_realtime_sec() < 1700000000 to i64:
+        return 26 to i32
+    // 12. sleep_ms(50) makes at least 40ms of monotonic progress.
+    let s1 as u64 = now_monotonic_ns()
+    sleep_ms(50 to u64)
+    let s2 as u64 = now_monotonic_ns()
+    if (s2 - s1) < 40000000 to u64:
+        return 27 to i32
+    if (s2 - s1) > 2000000000 to u64:
+        return 28 to i32
+    // 13. RSS telemetry is live.
+    if rss_bytes() == 0 to usize:
+        return 29 to i32
+    // 14. TTY queries run without asserting capture-dependent state.
+    let _tc as u16 = terminal_columns()
+
+    return 0 to i32

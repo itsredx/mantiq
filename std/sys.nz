@@ -1,0 +1,501 @@
+// ============================================================================
+// std/sys.nz
+// Nizam standard library module for the host system interface.
+//
+// This module is the foundational OS abstraction layer (spec 0031,
+// decision 0049).  Slice 1 covers host introspection, the environment,
+// process arguments/ids, clocks, sleeping and TTY queries.  The Command
+// process builder, SysError and system() arrive with slice 2.
+//
+// Provided here:
+//   - os / arch / hostname      – lowercased host identifiers
+//   - pointer_size / is_64bit / is_32bit / is_little_endian – word size
+//   - page_size / cpu_count     – memory & core topology
+//   - getenv(_ref/_cstr) / has_env(_ref) / getenv_or – env getters that
+//     honour the UNSET vs EMPTY invariant (spec 0031 §4.2)
+//   - setenv_ref / unsetenv_ref – env modifiers
+//   - args / argv0              – process command line (via /proc)
+//   - pid / ppid / uid / gid    – process credentials
+//   - STDIN/STDOUT/STDERR_FILENO – standard descriptor numbers
+//   - is_atty / terminal_size / terminal_columns – terminal queries
+//   - now_monotonic_ns / now_realtime_sec – clocks
+//   - sleep_ms / sleep_ns       – sleeping primitives
+//   - rss_bytes                 – resident memory telemetry
+//   - exit / abort              – process lifecycle (libc passthrough)
+//
+// Platform support (slice 1):
+//   POSIX targets only (Linux fully; macOS mostly).  The environment and
+//   argument lookups are libc based, never hard-coded at compile time.
+//   Known platform gaps, deferred to Phase 5 (see decision 0049):
+//     - windows (no uname/sysconf/environ layout yet) and wasi (sandboxed,
+//       no /proc) are NOT handled by os()/arch()/args() yet.
+//   Deviations from spec 0031 (language reality, slice 1):
+//     - getenv/setenv/unsetenv exist ONLY in their _ref/_cstr forms.
+//       Module-level fns may not carry a name that equals an extern symbol
+//       declared by the same module: the merged single-TU IR maps both to
+//       one unmangled @-symbol (e.g. @getenv) and the libc calls inside
+//       this module would recurse into the Nizam wrapper. Also, the spec's
+//       getenv_or is published as getenv_or_ref because the compiler does
+//       not materialize a String record for string literals passed as
+//       by-value String arguments: every String-argument API in this
+//       module takes ptr[String] and callers bind values to named locals
+//       first (the by-value spec wrappers return once the compiler both
+//       mangles module-scope function symbols and inserts literal-to-String
+//       coercions at call sites; the latter also unblocks
+//       spec 0031's system(String) in slice 2).
+//     - setenv_ref/unsetenv_ref signal errors as raw Err(-1) until
+//       SysError arrives with slice 2 (no errno FFI yet).
+//     - environ() (full block dump) needs extern-global support.
+//     - pointer_size/is_64bit detect word size at runtime by usize wrap,
+//       which matches the compiled target.
+// ============================================================================
+
+
+// ── Imports ──────────────────────────────────────────────────────────────────
+from std.collections import List
+from std.mem import make
+from std.option import Empty, Option, Some
+from std.result import Err, Ok, Result
+from std.string import String
+
+
+// ── C FFI Declarations ───────────────────────────────────────────────────────
+extern fn uname(buf as ptr) as i32
+extern fn strlen(s as cstr) as usize
+extern fn malloc(req_size as usize) as ptr
+extern fn free(p as ptr)
+extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+extern fn fopen(path as cstr, mode as cstr) as ptr
+extern fn fread(buf as ptr, size as usize, count as usize, stream as ptr) as usize
+extern fn fclose(stream as ptr) as i32
+extern fn getpid() as i32
+extern fn getppid() as i32
+extern fn getuid() as u32
+extern fn getgid() as u32
+extern fn isatty(fd as i32) as i32
+extern fn ioctl(fd as i32, request as i64, arg as ptr) as i32
+extern fn sysconf(name as i32) as i64
+extern fn getrusage(who as i32, usage as ptr) as i32
+extern fn clock_gettime(clk_id as i32, tp as ptr) as i32
+extern fn nanosleep(req as ptr, rem as ptr) as i32
+extern fn time(t as ptr) as i64
+extern fn htonl(host as u32) as u32
+extern fn exit(code as i32)
+
+
+// ── Structs ──────────────────────────────────────────────────────────────────
+struct Timespec:
+    public var sec as i64
+    public var nsec as i64
+
+
+struct Winsize:
+    public var rows as u16
+    public var cols as u16
+    public var xpix as u16
+    public var ypix as u16
+
+
+struct TermSize:
+    public var rows as u16
+    public var columns as u16
+
+
+// ── byte helpers ─────────────────────────────────────────────────────────────
+fn bytes_to_string(bytes as ptr[u8], n as usize) as String:
+    let cap as usize = n + 1
+    let d as ptr[u8] = make[u8](cap) to ptr[u8]
+    memcpy(d to ptr, bytes to ptr, n)
+    d[n] = 0 to u8
+    return String(data = d, len = n, capacity = cap)
+
+
+// Extract a NUL-terminated string starting at `p`, scanning at most `max`
+// bytes, and return it as an owned String copy.
+fn cstr_slice_to_string(p as ptr[u8], max as usize) as String:
+    var n as usize = 0 to usize
+    var stop as bool = False
+    while not stop:
+        if n >= max:
+            stop = True
+        elif deref ((p to usize + n) to ptr[u8]) == 0 to u8:
+            stop = True
+        else:
+            n = n + (1 to usize)
+    return bytes_to_string(p, n)
+
+
+// Build a NUL-terminated temporary copy of a Nizam String.  Caller frees.
+fn env_key_cstr(name as ptr[String]) as ptr[u8]:
+    let n as usize = (deref name).len
+    let d as ptr[u8] = make[u8](n + 1) to ptr[u8]
+    memcpy(d to ptr, (deref name).data to ptr, n)
+    d[n] = 0 to u8
+    return d
+
+
+// ============================================================================
+// Host operating system, architecture and hostname
+// ============================================================================
+
+
+// Lowercase the ASCII letters of a NUL-terminated field in place.
+fn fold_lower_ascii(p as ptr[u8], max as usize):
+    var i as usize = 0 to usize
+    var stop as bool = False
+    while not stop:
+        if i >= max:
+            stop = True
+        else:
+            let b as u8 = deref ((p to usize + i) to ptr[u8])
+            if b == 0 to u8:
+                stop = True
+            else:
+                if b >= 65 to u8 and b <= 90 to u8:
+                    deref ((p to usize + i) to ptr[u8]) = b + (32 to u8)
+                i = i + (1 to usize)
+
+
+fn uname_field(buf as ptr[u8], offset as usize, max as usize) as String:
+    let base as ptr[u8] = ((buf to usize) +offset) to ptr[u8]
+    return cstr_slice_to_string(base, max)
+
+
+fn os() as String:
+    let buf as ptr[u8] = make[u8](2048 to usize) to ptr[u8]
+    let rc as i32 = uname(buf to ptr)
+    if rc != 0 to i32:
+        free(buf to ptr)
+        return String.make("unknown" to cstr)
+    fold_lower_ascii(buf, 63 to usize)
+    // Kernel sysnames start uppercase; spec 0031 wants lowercased names,
+    // with Darwin mapped to the spec's `macos` identifier.
+    let b0 as u8 = deref ((buf to usize + 0) to ptr[u8])
+    let b1 as u8 = deref ((buf to usize + 1) to ptr[u8])
+    if b0 == 100 to u8 and b1 == 97 to u8:
+        free(buf to ptr)
+        return String.make("macos" to cstr)
+    let s as String = uname_field(buf, 0 to usize, 63 to usize)
+    free(buf to ptr)
+    return s
+
+
+fn arch() as String:
+    let buf as ptr[u8] = make[u8](2048 to usize) to ptr[u8]
+    let rc as i32 = uname(buf to ptr)
+    if rc != 0 to i32:
+        free(buf to ptr)
+        return String.make("unknown" to cstr)
+    // Linux utsname: struct field size 65; `machine` starts at 260.
+    // macOS utsname: struct field size 256; `machine` starts at 1024 and
+    // the Linux offset lands inside the (Darwin-prefixed) version field.
+    let linux_base as ptr[u8] = ((buf to usize) +260) to ptr[u8]
+    var is_darwin as bool = False
+    if deref ((linux_base to usize + 0) to ptr[u8]) == 68 to u8:
+        if deref ((linux_base to usize + 1) to ptr[u8]) == 97 to u8:
+            if deref ((linux_base to usize + 2) to ptr[u8]) == 114 to u8:
+                if deref ((linux_base to usize + 3) to ptr[u8]) == 119 to u8:
+                    if deref ((linux_base to usize + 4) to ptr[u8]) == 105 to u8:
+                        if deref ((linux_base to usize + 5) to ptr[u8]) == 110 to u8:
+                            is_darwin = True
+    var result as String = String.make("unknown" to cstr)
+    if is_darwin:
+        result = uname_field(buf, 1024 to usize, 255 to usize)
+        // uname reports arm64; spec's canonical spelling is aarch64.
+        let r0 as u8 = deref ((result.data to usize + 0) to ptr[u8])
+        let r1 as u8 = deref ((result.data to usize + 1) to ptr[u8])
+        let r2 as u8 = deref ((result.data to usize + 2) to ptr[u8])
+        if r0 == 97 to u8 and r1 == 114 to u8 and r2 == 109 to u8:
+            result = String.make("aarch64" to cstr)
+    else:
+        result = uname_field(buf, 260 to usize, 255 to usize)
+    free(buf to ptr)
+    return result
+
+
+fn hostname() as String:
+    let buf as ptr[u8] = make[u8](2048 to usize) to ptr[u8]
+    let rc as i32 = uname(buf to ptr)
+    if rc != 0 to i32:
+        free(buf to ptr)
+        return String.make("" to cstr)
+    let s as String = uname_field(buf, 65 to usize, 64 to usize)
+    free(buf to ptr)
+    return s
+
+
+// ============================================================================
+// Word size & endianness
+// ============================================================================
+
+
+fn is_64bit() as bool:
+    let probe as usize = (0 to usize) -(1 to usize)
+    return probe > 4294967295 to usize
+
+
+fn is_32bit() as bool:
+    return not is_64bit()
+
+
+fn pointer_size() as usize:
+    if is_64bit():
+        return 8 to usize
+    return 4 to usize
+
+
+fn is_little_endian() as bool:
+    // htonl(1) byte-swaps on little-endian hosts only.
+    return htonl(1 to u32) != 1 to u32
+
+
+// ============================================================================
+// Memory & core topology
+// ============================================================================
+
+
+fn page_size() as usize:
+    // Linux _SC_PAGESIZE = 30; Darwin historically exposes a different
+    // numbering, so fall back before giving up.
+    var n as i64 = sysconf(30 to i32)
+    if n <= 0 to i64:
+        n = sysconf(44 to i32)
+    if n <= 0 to i64:
+        n = 4096 to i64
+    return n to usize
+
+
+fn cpu_count() as usize:
+    // Linux _SC_NPROCESSORS_ONLN = 84; Darwin = 58.
+    var n as i64 = sysconf(84 to i32)
+    if n <= 0 to i64:
+        n = sysconf(58 to i32)
+    if n <= 0 to i64:
+        n = 1 to i64
+    return n to usize
+
+
+// ============================================================================
+// Environment getters (unset vs empty invariant honoured)
+// ============================================================================
+
+
+fn getenv_ref(name as ptr[String]) as Option[String]:
+    extern fn getenv(n as cstr) as cstr
+    let key as ptr[u8] = env_key_cstr(name)
+    let val as cstr = getenv(key to cstr)
+    var result as Option[String] = Empty
+    if val != None to cstr:
+        let vl as usize = strlen(val)
+        result = Some(bytes_to_string(val to ptr[u8], vl))
+    free(key to ptr)
+    return result
+
+
+fn getenv_cstr(name as cstr) as Option[String]:
+    extern fn getenv(n as cstr) as cstr
+    let val as cstr = getenv(name)
+    var result as Option[String] = Empty
+    if val != None to cstr:
+        let vl as usize = strlen(val)
+        result = Some(bytes_to_string(val to ptr[u8], vl))
+    return result
+
+
+fn getenv_or_ref(name as ptr[String], default_val as ptr[String]) as String:
+    let found as String = try getenv_ref(name) catch: deref default_val
+    return found
+
+
+fn has_env_ref(name as ptr[String]) as bool:
+    extern fn getenv(n as cstr) as cstr
+    let key as ptr[u8] = env_key_cstr(name)
+    let val as cstr = getenv(key to cstr)
+    free(key to ptr)
+    return val != None to cstr
+
+
+fn has_env(name as String) as bool:
+    return has_env_ref(ref name)
+
+
+// ============================================================================
+// Environment modifiers
+// ============================================================================
+
+
+fn setenv_ref(name as ptr[String], value as ptr[String]) as Result[i32, i32]:
+    // libc setenv needs its exact C symbol; declared at fn scope because the
+    // module-level API surface owns the unadorned `setenv` name.
+    extern fn setenv(n as cstr, v as cstr, ow as i32) as i32
+    let key as ptr[u8] = env_key_cstr(name)
+    let n as usize = (deref value).len
+    let val_buf as ptr[u8] = make[u8](n + 1) to ptr[u8]
+    memcpy(val_buf to ptr, (deref value).data to ptr, n)
+    val_buf[n] = 0 to u8
+    let rc as i32 = setenv(key to cstr, val_buf to cstr, 1 to i32)
+    free(key to ptr)
+    free(val_buf to ptr)
+    if rc == 0 to i32:
+        return Ok(0 to i32)
+    return Err(-1 to i32)
+
+
+fn unsetenv_ref(name as ptr[String]) as Result[i32, i32]:
+    // Same reasoning as setenv_ref: exact libc symbol, fn scope.
+    extern fn unsetenv(n as cstr) as i32
+    let key as ptr[u8] = env_key_cstr(name)
+    let rc as i32 = unsetenv(key to cstr)
+    free(key to ptr)
+    if rc == 0 to i32:
+        return Ok(0 to i32)
+    return Err(-1 to i32)
+
+
+// ============================================================================
+// Process command line arguments
+// ============================================================================
+
+
+fn args() as List[String]:
+    var out as List[String] = List[String]()
+    let f as ptr = fopen("/proc/self/cmdline" to cstr, "rb" to cstr)
+    if f == None to ptr:
+        return out
+    let buf as ptr[u8] = make[u8](65536 to usize) to ptr[u8]
+    let n as usize = fread(buf to ptr, 1 to usize, 65535 to usize, f)
+    let _fc as i32 = fclose(f)
+    var idx as usize = 0 to usize
+    var start as usize = 0 to usize
+    while idx < n:
+        if deref ((buf to usize + idx) to ptr[u8]) == 0 to u8:
+            if idx > start:
+                let s as String = bytes_to_string(((buf to usize) +start) to ptr[u8], idx - start)
+                (deref (ref out)).append(s)
+            start = idx + (1 to usize)
+        idx = idx + (1 to usize)
+    free(buf to ptr)
+    return out
+
+
+fn argv0() as String:
+    let a as List[String] = args()
+    if (deref (ref a)).length() == 0 to i64:
+        return String.make("" to cstr)
+    return (deref (ref a))[0]
+
+
+// ============================================================================
+// Process credentials & ids
+// ============================================================================
+
+
+fn pid() as i32:
+    return getpid()
+
+
+fn ppid() as i32:
+    return getppid()
+
+
+fn uid() as u32:
+    return getuid()
+
+
+fn gid() as u32:
+    return getgid()
+
+
+// ── Standard file descriptors ────────────────────────────────────────────────
+fn stdin_fileno() as i32:
+    return 0 to i32
+
+
+fn stdout_fileno() as i32:
+    return 1 to i32
+
+
+fn stderr_fileno() as i32:
+    return 2 to i32
+
+
+// ============================================================================
+// Terminal & TTY queries
+// ============================================================================
+
+
+fn is_atty(fd as i32) as bool:
+    return isatty(fd) != 0 to i32
+
+
+fn terminal_size() as Option[TermSize]:
+    // TIOCGWINSZ on Linux = 0x5413 (21523).
+    var ws as Winsize
+    let rc as i32 = ioctl(1 to i32, 21523 to i64, (ref ws) to ptr)
+    if rc != 0 to i32:
+        return Empty
+    return Some(TermSize(rows = (deref (ref ws)).rows, columns = (deref (ref ws)).cols))
+
+
+fn terminal_columns() as u16:
+    var ws as Winsize
+    let rc as i32 = ioctl(1 to i32, 21523 to i64, (ref ws) to ptr)
+    if rc != 0 to i32:
+        return 0 to u16
+    return (deref (ref ws)).cols
+
+
+// ============================================================================
+// Clocks, sleeping & telemetry
+// ============================================================================
+
+
+fn now_monotonic_ns() as u64:
+    // CLOCK_MONOTONIC = 0 on Linux and macOS.
+    var ts as Timespec
+    let _cg as i32 = clock_gettime(0 to i32, (ref ts) to ptr)
+    let sec as i64 = (deref (ref ts)).sec
+    let nsec as i64 = (deref (ref ts)).nsec
+    return ((sec to u64) * (1000000000 to u64)) +(nsec to u64)
+
+
+fn now_realtime_sec() as i64:
+    return time(None to ptr)
+
+
+fn sleep_ns(ns as u64):
+    if ns == 0 to u64:
+        return
+    var req as Timespec
+    var rem as Timespec
+    let deadline as u64 = now_monotonic_ns() +ns
+    var done as bool = False
+    while not done:
+        let now as u64 = now_monotonic_ns()
+        if now >= deadline:
+            done = True
+        else:
+            let remain as u64 = deadline - now
+            var chunk as u64 = remain
+            if chunk > 50000000 to u64:
+                chunk = 50000000 to u64
+            (deref (ref req)).sec = 0 to i64
+            (deref (ref req)).nsec = chunk to i64
+            let _ns as i32 = nanosleep((ref req) to ptr, (ref rem) to ptr)
+            // Early wake (signal) → the loop re-arms against the deadline.
+
+
+fn sleep_ms(ms as u64):
+    sleep_ns(ms * (1000000 to u64))
+
+
+fn rss_bytes() as usize:
+    // struct rusage: ru_maxrss (long) sits after two struct timevals, i.e.
+    // at byte offset 32 on 64-bit targets; the value unit is kilobytes.
+    let blob as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+    let _gr as i32 = getrusage(0 to i32, blob to ptr)
+    let kb as i64 = deref ((blob to usize + 32) to ptr[i64])
+    free(blob to ptr)
+    if kb <= 0 to i64:
+        return 0 to usize
+    return (kb to usize) * (1024 to usize)

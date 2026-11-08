@@ -1451,3 +1451,56 @@ recorded here for the next person who sees it.
   produces phantom non-idempotency.)
 - chain_stable.sh: full-suite (51/51) pass and promotion before each
   phase commit; Phase I additionally promoted ON the formatted tree.
+
+## std.sys Phase 2 — host abstraction module (slice 1)
+
+`std/sys.nz` landed (spec 0031 slice 1) with `src/tests/test_std_sys.nz`
+as the 52nd gate test (array-keyed, suite count follows the TEST_FILES
+array). The module implements the POSIX tier straight on libc externs —
+no runtime.c shim in the path:
+
+os/arch/hostname (uname + fold-lower, Darwin→`macos` because kernel
+sysnames are capitalized), word size/endianness (usize-wrap probe +
+htonl trick), page_size/cpu_count (sysconf with Darwin numbers as
+fallback), getenv_ref/getenv_cstr/getenv_or_ref/has_env_ref honoring
+the UNSET vs EMPTY invariant (the legacy `mantiq_sys_getenv` couldn't),
+setenv_ref/unsetenv_ref (Err(-1) until SysError comes with slice 2),
+args/argv0 (/proc/self/cmdline — matching the runtime's own approach),
+pid/ppid/uid/gid, stdin/stdout/stderr_fileno, is_atty/terminal_size/
+terminal_columns (TIOCGWINSZ), now_monotonic_ns/now_realtime_sec,
+sleep_ms/sleep_ns (50 ms deadline loop, no 64-bit division), rss_bytes
+(getrusage struct-offset read), exit/abort (libc passthrough externs).
+
+Suspected NEW notes:
+- validated live under a real (python-pty) terminal: terminal_size()
+  returns Some(TermSize(50, 120)) — Option-over-struct boxing and its
+  try/catch decode work end to end.
+- `script(1)`'s untyped pty answers TIOCGWINSZ with rc=0 and rows=0:
+  don't read that as module breakage.
+
+Compiler facts the slice exposed (recorded for the next milestones):
+1. Module fns may NOT share a name with an extern of the same module.
+   The merged single TU lowers both to one unmangled @-symbol; each
+   signature keeps the other's call sites broken (@getenv was defined
+   as `ptr` declare + `{i8,ptr}` call). Until symbols mangle, the env
+   API ships as _ref/_cstr forms and system(String) in slice 2 needs
+   another home.
+2. String literals passed to by-value String parameters arrive as RAW
+   cstr pointers (locals are cloned, literals are not) — the callee's
+   `(deref name).len` reads rodata bytes as a length and mantiq_malloc
+   aborts on the garbage size. Convention: String args flow as
+   ptr[String] with named locals (matches every existing std module).
+3. The rtunlink-era allocator is calloc-backed with a 500 MB guard
+   (`mantiq_malloc`), `mantiq_free` is a no-op port, so libc `free` on
+   made-by-make buffers stays valid but the pool never shrinks.
+4. No implicit u16→i32 widening: explicit `to i32` at every readback
+   (probe-visible only at -O0-free IR; -O2 hides it in inlining).
+5. `not` stays safe only on named bools; `:`-scoped externs (libc
+   getenv/setenv) shadow cleanly and dodge the name-collision rule.
+
+Next: slice 2 (Command builder on fork/execvp/waitpid — the pattern
+from main.nz's mantiq_run_command_direct — ProcessOutput pipe capture,
+SysError struct), then Phase 3 adoption: main.nz's 56 raw externs move
+to std.sys and std/path.nz:32's dangling `from std.sys import os`
+finally resolves. Runtime.c shim weakening (Phase 4/5 in the std.sys
+doc) still unstarted.
