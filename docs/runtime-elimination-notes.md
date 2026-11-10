@@ -1699,3 +1699,57 @@ Phase 4 is COMPLETE with slices A+B: the only remaining direct-exec /
 host shims in runtime.c are marked deprecated and unreachable; the
 next runtime.c milestone is the Phase 5 inventory (freestanding
 #no_std syscall tier).
+
+## std.sys Phase 5 slice 1 — freestanding probes (probes + inventory, no compiler changes)
+
+Goal per spec: binaries linked with `--no-libc` start at `_start`
+directly and invoke syscalls with zero external dependencies. This
+slice validated the entire floor with hand-written probes against
+Nizam-generated IR (probe sources preserved in
+research/freestanding/):
+
+INVENTORY — a MINIMAL Nizam program (`fn main() as i32: return 3`)
+built normally references 33 libc symbols (abort, atoi, calloc, free,
+fwrite, getenv, ioctl, malloc/memcpy/memset/memmove/memcmp/bcmp,
+mmap/munmap, printf/putchar/fwrite/snprintf/sprintf, pthread mutex/
+cond/create/join, stdout, strlen, __libc_start_main). NONE of them
+are actually called by main — they come from the unconditionally
+emitted rt glue bodies (mantiq_malloc templates, task/cond bodies,
+string-copy helpers) that every program's single-TU IR carries.
+
+PROBE RESULTS (all green):
+1. Dead-glue drop: compile the .ll with `-ffunction-sections`, link
+   with `-nostdlib -static -Wl,--gc-sections` — the 33 libc refs all
+   vanish (9,128-byte binary, 0 undefined). No allocator shim is
+   needed for minimal programs; gc-sections is the mechanism.
+2. Entry: a naked `_start` (AT&T asm: xor rbp/and rsp alignment, call
+   main, mov eax->edi, mov $60->eax, syscall) works as the entry;
+   also embedded IN IR (`define void @_start()`) with
+   `-Wl,-e,_start`.
+3. COMPILER FACT 14: clang SILENTLY DROPS unreferenced IR functions
+   when compiling .ll -> .o — `define void @_start()` in the IR
+   disappears from the object (nm shows no symbol, no warning, rc=0),
+   and it is NOT the name: any unreferenced function vanishes. The
+   pin is the standard `@llvm.used = appending global [1 x ptr]
+   [ptr @<fn>], section "llvm.metadata"` — with it the fn survives
+   and `_start` can live entirely in IR.
+4. syscalls from IR: inline asm with ALL-OPERAND templates works —
+   `call i64 asm sideeffect "mov $4, %rax; syscall",
+   "={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory}..."(...)`.
+   SUBTLETY: the syscall number must ride an explicit `imr` input
+   and be mov'd into rax in the template — a "={rax}" output alone
+   never loads it (the write silently failed twice before the mov
+   idiom). sys_write(1, msg, 15) printed; sys_exit(60) propagated
+   main's return (rc=3) — 0 undefined symbols, 9,304 bytes.
+5. Intel-syntax asm in .s fails under the AT&T assembler ("unknown
+   use of instruction mnemonic without a size suffix"); write the
+   _start stub in AT&T (operands prefixed %, immediates $).
+
+This proves the Phase 5 path end-to-end for Nizam-shaped IR. NEXT
+slice (compiler plumbing): a `--no-libc` link mode in main.nz —
+d_argv becomes `-nostdlib -static --gc-sections` + an emitted _start
+(emit_rt_glue_bodies-style template with @llvm.used), skipping
+tree_sitter_helper.c; then std.sys freestanding fns (sys_write/
+sys_exit/sys_getpid as x86_64 inline-asm glue); then the std-using
+story (strings pull mantiq_malloc -> the pure-Nizam allocator from
+std.mem backs it).
