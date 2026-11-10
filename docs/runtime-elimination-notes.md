@@ -1504,3 +1504,84 @@ SysError struct), then Phase 3 adoption: main.nz's 56 raw externs move
 to std.sys and std/path.nz:32's dangling `from std.sys import os`
 finally resolves. Runtime.c shim weakening (Phase 4/5 in the std.sys
 doc) still unstarted.
+
+## std.sys Phase 2 — slice 2: Command builder + SysError (spec 0031 §3.4)
+
+`std/sys.nz` gained the process-execution slice: `SysError`
+(kind/code/message — see the kind deviation below), `ProcessOutput`,
+`sys_error`, `drain_fd`, the `sys_err_*`/`stdio_*` tag wrappers, and the
+injection-safe `Command` builder (new_ref/add_arg/add_args/env/
+current_dir/stdin/stdout/stderr/status/output) plus `system_ref`. All of
+it is real fork/execvp/waitpid with pipe capture — the shared core is
+`spawn_and_wait(cmd, capture)`, and every public path funnels through
+it. Fifth gate test added: `src/tests/test_command.nz` (status decode,
+dual-stream capture, whitespace-verbatim args, bulk add_args, env
+propagation, cwd via Option, stdio_null suppression, transient pipe
+capture, exec failure as 127).
+
+Deviations (language reality, slice 2):
+- `SysError.kind` and the stdio config fields are i32 fed by
+  `sys_err_*()` / `stdio_*()` wrappers because payload-less enum
+  variants materialize as {ptr, ptr} globals and do NOT round-trip
+  through struct fields.
+- The spec's `Command.args()` builder collides with the field, so the
+  methods are `add_arg`/`add_args`. `system(String)` ships as
+  `system_ref` for the same literal-materialization reason as the env
+  API; every String-taking API takes ptr[String] with named locals.
+- `spawn_and_wait` returns a `SpawnResult` struct instead of
+  `Tuple3[i32, String, String]`: generic-struct member access (r.v0)
+  typechecks fine in a single-file build but FAILS to resolve its field
+  type when the defining module is loaded through `from std.sys import
+  ...` (E0308 on `let code as i32 = r.v0` + E0309 downstream). A
+  non-generic struct sidesteps the monomorphised-symbol lookup entirely.
+- exec failure surfaces as status 127 (shell convention — the child
+  reap in the parent decodes _exit(127)); the Err(SysError) channel is
+  reserved for fork/pipe failure in the parent. env_vars are ADDED on
+  top of the inherited environment (libc setenv semantics) rather than
+  replacing it; cwd rides Option[String] behind current_dir().
+
+Compiler facts this slice exposed (all probe-confirmed):
+6. Zero-arg calls to fns whose NAME STARTS UPPERCASE are classified as
+   struct constructors by codegen (`is_ctor = c0 in 'A'..'Z'`): the
+   call is replaced by a zeroinitializer (silently yielding 0 —
+   `STDIO_NULL()` compared as `== 0`, so stdio redirection never
+   matched) or, when nested, a phantom-struct insertvalue that fails
+   LLVM assembly (`%ONE_USED` type never declared). That is why the
+   tags are `sys_err_*`/`stdio_*` in lowercase: beginning a zero-arg
+   call with a lowercase letter keeps the real call path. Slice-1
+   happened to survive because all its zero-arg fns (os, pid,
+   page_size...) are lowercase.
+7. String values whose SYMBOL arrives only transitively (e.g. consumer
+   imports std.sys, which imports std.string, and the consumer then
+   calls `String.make` without its own `from std.string import
+   String`) lower calls with the { ptr, ptr } Any repr at the call
+   site while the callee returns { ptr, i64, i64 } — insertvalue/
+   register type conflicts at LLVM assembly. Directly importing the
+   defining module fixes the repr. Consumers of std.sys must therefore
+   also `from std.string import String` explicitly.
+8. A UPPERCASE-INITIAL fn call in a single file is treated as a
+   struct-init of a phantom struct named after the fn (from 6); the
+   two bugs above compounded during slicing and cost most of a
+   bisect session — the "working" single-file versions had silently
+   zero-valued XS wrappers.
+9. `catch`-expression findings (recorded from the probe ladder):
+   unbound `catch: <fallback>` WORKS even with struct payloads;
+   BOUND `catch e: e.<field>` mis-types the bound name as the Ok
+   payload and then fails field resolution — do not bind; and
+   arithmetic inside the catch expression itself misparses (keep the
+   fallback a literal/variable).
+10. Indexed build-state staleness: `check` (and cached builds) can
+    serve STALE module state after rewrites of a file that was JUST
+    compiled — a bisect run on cached check results chased ghosts
+    (externs were "failing" that never failed). Every diagnostic
+    build this slice ran with --no-cache; cache-rm before gate runs.
+11. Probes also pinned the wait-decode idioms that the parent uses:
+    typed ptr[cstr] indexing strides 8 bytes while `(base to usize
+    + N)` arithmetic strides 1 byte (probe6-style execvp argv
+    corruption), and mixed-type arithmetic requires fully
+    parenthesized cast operands: `sig = st % (256 to i32)`,
+    `(128 to i32) + sig`.
+12. Externs shared by slice-1 fns (open/close/dup2/pipe/fork/
+    execvp/waitpid/chdir/setenv/read) are fn-scoped inside
+    spawn_and_wait/drain_fd/child paths — fn-scoped externs shadow
+    cleanly and dodge the module-fn/extern name-collision rule (1).

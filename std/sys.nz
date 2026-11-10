@@ -4,8 +4,8 @@
 //
 // This module is the foundational OS abstraction layer (spec 0031,
 // decision 0049).  Slice 1 covers host introspection, the environment,
-// process arguments/ids, clocks, sleeping and TTY queries.  The Command
-// process builder, SysError and system() arrive with slice 2.
+// process arguments/ids, clocks, sleeping and TTY queries.  Slice 2 adds
+// the injection-safe Command builder, SysError and system_ref.
 //
 // Provided here:
 //   - os / arch / hostname      – lowercased host identifiers
@@ -22,6 +22,11 @@
 //   - sleep_ms / sleep_ns       – sleeping primitives
 //   - rss_bytes                 – resident memory telemetry
 //   - exit / abort              – process lifecycle (libc passthrough)
+//   - sys_err_* / stdio_*       – SysError kind & stdio config tags
+//   - SysError / ProcessOutput / Command – process execution slice
+//     (fork/execvp/waitpid + pipe capture; Command.new_ref, add_arg/
+//     add_args, env, current_dir, stdin/stdout/stderr, status, output)
+//   - system_ref                – /bin/sh -c quick execution
 //
 // Platform support (slice 1):
 //   POSIX targets only (Linux fully; macOS mostly).  The environment and
@@ -45,6 +50,20 @@
 //       spec 0031's system(String) in slice 2).
 //     - setenv_ref/unsetenv_ref signal errors as raw Err(-1) until
 //       SysError arrives with slice 2 (no errno FFI yet).
+//     - Slice 2 (process execution) deviations:
+//         SysError.kind and the StdioConfig fields are i32 tags
+//         (SYS_ERR_*()/STDIO_*() wrappers) because payload-less enum
+//         variants do not round-trip through struct fields.
+//         Command.new_ref/add_arg/env/current_dir take ptr[String]
+//         (literal-to-String non-materialization, see above).
+//         Spec's Command.args() builder is add_arg/add_args (field/
+//         method name clash) and spec's system(String) is system_ref.
+//         Command.env vars are ADDED on top of the inherited
+//         environment (child-side setenv), not a wholesale replace.
+//         status() captures then discards any Piped-configured
+//         stream; output() always pipes and captures both stdout and
+//         stderr.  stdin Piped behaves as Null (no write-stdin API in
+//         this slice).  exec failure surfaces as exit status 127.
 //     - environ() (full block dump) needs extern-global support.
 //     - pointer_size/is_64bit detect word size at runtime by usize wrap,
 //       which matches the compiled target.
@@ -52,11 +71,11 @@
 
 
 // ── Imports ──────────────────────────────────────────────────────────────────
-from std.collections import List
+from std.collections import Dict, List
 from std.mem import make
 from std.option import Empty, Option, Some
 from std.result import Err, Ok, Result
-from std.string import String
+from std.string import String, StringBuilder
 
 
 // ── C FFI Declarations ───────────────────────────────────────────────────────
@@ -499,3 +518,358 @@ fn rss_bytes() as usize:
     if kb <= 0 to i64:
         return 0 to usize
     return (kb to usize) * (1024 to usize)
+
+
+// ============================================================================
+// Slice 2: process execution — SysError, Command builder, system_ref
+// ============================================================================
+
+
+// SysError kind tags.  DEVIATIONS from spec 0031 section 3.4:
+// 1. The spec declares an enum SysErrorKind, but payload-less enum variants
+//    materialize as {ptr, ptr} globals in today's codegen and do NOT
+//    round-trip through struct fields (the value is truncated to its
+//    pointer pair when stored, losing the tag).  Until variant-to-field
+//    stores are fixed, the kind rides in an i32 with these named wrappers
+//    as the constant set.
+// 2. The wrappers are LOWERCASE (sys_err_* / stdio_*): codegen classifies
+//    any zero-arg call whose callee name starts with an uppercase letter
+//    as a struct constructor and emits a zeroinitializer instead of the
+//    call (silently yielding 0; nested, it emits a phantom-struct
+//    insertvalue that fails LLVM assembly).  Lowercase names keep the
+//    real call path.  Revisit once the ctor/call disambiguation is fixed.
+fn sys_err_none() as i32:
+    return 0 to i32
+fn sys_err_not_found() as i32:
+    return 1 to i32
+fn sys_err_permission_denied() as i32:
+    return 2 to i32
+fn sys_err_already_exists() as i32:
+    return 3 to i32
+fn sys_err_interrupted() as i32:
+    return 4 to i32
+fn sys_err_invalid_input() as i32:
+    return 5 to i32
+fn sys_err_timed_out() as i32:
+    return 6 to i32
+fn sys_err_out_of_memory() as i32:
+    return 7 to i32
+fn sys_err_broken_pipe() as i32:
+    return 8 to i32
+fn sys_err_unknown() as i32:
+    return 9 to i32
+
+
+// Stdio redirection tags (spec §3.4 enum StdioConfig; i32 for the same
+// enum-in-struct-field reason as the SysError kind tags above).
+fn stdio_inherit() as i32:
+    return 0 to i32
+fn stdio_null() as i32:
+    return 1 to i32
+fn stdio_piped() as i32:
+    return 2 to i32
+
+
+// ── Structured system error ──────────────────────────────────────────────────
+struct SysError:
+    public var kind as i32
+    public var code as i32
+    public var message as String
+
+
+// ── Subprocess output (spec §3.4) ────────────────────────────────────────────
+struct ProcessOutput:
+    public var status as i32
+    public var stdout as String
+    public var stderr as String
+
+
+// Internal: a pair of pipe descriptors (libc pipe(2) writes two i32s).
+struct PipeFds:
+    public var r as i32
+    public var w as i32
+
+
+// Internal: spawn result.  DEVIATION: this is a plain struct rather than
+// Tuple3[i32, String, String] because generic-struct member access (r.v0)
+// does not typecheck when the defining module is loaded via `from std.sys
+// import ...` (the imported-module typecheck pass cannot resolve the
+// monomorphised Tuple3 symbol; single-file builds are unaffected).
+struct SpawnResult:
+    public var status as i32
+    public var out as String
+    public var err as String
+
+
+fn sys_error(kind as i32, code as i32, msg as cstr) as SysError:
+    return SysError(kind = kind, code = code, message = String.make(msg))
+
+
+// Read a pipe dry into a StringBuilder.  Returns bytes drained.
+fn drain_fd(fd as i32, out as ptr[StringBuilder]) as i64:
+    extern fn read(fd as i32, buf as ptr, count as usize) as isize
+    extern fn free(p as ptr)
+    let buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
+    var total as i64 = 0 to i64
+    var done as bool = False
+    while not done:
+        let n as isize = read(fd, buf to ptr, 4096 to usize)
+        if n <= 0 to isize:
+            done = True
+        else:
+            (deref out).append_slice(buf, n to usize)
+            total = total + n
+    free(buf to ptr)
+    return total
+
+
+// Shared spawn core for Command.status / Command.output / system_ref.
+// Builds argv (typed ptr[cstr] indexing — raw base+N byte arithmetic
+// strides 1 byte and corrupts overlapping pointer stores), forks, wires
+// stdio in the child, execs, then drains any piped streams in the parent
+// and decodes the POSIX wait status.
+// Returns (decoded_status, captured_stdout, captured_stderr).
+fn spawn_and_wait(cmd as ptr[Command], capture as bool) as SpawnResult:
+    extern fn fork() as i32
+    extern fn execvp(file as cstr, argv as ptr[cstr]) as i32
+    extern fn _exit(code as i32)
+    extern fn waitpid(pid as i32, status as ptr, opts as i32) as i32
+    extern fn pipe(fds as ptr) as i32
+    extern fn dup2(oldfd as i32, newfd as i32) as i32
+    extern fn close(fd as i32) as i32
+    extern fn open(path as cstr, flags as i32) as i32
+    extern fn chdir(path as cstr) as i32
+
+    // ── assemble argv ────────────────────────────────────────────────────────────
+    let prog_s as String = (deref cmd).program
+    let alist as List[String] = (deref cmd).args
+    let nargs as usize = alist.len()
+    let argc as usize = nargs + (1 to usize)
+    let argv_arr as ptr[cstr] = malloc((argc + (1 to usize)) * (8 to usize)) to ptr[cstr]
+    argv_arr[0] = env_key_cstr(ref prog_s) to cstr
+    var i as usize = 0 to usize
+    while i < nargs:
+        let a_s as String = alist[i]
+        argv_arr[(i + (1 to usize))] = env_key_cstr(ref a_s) to cstr
+        i = i + (1 to usize)
+    argv_arr[argc] = None to cstr
+
+    // ── which streams get pipes (decided BEFORE fork) ────────────────────────────
+    // Failure signaling: a negative status carries the SysError kind tag;
+    // status()/output() translate it into Err(SysError).
+    let out_piped as bool = capture or ((deref cmd).stdout_cfg == stdio_piped())
+    let err_piped as bool = capture or ((deref cmd).stderr_cfg == stdio_piped())
+    var outp as PipeFds
+    var errp as PipeFds
+    if out_piped:
+        if pipe((ref outp) to ptr) != 0 to i32:
+            let empty1a as String = String.make("" to cstr)
+            let empty1b as String = String.make("" to cstr)
+            return SpawnResult(status = (0 - sys_err_unknown()), out = empty1a, err = empty1b)
+    if err_piped:
+        if pipe((ref errp) to ptr) != 0 to i32:
+            let empty2a as String = String.make("" to cstr)
+            let empty2b as String = String.make("" to cstr)
+            if out_piped:
+                let _co as i32 = close(outp.r)
+                let _co2 as i32 = close(outp.w)
+            return SpawnResult(status = (0 - sys_err_unknown()), out = empty2a, err = empty2b)
+    // ── fork ─────────────────────────────────────────────────────────────────────
+    let pid as i32 = fork()
+    if pid < 0 to i32:
+        if out_piped:
+            let _fco1 as i32 = close(outp.r)
+            let _fco2 as i32 = close(outp.w)
+        if err_piped:
+            let _fce1 as i32 = close(errp.r)
+            let _fce2 as i32 = close(errp.w)
+        let empty3a as String = String.make("" to cstr)
+        let empty3b as String = String.make("" to cstr)
+        return SpawnResult(status = (0 - sys_err_unknown()), out = empty3a, err = empty3b)
+    if pid == 0 to i32:
+        // ── child: wire stdio, apply env/cwd, exec ───────────────────────────────────
+        // stdin: Inherit shares the parent's fd; Null and Piped both
+        // read from /dev/null (no write-stdin API in this slice).
+        if (deref cmd).stdin_cfg != stdio_inherit():
+            let null_r as i32 = open("/dev/null" to cstr, 0 to i32)
+            if null_r >= 0 to i32:
+                let _ds as i32 = dup2(null_r, 0 to i32)
+                let _cs as i32 = close(null_r)
+        if out_piped:
+            let _c1 as i32 = close(outp.r)
+            let _d1 as i32 = dup2(outp.w, 1 to i32)
+            let _c2 as i32 = close(outp.w)
+        else:
+            if (deref cmd).stdout_cfg == stdio_null():
+                let null_w1 as i32 = open("/dev/null" to cstr, 1 to i32)
+                if null_w1 >= 0 to i32:
+                    let _d1n as i32 = dup2(null_w1, 1 to i32)
+                    let _c1n as i32 = close(null_w1)
+        if err_piped:
+            let _c3 as i32 = close(errp.r)
+            let _d2 as i32 = dup2(errp.w, 2 to i32)
+            let _c4 as i32 = close(errp.w)
+        else:
+            if (deref cmd).stderr_cfg == stdio_null():
+                let null_w2 as i32 = open("/dev/null" to cstr, 1 to i32)
+                if null_w2 >= 0 to i32:
+                    let _d2n as i32 = dup2(null_w2, 2 to i32)
+                    let _c2n as i32 = close(null_w2)
+        // env_vars are ADDED on top of the inherited environment
+        // (libc setenv semantics), applied child-side pre-exec.
+        let ev as Dict[String, String] = (deref cmd).env_vars
+        let ekeys as List[String] = ev.keys()
+        let ek_n as usize = ekeys.len()
+        var ei as usize = 0 to usize
+        while ei < ek_n:
+            let k_s as String = ekeys[ei]
+            let v_s as String = ev[k_s]
+            let k_c as cstr = env_key_cstr(ref k_s) to cstr
+            let v_c as cstr = env_key_cstr(ref v_s) to cstr
+            extern fn setenv(n as cstr, v as cstr, ow as i32) as i32
+            let _se as i32 = setenv(k_c, v_c, 1 to i32)
+            free(k_c to ptr)
+            free(v_c to ptr)
+            ei = ei + (1 to usize)
+        // cwd: Some(dir) → chdir before exec; Empty leaves it alone.
+        let cwd_opt as Option[String] = (deref cmd).cwd
+        let cwd_v as String = try cwd_opt catch: String.make("" to cstr)
+        if cwd_v.len > 0 to usize:
+            let _ch as i32 = chdir(cwd_v.data to cstr)
+        let _ex as i32 = execvp(argv_arr[0], argv_arr)
+        _exit(127 to i32)
+    // ── parent: close write ends, drain piped reads, wait ────────────────────────
+    let sbo as StringBuilder = StringBuilder.make()
+    let sbe as StringBuilder = StringBuilder.make()
+    if out_piped:
+        let _pc1 as i32 = close(outp.w)
+        let _dr1 as i64 = drain_fd(outp.r, ref sbo)
+        let _pc2 as i32 = close(outp.r)
+    if err_piped:
+        let _pc3 as i32 = close(errp.w)
+        let _dr2 as i64 = drain_fd(errp.r, ref sbe)
+        let _pc4 as i32 = close(errp.r)
+    var st as i32 = 0 to i32
+    let w as i32 = waitpid(pid, (ref st) to ptr, 0 to i32)
+    if w < 0 to i32:
+        let empty4a as String = String.make("" to cstr)
+        let empty4b as String = String.make("" to cstr)
+        return SpawnResult(status = (0 - sys_err_unknown()), out = empty4a, err = empty4b)
+    free(argv_arr to ptr)
+    // POSIX wait-status decode WITHOUT macros: low 7 bits = signal
+    // (0 = clean exit), exit code = status / 256.  Mixed-type
+    // arithmetic is fully parenthesized (cast-then-add misparses).
+    let sig as i32 = st % (256 to i32)
+    var code as i32 = 0 to i32
+    if sig == 0 to i32:
+        code = st / (256 to i32)
+    else:
+        code = (128 to i32) +sig
+    let out_s as String = sbo.to_string()
+    let err_s as String = sbe.to_string()
+    return SpawnResult(status = code, out = out_s, err = err_s)
+
+
+// ============================================================================
+// Injection-safe command builder (spec 0031 §3.4)
+// ============================================================================
+struct Command:
+    public var program as String
+    public var args as List[String]
+    public var env_vars as Dict[String, String]
+    public var cwd as Option[String]
+    public var stdin_cfg as i32
+    public var stdout_cfg as i32
+    public var stderr_cfg as i32
+
+    // Construction.  DEVIATION: spec's Command.new(program as String)
+    // ships as new_ref because string literals passed as by-value String
+    // arguments arrive as raw cstr pointers (no record materialization).
+    fn new_ref(program as ptr[String]) as Command:
+        let p_s as String = deref program
+        let a0 as List[String] = List[String]()
+        let e0 as Dict[String, String] = { }
+        return Command(program = p_s, args = a0, env_vars = e0, cwd = Empty,
+            stdin_cfg = stdio_inherit(), stdout_cfg = stdio_inherit(),
+            stderr_cfg = stdio_inherit())
+    // Builder: append one argument.  DEVIATION: spec's Command.args()
+    // builder is named add_arg / add_args because the field `args` and a
+    // method of the same name collide.
+    fn add_arg(self as ptr[Command], val as ptr[String]) as ptr[Command]:
+        let v_s as String = deref val
+        (deref self).args.append(v_s)
+        return self
+
+    fn add_args(self as ptr[Command], items as List[String]) as ptr[Command]:
+        let n as usize = items.len()
+        var i as usize = 0 to usize
+        while i < n:
+            let it as String = items[i]
+            (deref self).args.append(it)
+            i = i + (1 to usize)
+        return self
+    // Builder: add (or override) one child environment variable.
+    fn env(self as ptr[Command], key as ptr[String], val as ptr[String]) as ptr[Command]:
+        let k_s as String = deref key
+        let v_s as String = deref val
+        let evd as Dict[String, String] = (deref self).env_vars
+        evd[k_s] = v_s
+        (deref self).env_vars = evd
+        return self
+    // Builder: child working directory.
+    fn current_dir(self as ptr[Command], dir as ptr[String]) as ptr[Command]:
+        let d_s as String = deref dir
+        (deref self).cwd = Some(d_s)
+        return self
+    // Builder: stream redirection (see the STDIO_* tags).
+    fn stdin(self as ptr[Command], cfg as i32) as ptr[Command]:
+        (deref self).stdin_cfg = cfg
+        return self
+
+    fn stdout(self as ptr[Command], cfg as i32) as ptr[Command]:
+        (deref self).stdout_cfg = cfg
+        return self
+
+    fn stderr(self as ptr[Command], cfg as i32) as ptr[Command]:
+        (deref self).stderr_cfg = cfg
+        return self
+    // Run and return the decoded exit status.  Piped-configured streams
+    // are captured then discarded; use output() to keep their content.
+    // exec failure surfaces as status 127 (the shell convention).
+    fn status(self as ptr[Command]) as Result[i32, SysError]:
+        let r as SpawnResult = spawn_and_wait(self, False)
+        let code as i32 = r.status
+        if code < 0 to i32:
+            let e as SysError = SysError(kind = (0 - code), code = (0 - code),
+                message = String.make("spawn failed" to cstr))
+            return Err(e)
+        return Ok(code)
+    // Run and capture both standard streams.  DEVIATION: output() always
+    // pipes stdout and stderr regardless of the configured StdioConfig.
+    fn output(self as ptr[Command]) as Result[ProcessOutput, SysError]:
+        let r as SpawnResult = spawn_and_wait(self, True)
+        let code as i32 = r.status
+        if code < 0 to i32:
+            let e as SysError = SysError(kind = (0 - code), code = (0 - code),
+                message = String.make("spawn failed" to cstr))
+            return Err(e)
+        let po as ProcessOutput = ProcessOutput(status = code,
+            stdout = r.out, stderr = r.err)
+        return Ok(po)
+
+
+// ============================================================================
+// Quick shell execution (spec §3.4)
+// ============================================================================
+// DEVIATION: spec's system(command as String) ships as system_ref for
+// the same literal-materialization reason as the env API (callers bind
+// the command to a named local first).
+fn system_ref(command as ptr[String]) as i32:
+    let prog as String = String.make("/bin/sh" to cstr)
+    let dash_c as String = String.make("-c" to cstr)
+    let cmd_s as String = deref command
+    var c as Command = Command.new_ref(ref prog)
+    let _b1 as ptr[Command] = c.add_arg(ref dash_c)
+    let _b2 as ptr[Command] = c.add_arg(ref cmd_s)
+    let r as SpawnResult = spawn_and_wait(ref c, False)
+    return r.status

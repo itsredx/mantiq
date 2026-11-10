@@ -1,0 +1,154 @@
+// ── std.sys Slice-2 Conformance Test (Command builder + system_ref) ──────────
+// Exercises: Command.new_ref/add_arg/add_args, env, current_dir, stdio
+// redirection, status(), output(), system_ref — real fork/execvp/waitpid.
+// DEVIATIONS exercised here (see std/sys.nz header):
+//   - every String-taking API takes ptr[String]; callers bind named locals
+//   - Result consumers use UNBOUND catch (bound catch with a struct Err
+//     payload does not typecheck yet)
+//   - exec failure surfaces as status 127 (shell convention); the Err
+//     path is reserved for fork/pipe failure inside the parent
+
+
+extern fn printf(format as cstr, ...) as i32
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+
+from std.string import String
+from std.sys import Command
+from std.sys import ProcessOutput
+from std.sys import stdio_null
+from std.sys import stdio_piped
+from std.sys import system_ref
+
+
+fn eq_c(s as String, c as cstr) as bool:
+    return strcmp(s.data to cstr, c) == 0 to i32
+
+
+fn main() as i32:
+    // 1. status(): decoded exit code via /bin/sh.
+    let p1 as String = String.make("/bin/sh" to cstr)
+    var c1 as Command = Command.new_ref(ref p1)
+    let a1 as String = String.make("-c" to cstr)
+    let a2 as String = String.make("exit 3" to cstr)
+    let _b1 as ptr[Command] = c1.add_arg(ref a1)
+    let _b2 as ptr[Command] = c1.add_arg(ref a2)
+    let st1 as i32 = try c1.status() catch: 0 - 1
+    if st1 != 3 to i32:
+        return 1 to i32
+    // 2. output(): both streams captured, status decoded.
+    let p2 as String = String.make("/bin/sh" to cstr)
+    var c2 as Command = Command.new_ref(ref p2)
+    let a3 as String = String.make("-c" to cstr)
+    let a4 as String = String.make("echo out-line; echo err-line 1>&2" to cstr)
+    let _b3 as ptr[Command] = c2.add_arg(ref a3)
+    let _b4 as ptr[Command] = c2.add_arg(ref a4)
+    let r2 as ProcessOutput = try c2.output() catch: ProcessOutput(
+        status = 0 - 1, stdout = String.make("" to cstr),
+        stderr = String.make("" to cstr))
+    if r2.status != 0 to i32:
+        return 2 to i32
+    if not eq_c(r2.stdout, "out-line\n"):
+        return 3 to i32
+    if not eq_c(r2.stderr, "err-line\n"):
+        return 4 to i32
+    // 3. Injection safety: whitespace inside one argument stays one
+    //    argument (no shell word splitting on our side).
+    let p3 as String = String.make("/bin/sh" to cstr)
+    var c3 as Command = Command.new_ref(ref p3)
+    let a5 as String = String.make("-c" to cstr)
+    let a6 as String = String.make("printf '%s' \"a b\"" to cstr)
+    let _b5 as ptr[Command] = c3.add_arg(ref a5)
+    let _b6 as ptr[Command] = c3.add_arg(ref a6)
+    let r3 as ProcessOutput = try c3.output() catch: ProcessOutput(
+        status = 0 - 1, stdout = String.make("" to cstr),
+        stderr = String.make("" to cstr))
+    if r3.status != 0 to i32:
+        return 5 to i32
+    if not eq_c(r3.stdout, "a b"):
+        return 6 to i32
+    // 4. add_args(): bulk builder appends in order.
+    let p4 as String = String.make("/bin/sh" to cstr)
+    var c4 as Command = Command.new_ref(ref p4)
+    let a7 as String = String.make("-c" to cstr)
+    let lst as List[String] = List[String]()
+    lst.append(String.make("printf '%s-%s' \"$0\" \"$1\"" to cstr))
+    lst.append(String.make("x y" to cstr))
+    lst.append(String.make("z" to cstr))
+    let _b7 as ptr[Command] = c4.add_arg(ref a7)
+    let _b8 as ptr[Command] = c4.add_args(lst)
+    let r4 as ProcessOutput = try c4.output() catch: ProcessOutput(
+        status = 0 - 1, stdout = String.make("" to cstr),
+        stderr = String.make("" to cstr))
+    if r4.status != 0 to i32:
+        return 7 to i32
+    if not eq_c(r4.stdout, "x y-z"):
+        return 8 to i32
+    // 5. env(): child sees the variable (added on top of inherited env).
+    let p5 as String = String.make("/bin/sh" to cstr)
+    var c5 as Command = Command.new_ref(ref p5)
+    let a8 as String = String.make("-c" to cstr)
+    let a9 as String = String.make("printf '%s' \"$NZ_CMD_TEST_VAR\"" to cstr)
+    let _b9 as ptr[Command] = c5.add_arg(ref a8)
+    let _b10 as ptr[Command] = c5.add_arg(ref a9)
+    let ek as String = String.make("NZ_CMD_TEST_VAR" to cstr)
+    let ev as String = String.make("env-ok" to cstr)
+    let _b11 as ptr[Command] = c5.env(ref ek, ref ev)
+    let r5 as ProcessOutput = try c5.output() catch: ProcessOutput(
+        status = 0 - 1, stdout = String.make("" to cstr),
+        stderr = String.make("" to cstr))
+    if r5.status != 0 to i32:
+        return 9 to i32
+    if not eq_c(r5.stdout, "env-ok"):
+        return 10 to i32
+    // 6. current_dir(): child pwd matches the Option-carried directory.
+    let p6 as String = String.make("/bin/sh" to cstr)
+    var c6 as Command = Command.new_ref(ref p6)
+    let a10 as String = String.make("-c" to cstr)
+    let a11 as String = String.make("pwd" to cstr)
+    let _b12 as ptr[Command] = c6.add_arg(ref a10)
+    let _b13 as ptr[Command] = c6.add_arg(ref a11)
+    let cd as String = String.make("/tmp" to cstr)
+    let _b14 as ptr[Command] = c6.current_dir(ref cd)
+    let r6 as ProcessOutput = try c6.output() catch: ProcessOutput(
+        status = 0 - 1, stdout = String.make("" to cstr),
+        stderr = String.make("" to cstr))
+    if r6.status != 0 to i32:
+        return 11 to i32
+    if not eq_c(r6.stdout, "/tmp\n"):
+        return 12 to i32
+    // 7. stdio_null(): stdout discarded, status still decoded.
+    let p7 as String = String.make("/bin/sh" to cstr)
+    var c7 as Command = Command.new_ref(ref p7)
+    let a12 as String = String.make("-c" to cstr)
+    let a13 as String = String.make("echo discarded; exit 4" to cstr)
+    let _b15 as ptr[Command] = c7.add_arg(ref a12)
+    let _b16 as ptr[Command] = c7.add_arg(ref a13)
+    let _b17 as ptr[Command] = c7.stdout(stdio_null())
+    let st7 as i32 = try c7.status() catch: 0 - 1
+    if st7 != 4 to i32:
+        return 13 to i32
+    // 8. stdio_piped() with status(): captured then discarded.
+    let p8 as String = String.make("/bin/sh" to cstr)
+    var c8 as Command = Command.new_ref(ref p8)
+    let a14 as String = String.make("-c" to cstr)
+    let a15 as String = String.make("echo piped-noise; exit 5" to cstr)
+    let _b18 as ptr[Command] = c8.add_arg(ref a14)
+    let _b19 as ptr[Command] = c8.add_arg(ref a15)
+    let _b20 as ptr[Command] = c8.stdout(stdio_piped())
+    let st8 as i32 = try c8.status() catch: 0 - 1
+    if st8 != 5 to i32:
+        return 14 to i32
+    // 9. system_ref(): quick shell execution with decoded status.
+    let sh1 as String = String.make("exit 6" to cstr)
+    let st9 as i32 = system_ref(ref sh1)
+    if st9 != 6 to i32:
+        return 15 to i32
+    // 10. Exec failure surfaces as status 127 (shell convention).
+    let p10 as String = String.make("/nonexistent/nizam-probe-binary" to cstr)
+    var c10 as Command = Command.new_ref(ref p10)
+    let st10 as i32 = try c10.status() catch: 0 - 1
+    if st10 != 127 to i32:
+        return 16 to i32
+    printf("test_command: all checks passed\n" to cstr)
+    return 0 to i32
