@@ -2,6 +2,12 @@
 import std.collections
 from std.collections import Dict, List
 from std.string import String, StringBuilder
+// Phase 3 adoption (spec 0031): raw libc system()/getpid()/clock_gettime()
+// call sites now go through std.sys (system_ref/pid/now_monotonic_ns).
+// system_ref takes ptr[String] with named locals; it returns the ALREADY
+// DECODED exit status (raw wait status had been leaking into returns until
+// now).  mkdir()/access() stay fn-scoped raw externs until std.fs exists.
+from std.sys import now_monotonic_ns, pid, system_ref
 
 import borrowck
 from borrowck import BorrowChecker
@@ -67,7 +73,6 @@ fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
 extern fn printf(format as cstr, ...) as i32
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 extern fn strcmp(s1 as cstr, s2 as cstr) as i32
-extern fn system(command as cstr) as i32
 extern fn fopen(filename as cstr, mode as cstr) as ptr
 extern fn fclose(stream as ptr) as i32
 extern fn fflush(stream as ptr) as i32
@@ -78,7 +83,6 @@ extern fn ftell(stream as ptr) as isize
 extern fn malloc(size as usize) as ptr
 extern fn free(ptr as ptr)
 extern fn strstr(haystack as cstr, needle as cstr) as cstr
-extern fn getpid() as i32
 extern fn compiler_lib_dir() as cstr
 extern fn strlen(s as cstr) as usize
 extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
@@ -216,12 +220,9 @@ fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
 
 // ── Performance Monitor ──────────────────────────────────────────────────────
 fn mantiq_perf_now_ns() as i64:
-    extern fn clock_gettime(clk as i32, ts as ptr) as i32
-    let ts as ptr[i64] = malloc(16 to usize) to ptr[i64]
-    let _r as i32 = clock_gettime(1 to i32, ts to ptr) // CLOCK_MONOTONIC
-    let sec as i64 = ts[0]
-    let nsec as i64 = ts[1]
-    return sec * 1000000000 + nsec
+    // Phase 3 (spec 0031): std.sys clock — CLOCK_MONOTONIC without the
+    // per-call leaked malloc the raw clock_gettime pattern had.
+    return now_monotonic_ns() to i64
 
 
 fn mantiq_perf_rss_bytes() as i64:
@@ -1073,7 +1074,8 @@ fn compile_source(
                     res = mantiq_run_command_direct(d_argv)
             free(d_argv to ptr)
         if res != 0:
-            res = system(cmd_buf to cstr)
+            let link_cmd as String = String.make(cmd_buf to cstr)
+            res = system_ref(ref link_cmd)
         free(cmd_buf to ptr)
         perf_end(perf, "link", t6)
     if res == 0 and use_cache:
@@ -1466,12 +1468,13 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                             let dlen as i64 = 8704 to i64 + (strlen(fmt_path) to i64 * 3 to i64)
                             let dbuf as ptr[u8] = malloc(dlen) to ptr[u8]
                             sprintf(dbuf, "diff -u --label %s --label %s -- \"%s\" /tmp/nizam-fmt-diff.tmp 2>&1" to cstr, fmt_path, fmt_path, fmt_path)
-                            let drc as i32 = system(dbuf to cstr)
+                            let dcmd as String = String.make(dbuf to cstr)
+                            let drc as i32 = system_ref(ref dcmd)
                             let _unu as i32 = unlink("/tmp/nizam-fmt-diff.tmp")
-                            // system() yields the raw wait status; decode
-                            // with the /256 idiom: 0 same, 1 diffs shown
-                            // (CI-friendly exit 1), >=2 diff itself failed
-                            let drc_code as i32 = drc / 256
+                            // std.sys system_ref returns the ALREADY-DECODED
+                            // exit status: 0 same, 1 diffs shown (CI-friendly
+                            // exit 1), >=2 diff itself failed
+                            let drc_code as i32 = drc
                             if drc_code == 1 to i32:
                                 fmt_dirty = 1 to i32
                             elif drc_code >= 2 to i32:
@@ -1596,7 +1599,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 cache_dir = get_arg(argv, r_arg_i + 1 to i32)
                 r_arg_i = r_arg_i + 1 to i32
             r_arg_i = r_arg_i + 1 to i32
-        let pidv as i32 = getpid()
+        let pidv as i32 = pid()
         let rt_buf as ptr[u8] = malloc(256 to usize) to ptr[u8]
         var _rt0 as i32 = 0
         if strstr(target_triple, "wasm" to cstr) != None to cstr:
@@ -1620,13 +1623,15 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             if strstr(target_triple, "wasm" to cstr) != None to cstr:
                 let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
                 let _rc0 as i32 = sprintf(run_cmd, "node --experimental-wasi-unstable-preview1 -e 'const { WASI } = require(\"wasi\"); const fs = require(\"fs\"); const wasi = new WASI({ version: \"preview1\", args: [\"%s\"] }); const wasm = new WebAssembly.Module(fs.readFileSync(\"%s\")); const inst = new WebAssembly.Instance(wasm, wasi.getImportObject()); const code = wasi.start(inst); process.exit(code || 0);'" to cstr, out_path, out_path)
-                let res as i32 = system(run_cmd to cstr)
+                let rcmd as String = String.make(run_cmd to cstr)
+                let res as i32 = system_ref(ref rcmd)
                 return res
             elif strstr(target_triple, "python-ext" to cstr) != None to cstr:
                 let mod_name_str as String = get_module_name_from_path(input_path)
                 let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
                 let _rc0 as i32 = sprintf(run_cmd, "python3 -c 'import sys; sys.path.insert(0, \"/tmp\"); import %s; print(\"Extension loaded successfully: %s\"); print(\"Available exports:\", [m for m in dir(%s) if not m.startswith(\"__\")])'" to cstr, mod_name_str.data to cstr, mod_name_str.data to cstr, mod_name_str.data to cstr)
-                let res as i32 = system(run_cmd to cstr)
+                let rcmd as String = String.make(run_cmd to cstr)
+                let res as i32 = system_ref(ref rcmd)
                 return res
             else:
                 let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
@@ -1636,7 +1641,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
                 free(run_argv to ptr)
                 if r_res != -1:
                     return r_res
-                let res as i32 = system(out_path)
+                let ocmd as String = String.make(out_path)
+                let res as i32 = system_ref(ref ocmd)
                 return res
         else:
             let _p11 as i32 = printf("Compilation failed for %s\n" to cstr, input_path)

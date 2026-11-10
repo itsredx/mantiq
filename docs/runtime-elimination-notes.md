@@ -1585,3 +1585,52 @@ Compiler facts this slice exposed (all probe-confirmed):
     execvp/waitpid/chdir/setenv/read) are fn-scoped inside
     spawn_and_wait/drain_fd/child paths — fn-scoped externs shadow
     cleanly and dodge the module-fn/extern name-collision rule (1).
+
+## std.sys Phase 3 — adoption (std/path.nz + src/main.nz)
+
+`std/path.nz` — first std.sys consumer outside the gate tests:
+
+- The dangling `from std.fs import exists` (std.fs never existed as a
+  module) is gone; `exists_ref` now checks access(2) F_OK through an
+  fn-scoped extern (same discipline as std.sys's own externs). The
+  header's symlink note now says access(2) follows symlinks.
+- COMPILER FACT 13: comparing a String to a string literal with `==`
+  (`os() == "windows"`) typechecks but lowers to
+  `icmp eq { ptr, i64, i64 } <String struct>, <raw cstr ptr>` — LLVM
+  assembly rejects it. Workaround: strcmp on the data pointers with
+  NAMED locals for both operands (no direct-literal args — the known
+  call-site-literal repr corruption), strcmp scoped INSIDE the fn
+  (module-fn/extern rule). `is_windows()` is the canonical example.
+- Probe p_path.nz: join/basename/exists_ref across the module import
+  boundary — join("/tmp/sub","f.nz") -> "/tmp/sub/f.nz", basename, and
+  exists_ref True after mkdir+touch / False before. fmt idempotent.
+
+`src/main.nz` — the compiler CLI now consumes std.sys in its own source:
+
+- Top-level `from std.sys import pid, system_ref, now_monotonic_ns`
+  (fmt re-sorts import lists alphabetically — harmless).
+- `mantiq_perf_now_ns`: the 7-line clock_gettime body — which LEAKED a
+  16-byte malloc on every call — is now `now_monotonic_ns() to i64`.
+- `getpid()` -> `pid()` at the run-tmp naming site; verified live (the
+  `/tmp/mantiq_run_tmp_<pid>` name still carries the real pid).
+- All five `system()` call sites -> `system_ref(ref <String>)` with
+  named String locals built via `String.make(<existing cstr>)`:
+  link-tool fallback, `fmt --diff` diff run, wasm `--run` inline node
+  script, python-ext inline script, bare out-path exec fallback.
+  main.nz's mantiq_run_command_direct keeps its LOCAL `pid` var — the
+  imported fn shadows nowhere it is used. Top-level externs `system`
+  and `getpid` are DELETED.
+- BEHAVIOR FIX that fell out of the swap: raw libc system() returns
+  the raw wait status (exit code << 8), and main's `return res` paths
+  truncated it modulo 256 — a child exiting k*256 looked SUCCESSFUL.
+  system_ref returns the DECODED status, so run-mode exit codes now
+  propagate as written; the fmt --diff `/256` decode idiom was dropped
+  (diff exit 1 = diffs shown, >=2 = diff failed; CI contract
+  re-verified live: dirty=1, clean=0).
+- `mkdir()` and `access()` REMAIN fn-scoped raw externs (no std.sys
+  surface for them — Phase 4/std.fs territory); getrusage/fopen et al.
+  untouched.
+- Smoke on the rebuilt binary: fmt -c clean rc=0; fmt --diff dirty
+  rc=1 with diff text; `run` of a probe .nz returning 3 matched the
+  promoted compiler exactly (rc=3; child stdout still swallowed by the
+  pre-existing direct-exec wiring — pre-existing, not regressions).
