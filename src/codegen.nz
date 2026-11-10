@@ -2490,7 +2490,8 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_alloc" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_reset" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_arena_destroy" to cstr), True)
-        set_dict_bool(ref (deref self).external_decls, String.make("mantiq_run_command_direct" to cstr), True)
+        // Direct Process Execution external decl REMOVED (spec 0031 Phase 4):
+        // mantiq_run_command_direct is no longer declared or emitted here.
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_realloc" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_free" to cstr), True)
         set_dict_bool(ref (deref self).external_decls, String.make("mantiq_set_profile_active" to cstr), True)
@@ -2515,7 +2516,6 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_reset(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_destroy(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_scope_lookup(ptr, ptr, ptr, i64)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_run_command_direct(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_realloc(ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_set_profile_active(i32)\n")
         append_cstr(ref (deref self).type_out, "declare i64 @mantiq_strlen(ptr)\n")

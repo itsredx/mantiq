@@ -1634,3 +1634,44 @@ Compiler facts this slice exposed (all probe-confirmed):
   rc=1 with diff text; `run` of a probe .nz returning 3 matched the
   promoted compiler exactly (rc=3; child stdout still swallowed by the
   pre-existing direct-exec wiring — pre-existing, not regressions).
+
+## std.sys Phase 4 — runtime.c shim deprecation (slice A: delete Direct Process Execution)
+
+Discovery first: the research doc's Phase 4 "mark mantiq_sys_* weak"
+half was ALREADY done — mantiq_sys_os/arch/getenv/setenv/unsetenv,
+mantiq_process_exit, and the Direct-Process-Execution copy of
+mantiq_run_command_direct were all `__attribute__((weak))` in
+runtime.c before this phase started. What remained was the deletion
+and the deprecation markers.
+
+Slice A removed the Direct Process Execution block (weak C copy of
+`mantiq_run_command_direct`, plus its fork/execvp/waitpid internals)
+and codegen's dead references to the symbol (external_decls registry
+entry + the `declare i32 @mantiq_run_command_direct(ptr)` line in
+type_out). Justification chain, all verified:
+
+- No emitter anywhere produced a call (`grep "call i32
+  @mantiq_run_command_direct"` -> 0 hits); only main.nz's own strong
+  Nizam fn (fork/execvp/waitpid in the compiler source) uses that
+  name, and std.sys Command/system_ref is the program-level path.
+- The LINK LINE always carried the CANONICAL root `runtime.c`
+  (clangshim invocations.log: 5/5 invocations use the root path) — the
+  in-tree `src/runtime.c` mirror (strong, pre-weak-overlay vintage,
+  per dev-sync.sh fan-out) was NEVER linked and will refresh via
+  dev-sync; mirrors under mantiqz/, compiler-service/ and
+  ~/.local/lib/mantiq get the deletion at the next sync.
+- Verification: self-build (no-cache) green; user program built
+  through the NEW codegen links cleanly against the blockless
+  runtime.c, its IR contains ZERO mantiq_run_command_direct
+  references (the promoted compiler's identical build still emitted
+  the declare — grep 1 vs 0 snapshot evidence of the dead metadata);
+  native run rc propagates as before.
+- wasm32-wasi target: fails at LLVM assembly with `'%t.363' defined
+  with type 'i64' but expected 'i32'` — CONFIRMED PRE-EXISTING by A/B
+  against the promoted compiler (identical failure, one line off due
+  to the removed declare). The wasm lowering bug predates slice A and
+  is out of Phase 4 scope; logged for the wasm backend backlog.
+
+Next: slice B — `__attribute__((deprecated))` notices on the six
+remaining legacy mantiq_sys_*/process_exit shims (decision 0049),
+then the shim inventory for Phase 5 (freestanding no-std tier).

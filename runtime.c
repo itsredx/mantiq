@@ -2993,29 +2993,10 @@ void nizam_webview_destroy(NizamWebview *wv) {
     free(wv);
 }
 
-// ── Direct Process Execution (no /bin/sh overhead) ───────────────────
-__attribute__((weak)) int32_t mantiq_run_command_direct(const char* const* argv) {
-    if (!argv || !argv[0]) return -1;
-#if defined(__unix__) || defined(__APPLE__)
-    pid_t pid = fork();
-    if (pid < 0) {
-        return -1;
-    }
-    if (pid == 0) {
-        execvp(argv[0], (char* const*)argv);
-        _exit(127);
-    }
-    int status = 0;
-    if (waitpid(pid, &status, 0) < 0) {
-        return -1;
-    }
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-        return 128 + WTERMSIG(status);
-    }
-    return -1;
-#else
-    return -1;
-#endif
-}
+// ── Direct Process Execution shim REMOVED (spec 0031 Phase 4) ─────────
+// mantiq_run_command_direct was deleted here: the compiler's own src/
+// main.nz defines the only remaining implementation (strong Nizam fn),
+// codegen emitted no calls to the C copy, and std.sys's Command (spec
+// 0031 §3.4) is the user-facing path for program-level spawning. The
+// mirror copies under src/, mantiqz/, compiler-service/ and
+// ~/.local/lib/mantiq refresh via dev-sync.
