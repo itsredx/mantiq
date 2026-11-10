@@ -24,9 +24,7 @@
 // --- Imports ----------------------------------------------------------------
 // make:           allocate a heap buffer (used by make_from_slice)
 // String, StringBuilder, memcpy:  core string types and raw memory copy
-// exists:         std.fs file-existence check for exists_ref()
 // os:             returns the current operating system name ("windows", "linux", etc.)
-from std.fs import exists
 from std.mem import make
 from std.string import String, StringBuilder, memcpy
 from std.sys import os
@@ -38,9 +36,20 @@ from std.sys import os
 // Determine whether the host platform is Windows by querying the OS name.
 // This is used throughout the module to conditionally enable Windows-specific
 // path handling (backslash separators, drive letters, UNC paths).
+//
+// DEVIATION (compiler bug workaround): `os() == "windows"` (String struct vs
+// string literal) typechecks but lowers to an invalid `icmp eq { ptr, i64,
+// i64 } <struct>, <raw cstr ptr>` — LLVM assembly rejects it.  Strings are
+// compared by strcmp on their data pointers with NAMED locals (no direct
+// strcmp args, overriding the known call-site-literal repr corruption), and
+// strcmp is fn-scoped like exists_ref's access extern (module fns must not
+// share names with same-module externs).
 // ---------------------------------------------------------------------------
 fn is_windows() as bool:
-    return os() == "windows"
+    extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+    let os_name as String = os()
+    let win as cstr = "windows"
+    return strcmp(os_name.data to cstr, win) == 0 to i32
 
 
 // ---------------------------------------------------------------------------
@@ -158,12 +167,15 @@ fn isabs(path as String) as bool:
 //
 // Check whether the file-system object at the given path exists.
 //
-// Delegates to std.fs.exists() by reconstructing a fresh String from the
-// referenced path's fields.  This indirection is needed because exists()
-// takes a value-type String.
+// DEVIATION: implemented directly on the libc access(2) F_OK check via an
+// fn-scoped extern — std.fs does not exist as a Nizam module yet, and the
+// historical std.fs.exists was a runtime.c shim slated for elimination
+// (spec 0031 Phase 4).  This keeps std.path free of runtime shims and
+// follows the std.sys discipline (libc externs, no shim in the path).
 // ============================================================================
 fn exists_ref(path as ptr[String]) as bool:
-    return exists(String(data = (deref path).data, len = (deref path).len, capacity = (deref path).capacity))
+    extern fn access(p as cstr, mode as i32) as i32
+    return access((deref path).data to cstr, 0 to i32) == 0 to i32
 
 
 // ============================================================================
@@ -376,8 +388,8 @@ fn basename(path as String) as String:
 //   Normalisation is left to a higher-level layer.
 //
 // Symlinks:
-//   exists_ref checks the file-system directly, so it follows symlinks
-//   (it delegates to std.fs.exists).
+//   exists_ref checks the file-system directly (access(2)), so it
+//   follows symlinks.
 //
 // Case sensitivity:
 //   Path comparison is byte-for-byte; no case folding is performed,
