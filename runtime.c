@@ -2089,7 +2089,7 @@ __attribute__((weak)) void mantiq_init(int argc, char** argv) {
     (void)argv;
 }
 
-__attribute__((weak)) void mantiq_process_exit(int code) {
+__attribute__((weak, deprecated("superseded by std.sys process API (spec 0031); shim kept for link compatibility only, removal pending"))) void mantiq_process_exit(int code) {
     exit(code);
 }
 
@@ -2242,7 +2242,7 @@ __attribute__((weak)) void mantiq_time_sleep(int seconds) {
 #endif
 }
 
-__attribute__((weak)) MantiqAsciiStr* mantiq_sys_os() {
+__attribute__((weak, deprecated("superseded by std.sys.os() (spec 0031); shim kept for link compatibility only, removal pending"))) MantiqAsciiStr* mantiq_sys_os() {
     static MantiqAsciiStr os_str;
 #if defined(_WIN32)
     os_str.ptr = "windows";
@@ -2263,7 +2263,7 @@ __attribute__((weak)) MantiqAsciiStr* mantiq_sys_os() {
     return &os_str;
 }
 
-__attribute__((weak)) MantiqAsciiStr* mantiq_sys_arch() {
+__attribute__((weak, deprecated("superseded by std.sys.arch() (spec 0031); shim kept for link compatibility only, removal pending"))) MantiqAsciiStr* mantiq_sys_arch() {
     static MantiqAsciiStr arch_str;
 #if defined(__wasm32__) || defined(__wasm__)
     arch_str.ptr = "wasm32";
@@ -2281,7 +2281,7 @@ __attribute__((weak)) MantiqAsciiStr* mantiq_sys_arch() {
     return &arch_str;
 }
 
-__attribute__((weak)) MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
+__attribute__((weak, deprecated("superseded by std.sys.getenv_* (spec 0031); shim kept for link compatibility only, removal pending"))) MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, long long name_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
@@ -2300,7 +2300,7 @@ __attribute__((weak)) MantiqAsciiStr* mantiq_sys_getenv(const char* name_ptr, lo
     return &val_str;
 }
 
-__attribute__((weak)) void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val_ptr, long long val_len) {
+__attribute__((weak, deprecated("superseded by std.sys.setenv_ref (spec 0031); shim kept for link compatibility only, removal pending"))) void mantiq_sys_setenv(const char* name_ptr, long long name_len, const char* val_ptr, long long val_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';
@@ -2320,7 +2320,7 @@ __attribute__((weak)) void mantiq_sys_setenv(const char* name_ptr, long long nam
     mantiq_free_c(val);
 }
 
-__attribute__((weak)) void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
+__attribute__((weak, deprecated("superseded by std.sys.unsetenv_ref (spec 0031); shim kept for link compatibility only, removal pending"))) void mantiq_sys_unsetenv(const char* name_ptr, long long name_len) {
     char* name = (char*)mantiq_malloc_c(name_len + 1);
     memcpy(name, name_ptr, name_len);
     name[name_len] = '\0';

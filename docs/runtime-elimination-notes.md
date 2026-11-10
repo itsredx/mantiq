@@ -1675,3 +1675,27 @@ type_out). Justification chain, all verified:
 Next: slice B — `__attribute__((deprecated))` notices on the six
 remaining legacy mantiq_sys_*/process_exit shims (decision 0049),
 then the shim inventory for Phase 5 (freestanding no-std tier).
+
+## std.sys Phase 4 slice B — deprecation markers landed
+
+The six legacy shims now carry BOTH attributes:
+`__attribute__((weak, deprecated("superseded by std.sys.* (spec 0031);
+shim kept for link compatibility only, removal pending")))` —
+mantiq_sys_os, mantiq_sys_arch, mantiq_sys_getenv,
+mantiq_sys_setenv, mantiq_sys_unsetenv, mantiq_process_exit. Each
+message names the std.sys replacement. Verified:
+
+- Reference sweep before marking: ZERO callers in any Nizam source
+  (src/*.nz, std/*.nz) and none inside runtime.c itself — the
+  markers are warning-neutral by construction.
+- User-program build through the clangshim link (runtime.c compiled
+  on the fly): Successfully compiled with NO deprecation warnings,
+  runs rc=3 as before; `nm` on the binary shows the shims are not
+  even linked (weak + unreferenced = dropped) — the decision 0049
+  invariant "existing binaries continue to link" holds at zero
+  pull cost.
+
+Phase 4 is COMPLETE with slices A+B: the only remaining direct-exec /
+host shims in runtime.c are marked deprecated and unreachable; the
+next runtime.c milestone is the Phase 5 inventory (freestanding
+#no_std syscall tier).
