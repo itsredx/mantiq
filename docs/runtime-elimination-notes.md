@@ -1753,3 +1753,45 @@ tree_sitter_helper.c; then std.sys freestanding fns (sys_write/
 sys_exit/sys_getpid as x86_64 inline-asm glue); then the std-using
 story (strings pull mantiq_malloc -> the pure-Nizam allocator from
 std.mem backs it).
+
+## std.sys Phase 5 slice 2 — `--no-libc` compiler plumbing LANDED
+
+The compiler now has a real freestanding link mode:
+
+- CLI: `build`/`run` accept `--no-libc`; threaded through
+  compile_source (new 10th param) into codegen via the new
+  LLVMCodegen.no_libc field (set right after init_cg, before
+  generate). The cache flags_sig gained a `_%d` slot for the flag so
+  freestanding and libc artifacts never share a cache key.
+- Link line (no-libc branch ahead of the native elif in
+  compile_source): `zig cc [-O0 -g | -O2 -fno-strict-aliasing]
+  -ffunction-sections <ll> -nostdlib -static -Wl,--gc-sections
+  -Wl,-e,_start -o <out>` — NO tree-sitter, NO -lm, NO link_targets,
+  NO python libs; gcc/clang fallbacks preserved (the existing
+  d_argv[0]-swap fallback works for any flag set).
+- Codegen (emit_rt_glue_bodies, after the pointer_size guard): when
+  no_libc, emits `@_start` (calls @main, exits via syscall 60 with
+  main's return), `@nz_sys_write(fd, buf, len)` and
+  `@nz_sys_getpid()` as inline-asm syscall glue (all-operand
+  templates — syscall number rides an `imr` input mov'd into rax),
+  plus the `@llvm.used` pinning global (compiler fact 14). Normal
+  builds are bit-identical to before (field False → branch dead).
+
+VERIFIED (through the new compiler binary, not the wrap — the wrap
+still invokes the promoted compiler, which silently ignores unknown
+flags; that cost one debug cycle):
+- `build minimal.nz --no-libc` → 1,224-byte STATIC ELF, 0 undefined
+  symbols, rc=3.
+- `build fsdemo.nz --no-libc` (extern-declares nz_sys_write/
+  nz_sys_getpid, prints via the write syscall) → 1,400-byte static
+  ELF, 0 undefined, prints, rc=3.
+- Normal build unchanged: hello.nz → dynamic binary (38 undefined
+  libc refs), rc=3, same as before the slice.
+- fmt clean + idempotent on both files; gate green at commit time.
+
+Known limits (documented, next slices): programs that USE std.string
+pull mantiq_malloc (calloc) through the glue — freestanding needs the
+pure-Nizam allocator (std.mem) to back it; tree-sitter-based programs
+and python-ext targets cannot be freestanding; AArch64 syscall numbers
+differ (x86_64-only tier for now); the libc-beyond-write story
+(read, environ, ...) grows the glue set incrementally.

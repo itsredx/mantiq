@@ -1275,6 +1275,9 @@ struct LLVMCodegen:
     public var python_exported_functions as List[ptr[Node]]
     public var python_exported_structs as List[ptr[Node]]
     public var has_python_embed as bool
+    // Phase 5 (spec 0031): --no-libc freestanding builds — emit _start +
+    // syscall glue (nz_sys_write/nz_sys_getpid) instead of linking crt/libc.
+    public var no_libc as bool
     public var pyobject_vars as Dict[String, bool]
     public var py_module_aliases as Dict[String, String]
     public var string_intern_ids as Dict[String, i32]
@@ -1323,6 +1326,7 @@ struct LLVMCodegen:
         (deref self).python_exported_functions = List[ptr[Node]]()
         (deref self).python_exported_structs = List[ptr[Node]]()
         (deref self).has_python_embed = False
+        (deref self).no_libc = False
         (deref self).pyobject_vars = Dict[String, bool]()
         (deref self).py_module_aliases = Dict[String, String]()
         (deref self).string_intern_ids = Dict[String, i32]()
@@ -2140,6 +2144,15 @@ struct LLVMCodegen:
     public fn emit_rt_glue_bodies(self as ptr[LLVMCodegen], out as ptr[StringBuilder]):
         if (deref self).target.pointer_size != 8 to usize:
             return
+        // Phase 5 freestanding tier (spec 0031): --no-libc builds get _start
+        // (calls main, exits via the raw exit syscall) plus syscall glue.
+        // @llvm.used is REQUIRED: unreferenced IR functions are silently
+        // dropped when clang compiles .ll -> .o (compiler fact 14).
+        if (deref self).no_libc:
+            append_cstr(out, "define void @_start() {\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
+            append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
+            append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
+            append_cstr(out, "@llvm.used = appending global [3 x ptr] [ptr @_start, ptr @nz_sys_write, ptr @nz_sys_getpid], section \"llvm.metadata\"\n\n")
         let h_malloc as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
         let h_malloc_raw as i32 = self.rt_body_missing("define ptr @mantiq_malloc_raw(i64" to cstr)
         let h_free as i32 = self.rt_body_missing("define void @mantiq_free(ptr" to cstr)

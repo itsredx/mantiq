@@ -640,10 +640,11 @@ fn compile_source(
     is_debug as bool,
     use_cache as bool,
     cache_dir as cstr,
+    no_libc as bool,
 ) as bool:
     let exe_sha as String = get_file_sha256("/proc/self/exe" to cstr)
     let flags_buf as ptr[u8] = malloc(512 to usize) to ptr[u8]
-    let _fb as i32 = sprintf(flags_buf, "%d_%s_%d_%s" to cstr, mode, target_str, if is_debug: 1 to i32 else: 0 to i32, exe_sha.data to cstr)
+    let _fb as i32 = sprintf(flags_buf, "%d_%s_%d_%d_%s" to cstr, mode, target_str, if is_debug: 1 to i32 else: 0 to i32, if no_libc: 1 to i32 else: 0 to i32, exe_sha.data to cstr)
     let flags_sig as String = String.make(flags_buf to cstr)
     free(flags_buf to ptr)
 
@@ -825,6 +826,7 @@ fn compile_source(
     (deref cg).needs_drop_types = (deref sema).needs_drop_types
     (deref cg).needs_drop_registry_active = True
     (deref cg).target = target
+    (deref cg).no_libc = no_libc
     if target.is_python_ext():
         (deref cg).python_ext_module_name = get_module_name_from_path(out_file)
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)
@@ -964,7 +966,61 @@ fn compile_source(
                 else:
                     _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L\"%s\" -ltree-sitter-mantiq \"%s/tree_sitter_helper.c\" -Wl,-rpath,\"%s\" -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c, opt_flag, ll_path, lib_dir, lib_dir, lib_dir, lib_dir, out_file, extra_flags_c)
         res = -1
-        if not target.is_wasm() and not target.is_python_ext():
+        if no_libc and not target.is_wasm() and not target.is_python_ext():
+            // Phase 5 freestanding link (spec 0031): no crt, no libc, no
+            // tree-sitter, no -lm. -ffunction-sections + --gc-sections drop
+            // the dead glue bodies (33 dead libc refs on minimal programs);
+            // _start + nz_sys_write/nz_sys_getpid glue comes from codegen
+            // (emit_rt_glue_bodies, pinned via @llvm.used, compiler fact 14).
+            let d_argv as ptr[cstr] = malloc(64 to usize * 8 to usize) to ptr[cstr]
+            var di as usize = 0 to usize
+            d_argv[di] = "zig" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "cc" to cstr
+            di = di + 1 to usize
+            if is_debug:
+                d_argv[di] = "-O0" to cstr
+                di = di + 1 to usize
+                d_argv[di] = "-g" to cstr
+                di = di + 1 to usize
+            else:
+                d_argv[di] = "-O2" to cstr
+                di = di + 1 to usize
+                d_argv[di] = "-fno-strict-aliasing" to cstr
+                di = di + 1 to usize
+            d_argv[di] = "-ffunction-sections" to cstr
+            di = di + 1 to usize
+            d_argv[di] = ll_path
+            di = di + 1 to usize
+            d_argv[di] = "-nostdlib" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-static" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-Wl,--gc-sections" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-Wl,-e,_start" to cstr
+            di = di + 1 to usize
+            d_argv[di] = "-o" to cstr
+            di = di + 1 to usize
+            d_argv[di] = out_file
+            di = di + 1 to usize
+            d_argv[di] = None to cstr
+            res = mantiq_run_command_direct(d_argv)
+            if res != 0:
+                // Fallback: gcc directly
+                var si as usize = 1 to usize
+                while si < di:
+                    d_argv[si] = d_argv[si + 1 to usize]
+                    si = si + 1 to usize
+                d_argv[0] = "gcc" to cstr
+                d_argv[di - 1 to usize] = None to cstr
+                res = mantiq_run_command_direct(d_argv)
+                if res != 0:
+                    // Fallback: clang directly
+                    d_argv[0] = "clang" to cstr
+                    res = mantiq_run_command_direct(d_argv)
+            free(d_argv to ptr)
+        elif not target.is_wasm() and not target.is_python_ext():
             let d_argv as ptr[cstr] = malloc(128 to usize * 8 to usize) to ptr[cstr]
             var di as usize = 0 to usize
             d_argv[di] = "zig" to cstr
@@ -1523,6 +1579,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         var is_debug as bool = False
         var use_cache as bool = True
         var cache_dir as cstr = ".mantiq_cache" to cstr
+        var no_libc as bool = False
         var arg_i as i32 = 3 to i32
         while arg_i < argc:
             if strcmp(get_arg(argv, arg_i), "-o" to cstr) == 0 and arg_i + 1 to i32 < argc:
@@ -1546,6 +1603,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             elif strcmp(get_arg(argv, arg_i), "--cache-dir" to cstr) == 0 and arg_i + 1 to i32 < argc:
                 cache_dir = get_arg(argv, arg_i + 1 to i32)
                 arg_i = arg_i + 1 to i32
+            elif strcmp(get_arg(argv, arg_i), "--no-libc" to cstr) == 0:
+                no_libc = True
             arg_i = arg_i + 1 to i32
         if target_specified and strstr(target_triple, "wasm" to cstr) != None to cstr and not out_specified:
             out_path = "a.wasm" to cstr
@@ -1561,7 +1620,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir, no_libc)
         perf_print(ref perf)
         if ok:
             let _p7 as i32 = printf("Successfully compiled %s -> %s\n" to cstr, input_path, out_path)
@@ -1580,6 +1639,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         var is_debug as bool = False
         var use_cache as bool = True
         var cache_dir as cstr = ".mantiq_cache" to cstr
+        var no_libc as bool = False
         var r_arg_i as i32 = 3 to i32
         while r_arg_i < argc:
             if strcmp(get_arg(argv, r_arg_i), "--target" to cstr) == 0 and r_arg_i + 1 to i32 < argc:
@@ -1598,6 +1658,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             elif strcmp(get_arg(argv, r_arg_i), "--cache-dir" to cstr) == 0 and r_arg_i + 1 to i32 < argc:
                 cache_dir = get_arg(argv, r_arg_i + 1 to i32)
                 r_arg_i = r_arg_i + 1 to i32
+            elif strcmp(get_arg(argv, r_arg_i), "--no-libc" to cstr) == 0:
+                no_libc = True
             r_arg_i = r_arg_i + 1 to i32
         let pidv as i32 = pid()
         let rt_buf as ptr[u8] = malloc(256 to usize) to ptr[u8]
@@ -1617,7 +1679,7 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir)
+        let ok as bool = compile_source(source_cstr, input_path, out_path, mode, target_triple, ref perf, is_debug, use_cache, cache_dir, no_libc)
         perf_print(ref perf)
         if ok:
             if strstr(target_triple, "wasm" to cstr) != None to cstr:
