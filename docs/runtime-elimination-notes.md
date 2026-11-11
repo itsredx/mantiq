@@ -1982,3 +1982,36 @@ research/freestanding/):
 Next slices: cpu_count/page_size via auxv capture (sysconf),
 setenv/unsetenv freestanding (environ copy-on-write), List/Dict story
 (box32/ast_alloc calloc), AArch64 tier.
+
+## std.sys Phase 5 slice 7 — sysconf via the auxiliary vector LANDED
+
+std.sys page_size()/cpu_count() go through sysconf(30/44/84/58); the
+no_libc block now shims sysconf with kernel-backed sources of truth:
+
+- `fs_auxv_find(type)` walks the auxiliary vector lazily from the
+  captured @fs_envp — auxv sits right after envp's NULL on the initial
+  stack, so no _start change is needed; returns the entry's value or
+  -1 (NULL envp or AT_NULL reached first also → -1).
+- `sysconf(_SC_PAGESIZE=30)` and std.sys's Darwin fallback (44) read
+  AT_PAGESZ (**6**, not 3 — the first version passed 3, which is
+  AT_PHDR, and returned the program-headers address 0x1000040;
+  decoding it via a decimal-print probe exposed the mixup). Fallback
+  4096 kept via std.sys itself (unknown → -1 → std.sys defaults).
+- `sysconf(_SC_NPROCESSORS_ONLN=84)` / Darwin (58) = sched_getaffinity
+  (syscall 203, mask = @fs_affmask global scratch) + llvm.ctpop.i64
+  (intrinsic, no libm) — the same source of truth glibc's get_nprocs
+  uses. popcount 0 → 1.
+- Unknown names → -1.
+
+VERIFIED through the new compiler binary:
+- fsdemo11.nz: page_size()==4096 (ps-ok) AND cpu_count()>0 (cc-ok,
+  matches nproc=4) — 2,520-byte static ELF, 0 undefined symbols,
+  rc=0.
+- iso14 decimal printer: raw page_size() = 4096 after the AT_PAGESZ
+  fix (was 16777280 = AT_PHDR before).
+- All slice 2-6 regressions clean (minimal/fsdemo/fsdemo3/fsdemo4/
+  echo/argv/env/std.sys/args/argv0/has_env + libc hello). fmt clean +
+  idempotent; gate green at commit time.
+
+Next slices: setenv/unsetenv freestanding (copy-on-write environ),
+List/Dict story (box32/ast_alloc calloc), AArch64 tier.

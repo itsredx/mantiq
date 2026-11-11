@@ -2219,6 +2219,19 @@ struct LLVMCodegen:
             let fs_getenv_missing as i32 = self.rt_body_missing("define ptr @getenv(ptr" to cstr)
             if fs_getenv_missing == 1 to i32:
                 append_cstr(out, "define ptr @getenv(ptr %name) {\nentry:\n  %nl = call i64 @strlen(ptr %name)\n  %base = load ptr, ptr @fs_envp\n  br label %walk\nwalk:\n  %i = phi i64 [ 0, %entry ], [ %inext, %next ]\n  %sh = shl i64 %i, 3\n  %slot = getelementptr i8, ptr %base, i64 %sh\n  %e = load ptr, ptr %slot\n  %end = icmp eq ptr %e, null\n  br i1 %end, label %nf, label %try\ntry:\n  %m = call i32 @memcmp(ptr %e, ptr %name, i64 %nl)\n  %eq = icmp eq i32 %m, 0\n  br i1 %eq, label %chk, label %next\nchk:\n  %eqp = getelementptr i8, ptr %e, i64 %nl\n  %c = load i8, ptr %eqp\n  %iseq = icmp eq i8 %c, 61\n  br i1 %iseq, label %found, label %next\nfound:\n  %vo = add i64 %nl, 1\n  %vp = getelementptr i8, ptr %e, i64 %vo\n  ret ptr %vp\nnext:\n  %inext = add i64 %i, 1\n  br label %walk\nnf:\n  ret ptr null\n}\n\n")
+            // Phase 5 slice 7: sysconf via the auxiliary vector. auxv
+            // follows envp's NULL on the initial stack; walking it lazily
+            // from @fs_envp needs no _start change. AT_PAGESZ (3) serves
+            // _SC_PAGESIZE (30) and std.sys's Darwin fallback (44);
+            // _SC_NPROCESSORS_ONLN (84) / Darwin (58) come from
+            // sched_getaffinity (syscall 203) + llvm.ctpop — the same
+            // source of truth glibc's get_nprocs uses. Unknown names
+            // return -1 so std.sys falls back to its hardcoded defaults.
+            let fs_sysconf_missing as i32 = self.rt_body_missing("define i64 @sysconf(i32" to cstr)
+            if fs_sysconf_missing == 1 to i32:
+                append_cstr(out, "declare i64 @llvm.ctpop.i64(i64)\n@fs_affmask = global i64 0\n\n")
+                append_cstr(out, "define internal i64 @fs_auxv_find(i64 %want) {\nentry:\n  %env = load ptr, ptr @fs_envp\n  %en = icmp eq ptr %env, null\n  br i1 %en, label %nf, label %wenv\nwenv:\n  %si = phi ptr [ %env, %entry ], [ %sn, %step ]\n  %sv = load ptr, ptr %si\n  %snz = icmp ne ptr %sv, null\n  br i1 %snz, label %step, label %aux\nstep:\n  %sn = getelementptr i8, ptr %si, i64 8\n  br label %wenv\naux:\n  %ab = getelementptr i8, ptr %si, i64 8\n  br label %wloop\nwloop:\n  %i = phi i64 [ 0, %aux ], [ %i2, %wstep ]\n  %off = shl i64 %i, 3\n  %tp = getelementptr i8, ptr %ab, i64 %off\n  %t = load i64, ptr %tp\n  %isnull = icmp eq i64 %t, 0\n  br i1 %isnull, label %nf, label %chk\nchk:\n  %eq = icmp eq i64 %t, %want\n  br i1 %eq, label %found, label %wstep\nfound:\n  %voff = add i64 %off, 8\n  %vp = getelementptr i8, ptr %ab, i64 %voff\n  %v = load i64, ptr %vp\n  ret i64 %v\nwstep:\n  %i2 = add i64 %i, 2\n  br label %wloop\nnf:\n  ret i64 -1\n}\n\n")
+                append_cstr(out, "define i64 @sysconf(i32 %name) {\nentry:\n  %n30 = icmp eq i32 %name, 30\n  %n44 = icmp eq i32 %name, 44\n  %psz = or i1 %n30, %n44\n  br i1 %psz, label %pagesz, label %chkcpu\npagesz:\n  %pv = call i64 @fs_auxv_find(i64 6)\n  %pok = icmp sgt i64 %pv, 0\n  %pret = select i1 %pok, i64 %pv, i64 4096\n  ret i64 %pret\nchkcpu:\n  %n84 = icmp eq i32 %name, 84\n  %n58 = icmp eq i32 %name, 58\n  %cc = or i1 %n84, %n58\n  br i1 %cc, label %cpus, label %dflt\ncpus:\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 8, ptr @fs_affmask, i64 203)\n  %ok = icmp eq i64 %r, 0\n  br i1 %ok, label %pop, label %dflt\npop:\n  %mv = load i64, ptr @fs_affmask\n  %cnt = call i64 @llvm.ctpop.i64(i64 %mv)\n  %cok = icmp sgt i64 %cnt, 0\n  %cret = select i1 %cok, i64 %cnt, i64 1\n  ret i64 %cret\ndflt:\n  ret i64 -1\n}\n\n")
             // Phase 5 slice 6: /proc/self/cmdline shim so std.sys args()
             // works unchanged in freestanding mode. fopen returns a token
             // only for /proc/self/cmdline (everything else degrades
