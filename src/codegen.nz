@@ -2183,9 +2183,42 @@ struct LLVMCodegen:
             let fs_memcpy_missing as i32 = self.rt_body_missing("define ptr @memcpy(ptr" to cstr)
             if fs_memcpy_missing == 1 to i32:
                 append_cstr(out, "define ptr @memcpy(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
+            let fs_memset_missing as i32 = self.rt_body_missing("define ptr @memset(ptr" to cstr)
+            if fs_memset_missing == 1 to i32:
+                append_cstr(out, "define ptr @memset(ptr %d, i32 %c, i64 %n) {\n  %ci = sext i32 %c to i64\n  call void asm sideeffect \"cld; mov $0, %rdi; mov $1, %rcx; movzbl $2, %eax; rep stosb\", \"imr,imr,imr,~{rdi},~{rcx},~{rax},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, i64 %n, i64 %ci)\n  ret ptr %d\n}\n\n")
             let fs_abort_missing as i32 = self.rt_body_missing("define void @abort(" to cstr)
             if fs_abort_missing == 1 to i32:
                 append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 60)\n  unreachable\n}\n\n")
+            // Phase 5 slice 5: std.sys freestanding backing. The libc
+            // symbols std.sys calls (free/uname/getpid/getenv/
+            // clock_gettime) get syscall or captured-stack bodies, each
+            // guarded by rt_body_missing so user-defined versions win.
+            // free is a no-op under the bump allocator (memory is
+            // reclaimed at process exit).
+            let fs_free_missing as i32 = self.rt_body_missing("define void @free(ptr" to cstr)
+            if fs_free_missing == 1 to i32:
+                append_cstr(out, "define void @free(ptr %p) {\n  ret void\n}\n\n")
+            let fs_strlen_missing as i32 = self.rt_body_missing("define i64 @strlen(ptr" to cstr)
+            if fs_strlen_missing == 1 to i32:
+                append_cstr(out, "define i64 @strlen(ptr %s) {\n  %r = call i64 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rcx; repnz scasb; not %rcx; dec %rcx; mov %rcx, %rax\", \"={rax},imr,imr,~{rdi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %s, i64 -1)\n  ret i64 %r\n}\n\n")
+            let fs_memcmp_missing as i32 = self.rt_body_missing("define i32 @memcmp(ptr" to cstr)
+            if fs_memcmp_missing == 1 to i32:
+                append_cstr(out, "define i32 @memcmp(ptr %a, ptr %b, i64 %n) {\n  %r = call i32 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rsi; mov $3, %rcx; repz cmpsb; setne %al; movzbl %al, %eax\", \"={eax},imr,imr,imr,~{rdi},~{rsi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %a, ptr %b, i64 %n)\n  ret i32 %r\n}\n\n")
+            let fs_bcmp_missing as i32 = self.rt_body_missing("define i32 @bcmp(ptr" to cstr)
+            if fs_bcmp_missing == 1 to i32:
+                append_cstr(out, "define i32 @bcmp(ptr %a, ptr %b, i64 %n) {\n  %r = call i32 @memcmp(ptr %a, ptr %b, i64 %n)\n  ret i32 %r\n}\n\n")
+            let fs_getpid_missing as i32 = self.rt_body_missing("define i32 @getpid(" to cstr)
+            if fs_getpid_missing == 1 to i32:
+                append_cstr(out, "define i32 @getpid() {\n  %g = call i32 asm sideeffect \"mov $1, %rax; syscall\", \"={eax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i32 %g\n}\n\n")
+            let fs_cgtime_missing as i32 = self.rt_body_missing("define i32 @clock_gettime(i32" to cstr)
+            if fs_cgtime_missing == 1 to i32:
+                append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %r = call i32 asm sideeffect \"mov $3, %rax; syscall\", \"={eax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i32 %clk, ptr %tp, i64 228)\n  ret i32 %r\n}\n\n")
+            let fs_uname_missing as i32 = self.rt_body_missing("define i32 @uname(ptr" to cstr)
+            if fs_uname_missing == 1 to i32:
+                append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $2, %rax; syscall\", \"={rax},{rdi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 63)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
+            let fs_getenv_missing as i32 = self.rt_body_missing("define ptr @getenv(ptr" to cstr)
+            if fs_getenv_missing == 1 to i32:
+                append_cstr(out, "define ptr @getenv(ptr %name) {\nentry:\n  %nl = call i64 @strlen(ptr %name)\n  %base = load ptr, ptr @fs_envp\n  br label %walk\nwalk:\n  %i = phi i64 [ 0, %entry ], [ %inext, %next ]\n  %sh = shl i64 %i, 3\n  %slot = getelementptr i8, ptr %base, i64 %sh\n  %e = load ptr, ptr %slot\n  %end = icmp eq ptr %e, null\n  br i1 %end, label %nf, label %try\ntry:\n  %m = call i32 @memcmp(ptr %e, ptr %name, i64 %nl)\n  %eq = icmp eq i32 %m, 0\n  br i1 %eq, label %chk, label %next\nchk:\n  %eqp = getelementptr i8, ptr %e, i64 %nl\n  %c = load i8, ptr %eqp\n  %iseq = icmp eq i8 %c, 61\n  br i1 %iseq, label %found, label %next\nfound:\n  %vo = add i64 %nl, 1\n  %vp = getelementptr i8, ptr %e, i64 %vo\n  ret ptr %vp\nnext:\n  %inext = add i64 %i, 1\n  br label %walk\nnf:\n  ret ptr null\n}\n\n")
         let h_malloc as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
         let h_malloc_raw as i32 = self.rt_body_missing("define ptr @mantiq_malloc_raw(i64" to cstr)
         let h_free as i32 = self.rt_body_missing("define void @mantiq_free(ptr" to cstr)
