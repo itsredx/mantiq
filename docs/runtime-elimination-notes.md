@@ -2079,3 +2079,69 @@ research/freestanding/):
 Next slices: List/Dict story (box32/ast_alloc templates still
 calloc-based — now served by the bump calloc; a std.mem-backed
 mantiq_malloc remains on the backlog), AArch64 tier.
+
+## std.sys Phase 5 slice 9 — List/Dict freestanding + List.remove fix LANDED
+
+The anticipated List/Dict worklist turned out to be EMPTY: the
+__mantiq_dict_* / __mantiq_list_* helpers (dict_create, hash_string,
+get_or_insert, keys, values, list_append, ...) come from the stdlib
+source compiled into every program and allocate through
+mantiq_malloc / mantiq_alloc_box32 — which slice 3's bump allocator
+and slice 8's bump-backed calloc already serve. fsdemo13 constructs a
+Dict, assigns/overwrites/reads/keys it, and appends 2500 i64s to a
+List (forcing the box32 slab-rollover path: newslab → calloc 64KB →
+bump) — all freestanding, 0 undefined symbols.
+
+Two codegen fixes landed anyway, both shared with libc mode:
+
+- COMPILER FACT 18 (pre-existing, fixed in slice 9): List.remove's
+  bool return was never captured. The emission site emitted
+  `call i8 @__mantiq_list_remove(...)` as a bare statement and
+  returned the literal string "null" as the result expression, so
+  `let rmv as bool = lst.remove(x)` lowered to `store i8 null` —
+  invalid IR ("null must be a pointer type") AND semantically
+  always-false even where it assembled. Fixed by capturing the call
+  into a fresh temp (the same pattern count/index already use) and
+  returning the temp. Verified both modes: fsdemo14 asserts
+  remove/pop/reverse freestanding; iso16 (extern printf) asserts
+  remove's true return + survivors under libc (libc-rmv-ok).
+- memmove glue: LLVM lowers List remove's element-shift loop to
+  memmove at -O2 (same family as slice 5's memset discovery). Body =
+  rep movsb (overlap-safe by definition — exactly memmove's
+  contract) via memcpy's proven tied-output template.
+
+API-surface notes for future probes (fact 16 family, pre-existing,
+both modes — probe workarounds only, not fixed):
+
+- Dict-assign converts the KEY to a String struct but stores the
+  VALUE expression raw — `(deref ref d)["k1"] = "v1"` stores a bare
+  cstr pointer into the String value slot (garbage struct). Values
+  must be String variables. (Fact 16's call-site hole, in the
+  dict-assign path.)
+- `Dict[K, V]()` comes from std.collections
+  (`from std.collections import Dict`); `List[T]()` is a builtin
+  constructor needing no import.
+- Passing a cstr literal to a String PARAMETER prints garbage
+  (empty) fields — fact 16 again; probes pass cstr+len pairs or
+  String variables.
+
+VERIFIED through the new compiler binary (probes preserved in
+research/freestanding/):
+- fsdemo13.nz: List[String] build/length/index + List[i64] 2500-elem
+  append+sum stress (acc == 3123750) + Dict create/assign/overwrite/
+  keys/read-back — alpha / L-ok / v1b / D-ok, 8,976-byte static ELF,
+  0 undefined symbols, rc=0.
+- fsdemo14.nz: Dict has(hit+miss)/remove(hit+miss)/get(key,default)
+  (hit+miss)/values + List[i64] remove/pop/reverse/index —
+  H-ok/R-ok/G-ok/V-ok/L2-ok, 12,640-byte static ELF, 0 undefined,
+  rc=0.
+- iso16.nz (libc): List.remove returns True and survivors are
+  correct (libc-rmv-ok, rc=0).
+- All slice 2-8 regressions clean (minimal/fsdemo/fsdemo3/fsdemo4/
+  echo/argv/env/std.sys/args/argv0/sysconf/setenv/has_env/
+  page_size + libc hello). fmt clean + idempotent; gate green at
+  commit time.
+
+Next slices: AArch64 tier (naked _start + capture + syscall-number
+table carry over; different numbers), or std.mem-backed mantiq_malloc
+(replacing the bump allocator) per the spec's later phases.

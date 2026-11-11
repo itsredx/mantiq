@@ -2186,6 +2186,13 @@ struct LLVMCodegen:
             let fs_memset_missing as i32 = self.rt_body_missing("define ptr @memset(ptr" to cstr)
             if fs_memset_missing == 1 to i32:
                 append_cstr(out, "define ptr @memset(ptr %d, i32 %c, i64 %n) {\n  %ci = sext i32 %c to i64\n  call void asm sideeffect \"cld; mov $0, %rdi; mov $1, %rcx; movzbl $2, %eax; rep stosb\", \"imr,imr,imr,~{rdi},~{rcx},~{rax},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, i64 %n, i64 %ci)\n  ret ptr %d\n}\n\n")
+            // Phase 5 slice 9: memmove (LLVM lowers List remove's
+            // element-shift loop to it at -O2, same family as the memset
+            // discovery). rep movsb is overlap-safe by definition, which
+            // is exactly memmove's contract.
+            let fs_memmove_missing as i32 = self.rt_body_missing("define ptr @memmove(ptr" to cstr)
+            if fs_memmove_missing == 1 to i32:
+                append_cstr(out, "define ptr @memmove(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
             let fs_abort_missing as i32 = self.rt_body_missing("define void @abort(" to cstr)
             if fs_abort_missing == 1 to i32:
                 append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 60)\n  unreachable\n}\n\n")
@@ -9497,14 +9504,17 @@ struct LLVMCodegen:
                         append_i64(ref (deref self).main_out, elem_s_cr)
                         append_cstr(ref (deref self).main_out, ")\n")
                         return isres
-                    append_cstr(ref (deref self).main_out, "  call i8 @__mantiq_list_remove(ptr ")
+                    let rres as ptr[u8] = self.fresh_temp()
+                    append_cstr(ref (deref self).main_out, "  ")
+                    append_cstr(ref (deref self).main_out, rres to cstr)
+                    append_cstr(ref (deref self).main_out, " = call i8 @__mantiq_list_remove(ptr ")
                     append_cstr(ref (deref self).main_out, list_addr_cr to cstr)
                     append_cstr(ref (deref self).main_out, ", ptr ")
                     append_cstr(ref (deref self).main_out, m_ep to cstr)
                     append_cstr(ref (deref self).main_out, ", i64 ")
                     append_i64(ref (deref self).main_out, elem_s_cr)
                     append_cstr(ref (deref self).main_out, ")\n")
-                    return"null" to ptr[u8]
+                    return rres
                 return"null" to ptr[u8]
             if strcmp(mname, "insert") == 0:
                 if m_args.length() >= 2 to i64:
