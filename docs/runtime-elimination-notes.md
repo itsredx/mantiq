@@ -1941,3 +1941,44 @@ too). Workaround: build the String explicitly via String.make.
 Next slices: args()/argv0() via the captured stack (replaces the
 /proc/self/cmdline fopen path in freestanding), List/Dict story,
 AArch64 tier.
+
+## std.sys Phase 5 slice 6 — args()/argv0() via the captured stack LANDED
+
+std.sys args() reads /proc/self/cmdline through fopen/fread/fclose;
+instead of reimplementing FILE* in freestanding, the no_libc block now
+shims those three libc symbols with exact /proc semantics — std.sys
+source unchanged, works identically in both modes (libc builds keep
+the real fopen path; no_libc=False never enters the shim block):
+
+- `fopen(path, mode)`: strcmp against "/proc/self/cmdline" (a private
+  module-global string + memcmp/strlen glue); match returns the
+  @fs_cmdline_token global address (a unique non-null token), anything
+  else returns NULL — std.sys callers degrade gracefully on NULL.
+- `fread(buf, sz, cnt, f)`: if f == token, serialize the captured argv
+  NUL-separated into buf (exactly /proc/self/cmdline's format):
+  phi-driven slot loop, per-arg strlen + memcpy + explicit NUL, capped
+  by sz*cnt (a full arg+1 that doesn't fit stops the walk), returns
+  bytes written; other tokens return 0.
+- `fclose(f)`: no-op success.
+
+LLVM dominance gotcha (compiler fact 17): a loop-header phi's incoming
+values must dominate the predecessor block — updating two phis from a
+conditional side-path (skip the NUL-copy when the arg is null) needs a
+join block with its own phis merging the copy/skip paths; putting the
+increment in the copy block alone is "Instruction does not dominate
+all uses".
+
+VERIFIED through the new compiler binary (probes preserved in
+research/freestanding/):
+- fsdemo9.nz (args() loop, printing each via nz_sys_write): with
+  ./fsdemo9 alpha beta → argv0/alpha/beta lines, rc=3 (=argc); no
+  args → argv0 only, rc=1. 0 undefined symbols, 3,824-byte static ELF.
+- fsdemo10.nz (argv0()): prints the binary path, rc=3 with two args.
+- Worklist before the shim: exactly fopen/fread/fclose.
+- All slice 2-5 regressions clean (minimal/fsdemo/fsdemo3/fsdemo4/
+  echo/argv/env/std.sys probes + libc hello). fmt clean + idempotent;
+  gate green at commit time.
+
+Next slices: cpu_count/page_size via auxv capture (sysconf),
+setenv/unsetenv freestanding (environ copy-on-write), List/Dict story
+(box32/ast_alloc calloc), AArch64 tier.
