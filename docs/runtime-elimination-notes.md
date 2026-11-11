@@ -1801,6 +1801,48 @@ Next slices: incremental syscall glue (read/environ/args), List/Dict
 freestanding story (box32/ast_alloc templates also calloc), AArch64
 tier.
 
+## std.sys Phase 5 slice 4 — freestanding read + args/envp LANDED
+
+The no-libc glue grows from write-only to a real process surface:
+
+- `@_start` is now `naked` and CAPTURES the initial stack before
+  calling main: `mov %rsp, %rax` (inline-asm, "={rax}"), argc = [rsp],
+  argv = rsp+8, envp = rsp + 8*argc + 16, all stored into
+  `@fs_argc`/`@fs_argv`/`@fs_envp` globals. WHY naked: LLVM inserts a
+  `push %rax` stack-realignment prologue in a normal _start (it assumes
+  the call-ABI rsp ≡ 8 mod 16; the kernel guarantees ≡ 0 at process
+  entry), which silently shifted the capture to read the pushed rax
+  (argc=0, argv/envp garbage — found via exit-code probes and
+  disassembly; naked kills the prologue and the direct @main call is
+  ABI-correct since call pushes the return address making rsp ≡ 8).
+- New glue (all defined unconditionally in the no_libc block, pinned
+  via @llvm.used — now 8 entries): `nz_sys_read(fd, buf, count)`
+  (syscall 0, same operand template as write), `nz_fs_argc()` → i64,
+  `nz_fs_argv(i)` → ptr (cstr), `nz_fs_envp()` → ptr (char** base),
+  `nz_fs_env_at(i)` → ptr (env string i, NULL past the end).
+
+VERIFIED through the new compiler binary (probes in
+research/freestanding/):
+- fsdemo5.nz (echo: read 0 → write 1, bump-allocated 256B buffer) →
+  pipes echo correctly, rc=0.
+- fsdemo6.nz (argc/argv) → no-args rc=1 (argc), arg "alpha" rc=97
+  (argv[1][0]='a') — argv indexing proven through the captured stack.
+- fsdemo7.nz (env) → `env -i FOO=Bar` rc=70 (envp[0][0]='F'),
+  `env -i` rc=0 (NULL guard: env_at(0) returns null with an empty
+  environ), repeated runs deterministic.
+- Regressions: minimal rc=3, fsdemo prints+rc=3, fsdemo3/fdsdemo4
+  std.string paths unchanged, normal libc build unchanged.
+- fmt clean + idempotent; gate green at commit time.
+
+Gotchas recorded: `env VAR=x prog` ADDS to the inherited environ (use
+`env -i VAR=x` for a deterministic envp[0]); the env probe must
+null-check env_at(0) because an empty environ is a NULL first slot
+(deref without guard = SIGSEGV, rc=139). Server restarts keep wiping
+/tmp/opencode mid-slice — probe sources now all live in
+research/freestanding/ and get copied back. Next slices: std.sys
+freestanding backing (getenv/args/env via the capture, getpid via
+nz_sys_getpid), List/Dict story, AArch64 tier.
+
 ## std.sys Phase 5 slice 2 — `--no-libc` compiler plumbing LANDED
 
 The compiler now has a real freestanding link mode:

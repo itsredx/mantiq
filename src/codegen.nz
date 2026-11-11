@@ -2149,10 +2149,20 @@ struct LLVMCodegen:
         // @llvm.used is REQUIRED: unreferenced IR functions are silently
         // dropped when clang compiles .ll -> .o (compiler fact 14).
         if (deref self).no_libc:
-            append_cstr(out, "define void @_start() {\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
+            // _start captures the initial stack (argc at [rsp], argv[]
+            // after it, envp[] after argv's NULL) into globals so
+            // nz_fs_argc/nz_fs_argv/nz_fs_envp can serve args+env without
+            // libc. Capture happens before any call moves rsp.
+            append_cstr(out, "@fs_argc = global i64 0\n@fs_argv = global ptr null\n@fs_envp = global ptr null\n\n")
+            append_cstr(out, "define void @_start() naked {\n  %sp = call ptr asm sideeffect \"mov %rsp, %rax\", \"={rax},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %fs_argc = load i64, ptr %sp\n  store i64 %fs_argc, ptr @fs_argc\n  %fs_ap = getelementptr i8, ptr %sp, i64 8\n  store ptr %fs_ap, ptr @fs_argv\n  %fs_ai = ptrtoint ptr %fs_ap to i64\n  %fs_sh = shl i64 %fs_argc, 3\n  %fs_e1 = add i64 %fs_ai, %fs_sh\n  %fs_e2 = add i64 %fs_e1, 8\n  %fs_ep = inttoptr i64 %fs_e2 to ptr\n  store ptr %fs_ep, ptr @fs_envp\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
             append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
+            append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 0)\n  ret i64 %r\n}\n\n")
             append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
-            append_cstr(out, "@llvm.used = appending global [3 x ptr] [ptr @_start, ptr @nz_sys_write, ptr @nz_sys_getpid], section \"llvm.metadata\"\n\n")
+            append_cstr(out, "define i64 @nz_fs_argc() {\n  %a = load i64, ptr @fs_argc\n  ret i64 %a\n}\n\n")
+            append_cstr(out, "define ptr @nz_fs_argv(i64 %i) {\n  %base = load ptr, ptr @fs_argv\n  %off = shl i64 %i, 3\n  %slot = getelementptr i8, ptr %base, i64 %off\n  %v = load ptr, ptr %slot\n  ret ptr %v\n}\n\n")
+            append_cstr(out, "define ptr @nz_fs_envp() {\n  %e = load ptr, ptr @fs_envp\n  ret ptr %e\n}\n\n")
+            append_cstr(out, "define ptr @nz_fs_env_at(i64 %i) {\n  %base = load ptr, ptr @fs_envp\n  %off = shl i64 %i, 3\n  %slot = getelementptr i8, ptr %base, i64 %off\n  %v = load ptr, ptr %slot\n  ret ptr %v\n}\n\n")
+            append_cstr(out, "@llvm.used = appending global [8 x ptr] [ptr @_start, ptr @nz_sys_write, ptr @nz_sys_read, ptr @nz_sys_getpid, ptr @nz_fs_argc, ptr @nz_fs_argv, ptr @nz_fs_envp, ptr @nz_fs_env_at], section \"llvm.metadata\"\n\n")
             // Freestanding allocator (bump over anonymous mmap chunks): backs
             // mantiq_malloc/mantiq_malloc_raw/mantiq_realloc without libc.
             // Each allocation carries a 16-byte header storing its usable
