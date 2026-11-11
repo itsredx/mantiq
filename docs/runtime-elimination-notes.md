@@ -1754,6 +1754,53 @@ sys_exit/sys_getpid as x86_64 inline-asm glue); then the std-using
 story (strings pull mantiq_malloc -> the pure-Nizam allocator from
 std.mem backs it).
 
+## std.sys Phase 5 slice 3 — freestanding std-using programs LANDED
+
+Programs that USE std.string now link and run under `--no-libc`:
+
+- Worklist from the first std.string probe (two String.make +
+  sys_write): exactly `calloc`, `memcpy`, `abort` — all pulled by the
+  Milestone-C glue bodies (mantiq_malloc's calloc template, str_clone's
+  memcpy, the malloc bounds-check abort).
+- emit_rt_glue_bodies' no_libc block now PRE-EMITS, each guarded by
+  rt_body_missing so user-defined bodies (std.mem imports) always win:
+  - Bump allocator: `@fs_heap_ptr`/`@fs_heap_end` globals + internal
+    `@fs_mmap_chunk` (syscall 9, 64MB anonymous chunks, 7-input inline
+    asm: rdi=0 rsi=len rdx=3 r10=0x22 r8=-1 r9=0, number via `imr` at
+    $7). `mantiq_malloc` aligns to 16 and stores the usable size in a
+    16-byte header before the data pointer; `mantiq_malloc_raw` is a
+    thin alias (mmap pages are pre-zeroed); `mantiq_free` stays the
+    existing no-op template; `mantiq_realloc` reads the header for the
+    copy prefix (no malloc_usable_size in freestanding).
+  - `memcpy` as `rep movsb` with TIED operands
+    ("={rdi},={rsi},={rcx},0,1,2" returning a {ptr,ptr,i64} struct —
+    a void-asm with multiple bare outputs is a hard LLVM error, and
+    input regs cannot be clobbers). Opaque to loop-idiom recognition,
+    so no memcpy-calls-memcpy self-recursion at -O2.
+  - `abort` as exit(134) via syscall 60 (shell-visible abort status).
+  - The calloc/malloc/malloc_usable_size templates for
+    mantiq_malloc/mantiq_malloc_raw/mantiq_realloc are now guarded with
+    `and not no_libc` (rt_body_missing only scans the four pre-emit
+    streams, not the glue `out` buffer, so pre-emitted bodies cannot
+    make those checks skip on their own).
+
+VERIFIED through the new compiler binary:
+- fsdemo3.nz (std.string: two String.make + sys_write of each) →
+  2,248-byte STATIC ELF, 0 undefined symbols, prints both strings,
+  rc=0. fsdemo4.nz (adds lower/upper, allocation churn) → 3,952-byte
+  static ELF, 0 undefined, correct mixed-case output, rc=0.
+- Regression: minimal.nz/fsdemo.nz still 0-undefined static (rc=3);
+  normal libc build unchanged (38 undefined refs, rc=3).
+- fmt clean + idempotent; gate green at commit time.
+
+KNOWN GAP (pre-existing, out of scope): `+` on two Strings lowers to
+`add { ptr, i64, i64 }` — invalid IR in NORMAL builds too (compiler
+fact 15; String's `__add__` is never reached). Documented; the
+operator path needs struct-aware lowering, not a freestanding fix.
+Next slices: incremental syscall glue (read/environ/args), List/Dict
+freestanding story (box32/ast_alloc templates also calloc), AArch64
+tier.
+
 ## std.sys Phase 5 slice 2 — `--no-libc` compiler plumbing LANDED
 
 The compiler now has a real freestanding link mode:

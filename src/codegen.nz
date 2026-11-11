@@ -2153,6 +2153,29 @@ struct LLVMCodegen:
             append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
             append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
             append_cstr(out, "@llvm.used = appending global [3 x ptr] [ptr @_start, ptr @nz_sys_write, ptr @nz_sys_getpid], section \"llvm.metadata\"\n\n")
+            // Freestanding allocator (bump over anonymous mmap chunks): backs
+            // mantiq_malloc/mantiq_malloc_raw/mantiq_realloc without libc.
+            // Each allocation carries a 16-byte header storing its usable
+            // size, so realloc copies the right prefix. mmap-zeroed pages
+            // make the no-zeroing distinction moot. Respects user-defined
+            // bodies (e.g. programs importing std.mem).
+            let fs_alloc_missing as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
+            if fs_alloc_missing == 1 to i32:
+                append_cstr(out, "@fs_heap_ptr = global i64 0\n@fs_heap_end = global i64 0\n\n")
+                append_cstr(out, "define internal ptr @fs_mmap_chunk() {\n  %b = call i64 asm sideeffect \"mov $7, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 67108864, i64 3, i64 34, i64 -1, i64 0, i64 9)\n  %ok = icmp sgt i64 %b, 0\n  br i1 %ok, label %fs_gok, label %fs_gbad\nfs_gbad:\n  call void @abort()\n  unreachable\nfs_gok:\n  %p = inttoptr i64 %b to ptr\n  ret ptr %p\n}\n\n")
+                append_cstr(out, "define ptr @mantiq_malloc(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %fs_badm, label %fs_okm\nfs_badm:\n  call void @abort()\n  unreachable\nfs_okm:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %al = add i64 %ms, 15\n  %al2 = and i64 %al, -16\n  %tot = add i64 %al2, 16\n  %cur = load i64, ptr @fs_heap_ptr\n  %nxt = add i64 %cur, %tot\n  %end = load i64, ptr @fs_heap_end\n  %need = icmp ugt i64 %nxt, %end\n  br i1 %need, label %fs_grow, label %fs_take\nfs_grow:\n  %b = call ptr @fs_mmap_chunk()\n  %bi = ptrtoint ptr %b to i64\n  store i64 %bi, ptr @fs_heap_ptr\n  %be = add i64 %bi, 67108864\n  store i64 %be, ptr @fs_heap_end\n  br label %fs_take\nfs_take:\n  %p = load i64, ptr @fs_heap_ptr\n  %hp = inttoptr i64 %p to ptr\n  store i64 %ms, ptr %hp\n  %dp = add i64 %p, 16\n  %np2 = add i64 %p, %tot\n  store i64 %np2, ptr @fs_heap_ptr\n  %pp = inttoptr i64 %dp to ptr\n  ret ptr %pp\n}\n\n")
+                append_cstr(out, "define ptr @mantiq_malloc_raw(i64 %sz) {\n  %p = call ptr @mantiq_malloc(i64 %sz)\n  ret ptr %p\n}\n\n")
+                let fs_realloc_missing as i32 = self.rt_body_missing("define ptr @mantiq_realloc(ptr" to cstr)
+                if fs_realloc_missing == 1 to i32:
+                    append_cstr(out, "define ptr @mantiq_realloc(ptr %p, i64 %sz) {\n  %rn = icmp slt i64 %sz, 0\n  %ro = icmp sgt i64 %sz, 500000000\n  %rb = or i1 %rn, %ro\n  br i1 %rb, label %fs_badr, label %fs_okr\nfs_badr:\n  call void @abort()\n  unreachable\nfs_okr:\n  %np = call ptr @mantiq_malloc(i64 %sz)\n  %bad = icmp eq ptr %np, null\n  %op = icmp eq ptr %p, null\n  %skip = or i1 %bad, %op\n  br i1 %skip, label %fs_retr, label %fs_cpy\nfs_cpy:\n  %hp = getelementptr i8, ptr %p, i64 -16\n  %old = load i64, ptr %hp\n  %c1 = icmp ult i64 %sz, %old\n  %cn = select i1 %c1, i64 %sz, i64 %old\n  %ign = call ptr @memcpy(ptr %np, ptr %p, i64 %cn)\n  br label %fs_retr\nfs_retr:\n  ret ptr %np\n}\n\n")
+            // memcpy as rep movsb (opaque to LLVM: no loop-idiom self-recursion
+            // at -O2); abort as exit(134), the shell-visible abort status.
+            let fs_memcpy_missing as i32 = self.rt_body_missing("define ptr @memcpy(ptr" to cstr)
+            if fs_memcpy_missing == 1 to i32:
+                append_cstr(out, "define ptr @memcpy(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
+            let fs_abort_missing as i32 = self.rt_body_missing("define void @abort(" to cstr)
+            if fs_abort_missing == 1 to i32:
+                append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 60)\n  unreachable\n}\n\n")
         let h_malloc as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
         let h_malloc_raw as i32 = self.rt_body_missing("define ptr @mantiq_malloc_raw(i64" to cstr)
         let h_free as i32 = self.rt_body_missing("define void @mantiq_free(ptr" to cstr)
@@ -2167,17 +2190,17 @@ struct LLVMCodegen:
         if h_free == 1 to i32:
             append_cstr(out, "declare i32 @mantiq_is_arena_ptr(ptr)\n")
             append_cstr(out, "declare void @free(ptr)\n")
-        if h_malloc == 1 to i32:
+        if h_malloc == 1 to i32 and not (deref self).no_libc:
             append_cstr(out, "declare ptr @calloc(i64, i64)\n")
             append_cstr(out, "declare void @abort()\n")
             append_cstr(out, "define ptr @mantiq_malloc(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %rt_badm, label %rt_okm\nrt_badm:\n  call void @abort()\n  ret ptr null\nrt_okm:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %mp = call ptr @calloc(i64 1, i64 %ms)\n  %mn = icmp eq ptr %mp, null\n  br i1 %mn, label %rt_failm, label %rt_retm\nrt_failm:\n  call void @abort()\n  ret ptr null\nrt_retm:\n  ret ptr %mp\n}\n\n")
-        if h_malloc_raw == 1 to i32:
+        if h_malloc_raw == 1 to i32 and not (deref self).no_libc:
             append_cstr(out, "declare ptr @malloc(i64)\n")
             append_cstr(out, "declare void @abort()\n")
             append_cstr(out, "define ptr @mantiq_malloc_raw(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %rt_badmr, label %rt_okmr\nrt_badmr:\n  call void @abort()\n  ret ptr null\nrt_okmr:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %mp = call ptr @malloc(i64 %ms)\n  %mn = icmp eq ptr %mp, null\n  br i1 %mn, label %rt_failmr, label %rt_retmr\nrt_failmr:\n  call void @abort()\n  ret ptr null\nrt_retmr:\n  ret ptr %mp\n}\n\n")
         if h_free == 1 to i32:
             append_cstr(out, "define void @mantiq_free(ptr %p) {\n  ret void\n}\n\n")
-        if h_realloc == 1 to i32:
+        if h_realloc == 1 to i32 and not (deref self).no_libc:
             append_cstr(out, "declare ptr @realloc(ptr, i64)\n")
             append_cstr(out, "declare ptr @malloc(i64)\n")
             append_cstr(out, "declare ptr @memcpy(ptr, ptr, i64)\n")
