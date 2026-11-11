@@ -2015,3 +2015,67 @@ VERIFIED through the new compiler binary:
 
 Next slices: setenv/unsetenv freestanding (copy-on-write environ),
 List/Dict story (box32/ast_alloc calloc), AArch64 tier.
+
+## std.sys Phase 5 slice 8 — setenv/unsetenv copy-on-write environ + calloc LANDED
+
+std.sys setenv_ref/unsetenv_ref call the exact libc symbols
+setenv(n,v,ow)/unsetenv(n) after building heap keys; the no_libc block
+now provides both with a COPY-ON-WRITE environ so getenv's captured
+(initial-stack) envp is never mutated:
+
+- `@fs_env_rw = global ptr null` — the writable environ pointer.
+  getenv now selects it over the captured @fs_envp once non-null.
+- `setenv(name, val, ow)`: scan loop (counts entries, and with ow==0 +
+  a match short-circuits to Ok without allocating); builds the
+  "NAME=VALUE\0" entry in the bump heap (mantiq_malloc + memcpy);
+  allocates a fresh array (cnt+2 slots), fill loop copies every entry
+  replacing matches with the new entry pointer (select + a %repl phi
+  tracks whether anything was replaced), appends the entry when no
+  match existed, NULL-terminates, and publishes @fs_env_rw.
+- `unsetenv(name)`: scan loop counts entries AND matches (the match
+  increment is conditional → join-block phis, fact 17); no match →
+  plain Ok with zero allocation; otherwise a fresh (cnt-nmatch+1)-slot
+  array, fill loop with the copy/skip join advancing the out pointer
+  only on kept entries, NULL-terminate, publish.
+- `calloc(n, sz)`: the runtime templates reference calloc directly
+  (alloc_box32 slabs, ast_alloc, intern_string) and std code does too
+  (bytes_to_string) — it now gets a bump-backed body:
+  overflow/size guards (negative args abort; prod/n != sz overflow
+  check with udiv only on the n!=0 path; >500MB abort), then
+  mantiq_malloc + memset 0. A declare + define of the same symbol in
+  one module is legal LLVM IR (verified with a standalone clang -x ir
+  probe) — the unguarded template emits only declare calloc.
+
+RUNTIME BUG CAUGHT BY THE PROBE (SIGSEGV rc=139): the first scan/fill
+loops tested the SLOT pointer for null (`icmp eq ptr %si, null`) —
+but the env array terminates with a NULL *entry*; the slot pointer
+just walks past the array into random stack memory, feeding garbage
+pointers to memcmp. The proven getenv pattern loads the entry first
+and tests THAT (`%se0 = load; icmp eq ptr %se0, null`); all four
+loops (setenv scan+fill, unsetenv scan+fill) now follow it.
+
+Also: fsdemo12's first draft compared `got == "hello" to cstr` — a
+String-vs-cstr `==`, which typechecks but lowers to
+`icmp eq {ptr,i64,i64}, ptr` (fact 13's broken form; fact 13's
+recorded workaround form is literal-vs-literal via strcmp). Probe
+compares via a memcmp helper on named locals instead.
+
+VERIFIED through the new compiler binary (probes preserved in
+research/freestanding/):
+- iso15.nz (direct glue setenv + getenv round-trip): prints hello,
+  rc=0.
+- fsdemo12.nz (std.sys setenv_ref/getenv_or_ref/has_env/unsetenv_ref):
+  a-ok(set+read) b-ok(overwrite→zar) c-ok(captured PATH still
+  visible) d-ok(unset) e-ok(unset nonexistent) f-ok(getenv-after-
+  unset returns default) — 9,032-byte static ELF, 0 undefined
+  symbols, rc=0. (Libc builds of these two probes don't apply — they
+  print via nz_sys_write, a no-libc-only glue symbol.)
+- calloc backing exercised by every std.string probe (box32/ast_alloc
+  /intern_string/bytes_to_string paths) in the ladder below.
+- All slice 2-7 regressions clean (minimal/fsdemo/fsdemo3/fsdemo4/
+  echo/argv/env/std.sys/args/argv0/sysconf/has_env/page_size + libc
+  hello). fmt clean + idempotent; gate green at commit time.
+
+Next slices: List/Dict story (box32/ast_alloc templates still
+calloc-based — now served by the bump calloc; a std.mem-backed
+mantiq_malloc remains on the backlog), AArch64 tier.
