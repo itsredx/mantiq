@@ -978,6 +978,11 @@ fn compile_source(
             di = di + 1 to usize
             d_argv[di] = "cc" to cstr
             di = di + 1 to usize
+            // zig cc otherwise overrides the module triple with the host;
+            // the aarch64 freestanding glue emits aarch64 asm.
+            if target.is_aarch64():
+                d_argv[di] = "--target=aarch64-linux-gnu" to cstr
+                di = di + 1 to usize
             if is_debug:
                 d_argv[di] = "-O0" to cstr
                 di = di + 1 to usize

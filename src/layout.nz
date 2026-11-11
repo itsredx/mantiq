@@ -29,6 +29,9 @@ struct Target:
     public fn x86_64_linux() -> Target:
         return Target(arch = String.make("x86_64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), abi = String.make("sysv" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128" to cstr), triple = String.make("x86_64-unknown-linux-gnu" to cstr))
 
+    public fn aarch64_linux() -> Target:
+        return Target(arch = String.make("aarch64" to cstr), os = String.make("linux" to cstr), env = String.make("gnu" to cstr), abi = String.make("sysv" to cstr), pointer_size = 8 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32" to cstr), triple = String.make("aarch64-unknown-linux-gnu" to cstr))
+
     public fn wasm32_wasi() -> Target:
         return Target(arch = String.make("wasm32" to cstr), os = String.make("wasi" to cstr), env = String.make("none" to cstr), abi = String.make("preview1" to cstr), pointer_size = 4 to usize, endianness = Endianness.Little, data_layout = String.make("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20" to cstr), triple = String.make("wasm32-unknown-wasi-musl" to cstr))
 
@@ -47,10 +50,17 @@ struct Target:
             if strstr(triple_cstr, "unknown" to cstr) != None to cstr or strstr(triple_cstr, "freestanding" to cstr) != None to cstr:
                 return Target.wasm32_freestanding()
             return Target.wasm32_wasi()
+        if strstr(triple_cstr, "aarch64" to cstr) != None to cstr or strstr(triple_cstr, "arm64" to cstr) != None to cstr:
+            return Target.aarch64_linux()
         return Target.x86_64_linux()
 
     public fn is_wasm(self as ptr[Target]) -> bool:
         return (deref self).pointer_size == 4 to usize
+
+    public fn is_aarch64(self as ptr[Target]) -> bool:
+        if (deref self).arch.data == None to ptr[u8]:
+            return False
+        return strcmp((deref self).arch.data to cstr, "aarch64" to cstr) == 0
 
     public fn is_python_ext(self as ptr[Target]) -> bool:
         if (deref self).abi.data == None to ptr[u8]:

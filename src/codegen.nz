@@ -2149,15 +2149,58 @@ struct LLVMCodegen:
         // @llvm.used is REQUIRED: unreferenced IR functions are silently
         // dropped when clang compiles .ll -> .o (compiler fact 14).
         if (deref self).no_libc:
-            // _start captures the initial stack (argc at [rsp], argv[]
-            // after it, envp[] after argv's NULL) into globals so
+            // Phase 5 slice 10: AArch64 tier. Same IR shapes, different
+            // asm: thin syscall wrappers stay inline asm (proven via the
+            // aa1 probe: tied-struct outputs + I-constraint immediates,
+            // disassembled to `mov x8, #imm; svc #0`), while the
+            // loop-based mem/str functions become module-asm bodies
+            // (module-asm functions cannot be dropped by clang's .ll ->
+            // .o step, so they need no @llvm.used pin). x86_64 unchanged.
+            let is_aa as bool = (deref self).target.is_aarch64()
+            if is_aa:
+                // Declares must precede use in textual IR: the bump
+                // allocator's realloc below calls memcpy and calloc
+                // below calls memset, so all five declares are emitted
+                // up front, each guarded by the same rt_body_missing
+                // check as the module-asm body further down (user
+                // bodies, e.g. std.mem imports, win over both).
+                let aa_mcpy_decl_missing as i32 = self.rt_body_missing("define ptr @memcpy(ptr" to cstr)
+                if aa_mcpy_decl_missing == 1 to i32:
+                    append_cstr(out, "declare ptr @memcpy(ptr, ptr, i64)\n")
+                let aa_mmv_decl_missing as i32 = self.rt_body_missing("define ptr @memmove(ptr" to cstr)
+                if aa_mmv_decl_missing == 1 to i32:
+                    append_cstr(out, "declare ptr @memmove(ptr, ptr, i64)\n")
+                let aa_mset_decl_missing as i32 = self.rt_body_missing("define ptr @memset(ptr" to cstr)
+                if aa_mset_decl_missing == 1 to i32:
+                    append_cstr(out, "declare ptr @memset(ptr, i32, i64)\n")
+                let aa_mcmp_decl_missing as i32 = self.rt_body_missing("define i32 @memcmp(ptr" to cstr)
+                if aa_mcmp_decl_missing == 1 to i32:
+                    append_cstr(out, "declare i32 @memcmp(ptr, ptr, i64)\n")
+                let aa_slen_decl_missing as i32 = self.rt_body_missing("define i64 @strlen(ptr" to cstr)
+                if aa_slen_decl_missing == 1 to i32:
+                    append_cstr(out, "declare i64 @strlen(ptr)\n")
+                append_cstr(out, "\n")
+            append_cstr(out, "@fs_argc = global i64 0\n@fs_argv = global ptr null\n@fs_envp = global ptr null\n\n")
+            // _start captures the initial stack (argc at [rsp]/[sp],
+            // argv[] after it, envp[] after argv's NULL) into globals so
             // nz_fs_argc/nz_fs_argv/nz_fs_envp can serve args+env without
             // libc. Capture happens before any call moves rsp.
-            append_cstr(out, "@fs_argc = global i64 0\n@fs_argv = global ptr null\n@fs_envp = global ptr null\n\n")
-            append_cstr(out, "define void @_start() naked {\n  %sp = call ptr asm sideeffect \"mov %rsp, %rax\", \"={rax},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %fs_argc = load i64, ptr %sp\n  store i64 %fs_argc, ptr @fs_argc\n  %fs_ap = getelementptr i8, ptr %sp, i64 8\n  store ptr %fs_ap, ptr @fs_argv\n  %fs_ai = ptrtoint ptr %fs_ap to i64\n  %fs_sh = shl i64 %fs_argc, 3\n  %fs_e1 = add i64 %fs_ai, %fs_sh\n  %fs_e2 = add i64 %fs_e1, 8\n  %fs_ep = inttoptr i64 %fs_e2 to ptr\n  store ptr %fs_ep, ptr @fs_envp\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
-            append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
-            append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 0)\n  ret i64 %r\n}\n\n")
-            append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
+            if is_aa:
+                append_cstr(out, "define void @_start() naked {\n  %sp = call ptr asm sideeffect \"mov x0, sp\", \"={x0},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %fs_argc = load i64, ptr %sp\n  store i64 %fs_argc, ptr @fs_argc\n  %fs_ap = getelementptr i8, ptr %sp, i64 8\n  store ptr %fs_ap, ptr @fs_argv\n  %fs_ai = ptrtoint ptr %fs_ap to i64\n  %fs_sh = shl i64 %fs_argc, 3\n  %fs_e1 = add i64 %fs_ai, %fs_sh\n  %fs_e2 = add i64 %fs_e1, 8\n  %fs_ep = inttoptr i64 %fs_e2 to ptr\n  store ptr %fs_ep, ptr @fs_envp\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov x0, $0; mov x8, $1; svc #0\", \"r,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 93)\n  unreachable\n}\n\n")
+            else:
+                append_cstr(out, "define void @_start() naked {\n  %sp = call ptr asm sideeffect \"mov %rsp, %rax\", \"={rax},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %fs_argc = load i64, ptr %sp\n  store i64 %fs_argc, ptr @fs_argc\n  %fs_ap = getelementptr i8, ptr %sp, i64 8\n  store ptr %fs_ap, ptr @fs_argv\n  %fs_ai = ptrtoint ptr %fs_ap to i64\n  %fs_sh = shl i64 %fs_argc, 3\n  %fs_e1 = add i64 %fs_ai, %fs_sh\n  %fs_e2 = add i64 %fs_e1, 8\n  %fs_ep = inttoptr i64 %fs_e2 to ptr\n  store ptr %fs_ep, ptr @fs_envp\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
+            if is_aa:
+                append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 64)\n  %w = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %w\n}\n\n")
+            else:
+                append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
+            if is_aa:
+                append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 63)\n  %rr = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %rr\n}\n\n")
+            else:
+                append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 0)\n  ret i64 %r\n}\n\n")
+            if is_aa:
+                append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  ret i64 %g\n}\n\n")
+            else:
+                append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
             append_cstr(out, "define i64 @nz_fs_argc() {\n  %a = load i64, ptr @fs_argc\n  ret i64 %a\n}\n\n")
             append_cstr(out, "define ptr @nz_fs_argv(i64 %i) {\n  %base = load ptr, ptr @fs_argv\n  %off = shl i64 %i, 3\n  %slot = getelementptr i8, ptr %base, i64 %off\n  %v = load ptr, ptr %slot\n  ret ptr %v\n}\n\n")
             append_cstr(out, "define ptr @nz_fs_envp() {\n  %e = load ptr, ptr @fs_envp\n  ret ptr %e\n}\n\n")
@@ -2172,7 +2215,10 @@ struct LLVMCodegen:
             let fs_alloc_missing as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
             if fs_alloc_missing == 1 to i32:
                 append_cstr(out, "@fs_heap_ptr = global i64 0\n@fs_heap_end = global i64 0\n\n")
-                append_cstr(out, "define internal ptr @fs_mmap_chunk() {\n  %b = call i64 asm sideeffect \"mov $7, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 67108864, i64 3, i64 34, i64 -1, i64 0, i64 9)\n  %ok = icmp sgt i64 %b, 0\n  br i1 %ok, label %fs_gok, label %fs_gbad\nfs_gbad:\n  call void @abort()\n  unreachable\nfs_gok:\n  %p = inttoptr i64 %b to ptr\n  ret ptr %p\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "define internal ptr @fs_mmap_chunk() {\n  %b = call i64 asm sideeffect \"mov x0, xzr; mov x1, #67108864; mov x2, #3; mov x3, #34; mov x4, #-1; mov x5, xzr; mov x8, #222; svc #0\", \"={x0},~{x1},~{x2},~{x3},~{x4},~{x5},~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %ok = icmp sgt i64 %b, 0\n  br i1 %ok, label %fs_gok, label %fs_gbad\nfs_gbad:\n  call void @abort()\n  unreachable\nfs_gok:\n  %p = inttoptr i64 %b to ptr\n  ret ptr %p\n}\n\n")
+                else:
+                    append_cstr(out, "define internal ptr @fs_mmap_chunk() {\n  %b = call i64 asm sideeffect \"mov $7, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 67108864, i64 3, i64 34, i64 -1, i64 0, i64 9)\n  %ok = icmp sgt i64 %b, 0\n  br i1 %ok, label %fs_gok, label %fs_gbad\nfs_gbad:\n  call void @abort()\n  unreachable\nfs_gok:\n  %p = inttoptr i64 %b to ptr\n  ret ptr %p\n}\n\n")
                 append_cstr(out, "define ptr @mantiq_malloc(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %fs_badm, label %fs_okm\nfs_badm:\n  call void @abort()\n  unreachable\nfs_okm:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %al = add i64 %ms, 15\n  %al2 = and i64 %al, -16\n  %tot = add i64 %al2, 16\n  %cur = load i64, ptr @fs_heap_ptr\n  %nxt = add i64 %cur, %tot\n  %end = load i64, ptr @fs_heap_end\n  %need = icmp ugt i64 %nxt, %end\n  br i1 %need, label %fs_grow, label %fs_take\nfs_grow:\n  %b = call ptr @fs_mmap_chunk()\n  %bi = ptrtoint ptr %b to i64\n  store i64 %bi, ptr @fs_heap_ptr\n  %be = add i64 %bi, 67108864\n  store i64 %be, ptr @fs_heap_end\n  br label %fs_take\nfs_take:\n  %p = load i64, ptr @fs_heap_ptr\n  %hp = inttoptr i64 %p to ptr\n  store i64 %ms, ptr %hp\n  %dp = add i64 %p, 16\n  %np2 = add i64 %p, %tot\n  store i64 %np2, ptr @fs_heap_ptr\n  %pp = inttoptr i64 %dp to ptr\n  ret ptr %pp\n}\n\n")
                 append_cstr(out, "define ptr @mantiq_malloc_raw(i64 %sz) {\n  %p = call ptr @mantiq_malloc(i64 %sz)\n  ret ptr %p\n}\n\n")
                 let fs_realloc_missing as i32 = self.rt_body_missing("define ptr @mantiq_realloc(ptr" to cstr)
@@ -2182,20 +2228,34 @@ struct LLVMCodegen:
             // at -O2); abort as exit(134), the shell-visible abort status.
             let fs_memcpy_missing as i32 = self.rt_body_missing("define ptr @memcpy(ptr" to cstr)
             if fs_memcpy_missing == 1 to i32:
-                append_cstr(out, "define ptr @memcpy(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "module asm \".text\"\nmodule asm \".globl memcpy\"\nmodule asm \"memcpy:\"\nmodule asm \"  mov x3, x0\"\nmodule asm \"  mov x4, x2\"\nmodule asm \"1:\"\nmodule asm \"  cbz x4, 2f\"\nmodule asm \"  ldrb w5, [x1], #1\"\nmodule asm \"  strb w5, [x3], #1\"\nmodule asm \"  sub x4, x4, #1\"\nmodule asm \"  b 1b\"\nmodule asm \"2:\"\nmodule asm \"  ret\"\n\n")
+                else:
+                    append_cstr(out, "define ptr @memcpy(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
             let fs_memset_missing as i32 = self.rt_body_missing("define ptr @memset(ptr" to cstr)
             if fs_memset_missing == 1 to i32:
-                append_cstr(out, "define ptr @memset(ptr %d, i32 %c, i64 %n) {\n  %ci = sext i32 %c to i64\n  call void asm sideeffect \"cld; mov $0, %rdi; mov $1, %rcx; movzbl $2, %eax; rep stosb\", \"imr,imr,imr,~{rdi},~{rcx},~{rax},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, i64 %n, i64 %ci)\n  ret ptr %d\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "module asm \".globl memset\"\nmodule asm \"memset:\"\nmodule asm \"  mov x3, x0\"\nmodule asm \"  mov x4, x2\"\nmodule asm \"1:\"\nmodule asm \"  cbz x4, 2f\"\nmodule asm \"  strb w1, [x3], #1\"\nmodule asm \"  sub x4, x4, #1\"\nmodule asm \"  b 1b\"\nmodule asm \"2:\"\nmodule asm \"  ret\"\n\n")
+                else:
+                    append_cstr(out, "define ptr @memset(ptr %d, i32 %c, i64 %n) {\n  %ci = sext i32 %c to i64\n  call void asm sideeffect \"cld; mov $0, %rdi; mov $1, %rcx; movzbl $2, %eax; rep stosb\", \"imr,imr,imr,~{rdi},~{rcx},~{rax},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, i64 %n, i64 %ci)\n  ret ptr %d\n}\n\n")
             // Phase 5 slice 9: memmove (LLVM lowers List remove's
             // element-shift loop to it at -O2, same family as the memset
             // discovery). rep movsb is overlap-safe by definition, which
-            // is exactly memmove's contract.
+            // is exactly memmove's contract. The aarch64 body branches on
+            // dest<=src (b.ls, unsigned): forward copy, else a reversed
+            // (end-indexed) copy — memmove's overlap contract either way.
             let fs_memmove_missing as i32 = self.rt_body_missing("define ptr @memmove(ptr" to cstr)
             if fs_memmove_missing == 1 to i32:
-                append_cstr(out, "define ptr @memmove(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "module asm \".globl memmove\"\nmodule asm \"memmove:\"\nmodule asm \"  mov x3, x0\"\nmodule asm \"  cmp x0, x1\"\nmodule asm \"  b.ls 5f\"\nmodule asm \"  add x0, x0, x2\"\nmodule asm \"  add x1, x1, x2\"\nmodule asm \"6:\"\nmodule asm \"  cbz x2, 7f\"\nmodule asm \"  sub x0, x0, #1\"\nmodule asm \"  sub x1, x1, #1\"\nmodule asm \"  ldrb w4, [x1]\"\nmodule asm \"  strb w4, [x0]\"\nmodule asm \"  sub x2, x2, #1\"\nmodule asm \"  b 6b\"\nmodule asm \"7:\"\nmodule asm \"  mov x0, x3\"\nmodule asm \"  ret\"\nmodule asm \"5:\"\nmodule asm \"1:\"\nmodule asm \"  cbz x2, 2f\"\nmodule asm \"  ldrb w4, [x1], #1\"\nmodule asm \"  strb w4, [x0], #1\"\nmodule asm \"  sub x2, x2, #1\"\nmodule asm \"  b 1b\"\nmodule asm \"2:\"\nmodule asm \"  mov x0, x3\"\nmodule asm \"  ret\"\n\n")
+                else:
+                    append_cstr(out, "define ptr @memmove(ptr %d, ptr %s, i64 %n) {\n  %r = call { ptr, ptr, i64 } asm sideeffect \"rep movsb\", \"={rdi},={rsi},={rcx},0,1,2,~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %d, ptr %s, i64 %n)\n  %d2 = extractvalue { ptr, ptr, i64 } %r, 0\n  ret ptr %d2\n}\n\n")
             let fs_abort_missing as i32 = self.rt_body_missing("define void @abort(" to cstr)
             if fs_abort_missing == 1 to i32:
-                append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 60)\n  unreachable\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov x0, $0; mov x8, $1; svc #0\", \"r,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 93)\n  unreachable\n}\n\n")
+                else:
+                    append_cstr(out, "define void @abort() {\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 134, i64 60)\n  unreachable\n}\n\n")
             // Phase 5 slice 5: std.sys freestanding backing. The libc
             // symbols std.sys calls (free/uname/getpid/getenv/
             // clock_gettime) get syscall or captured-stack bodies, each
@@ -2207,22 +2267,45 @@ struct LLVMCodegen:
                 append_cstr(out, "define void @free(ptr %p) {\n  ret void\n}\n\n")
             let fs_strlen_missing as i32 = self.rt_body_missing("define i64 @strlen(ptr" to cstr)
             if fs_strlen_missing == 1 to i32:
-                append_cstr(out, "define i64 @strlen(ptr %s) {\n  %r = call i64 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rcx; repnz scasb; not %rcx; dec %rcx; mov %rcx, %rax\", \"={rax},imr,imr,~{rdi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %s, i64 -1)\n  ret i64 %r\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "module asm \".globl strlen\"\nmodule asm \"strlen:\"\nmodule asm \"  mov x1, x0\"\nmodule asm \"  mov w2, #0\"\nmodule asm \"1:\"\nmodule asm \"  ldrb w3, [x1], #1\"\nmodule asm \"  cbz w3, 2f\"\nmodule asm \"  add w2, w2, #1\"\nmodule asm \"  b 1b\"\nmodule asm \"2:\"\nmodule asm \"  mov x0, x2\"\nmodule asm \"  ret\"\n\n")
+                else:
+                    append_cstr(out, "define i64 @strlen(ptr %s) {\n  %r = call i64 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rcx; repnz scasb; not %rcx; dec %rcx; mov %rcx, %rax\", \"={rax},imr,imr,~{rdi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %s, i64 -1)\n  ret i64 %r\n}\n\n")
             let fs_memcmp_missing as i32 = self.rt_body_missing("define i32 @memcmp(ptr" to cstr)
             if fs_memcmp_missing == 1 to i32:
-                append_cstr(out, "define i32 @memcmp(ptr %a, ptr %b, i64 %n) {\n  %r = call i32 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rsi; mov $3, %rcx; repz cmpsb; setne %al; movzbl %al, %eax\", \"={eax},imr,imr,imr,~{rdi},~{rsi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %a, ptr %b, i64 %n)\n  ret i32 %r\n}\n\n")
+                if is_aa:
+                    // 0/1 return matches x86's setne semantics (nonzero
+                    // means different), which is what std.sys's callers
+                    // compare against.
+                    append_cstr(out, "module asm \".globl memcmp\"\nmodule asm \"memcmp:\"\nmodule asm \"  mov x4, x2\"\nmodule asm \"1:\"\nmodule asm \"  cbz x4, 4f\"\nmodule asm \"  ldrb w3, [x0], #1\"\nmodule asm \"  ldrb w5, [x1], #1\"\nmodule asm \"  cmp w3, w5\"\nmodule asm \"  b.ne 3f\"\nmodule asm \"  sub x4, x4, #1\"\nmodule asm \"  b 1b\"\nmodule asm \"3:\"\nmodule asm \"  mov w0, #1\"\nmodule asm \"  ret\"\nmodule asm \"4:\"\nmodule asm \"  mov w0, #0\"\nmodule asm \"  ret\"\n\n")
+                else:
+                    append_cstr(out, "define i32 @memcmp(ptr %a, ptr %b, i64 %n) {\n  %r = call i32 asm sideeffect \"xor %eax, %eax; cld; mov $1, %rdi; mov $2, %rsi; mov $3, %rcx; repz cmpsb; setne %al; movzbl %al, %eax\", \"={eax},imr,imr,imr,~{rdi},~{rsi},~{rcx},~{memory},~{dirflag},~{fpsr},~{flags}\"(ptr %a, ptr %b, i64 %n)\n  ret i32 %r\n}\n\n")
             let fs_bcmp_missing as i32 = self.rt_body_missing("define i32 @bcmp(ptr" to cstr)
             if fs_bcmp_missing == 1 to i32:
                 append_cstr(out, "define i32 @bcmp(ptr %a, ptr %b, i64 %n) {\n  %r = call i32 @memcmp(ptr %a, ptr %b, i64 %n)\n  ret i32 %r\n}\n\n")
             let fs_getpid_missing as i32 = self.rt_body_missing("define i32 @getpid(" to cstr)
             if fs_getpid_missing == 1 to i32:
-                append_cstr(out, "define i32 @getpid() {\n  %g = call i32 asm sideeffect \"mov $1, %rax; syscall\", \"={eax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i32 %g\n}\n\n")
+                if is_aa:
+                    append_cstr(out, "define i32 @getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  %g32 = trunc i64 %g to i32\n  ret i32 %g32\n}\n\n")
+                else:
+                    append_cstr(out, "define i32 @getpid() {\n  %g = call i32 asm sideeffect \"mov $1, %rax; syscall\", \"={eax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i32 %g\n}\n\n")
             let fs_cgtime_missing as i32 = self.rt_body_missing("define i32 @clock_gettime(i32" to cstr)
             if fs_cgtime_missing == 1 to i32:
-                append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %r = call i32 asm sideeffect \"mov $3, %rax; syscall\", \"={eax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i32 %clk, ptr %tp, i64 228)\n  ret i32 %r\n}\n\n")
+                if is_aa:
+                    // Tied-struct form: outputs x0-x2 are the tied inputs
+                    // (clk, tp), the immediate is operand $5. clk is
+                    // sext'd and tp ptrtoint'd so all ties are i64.
+                    append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %cl = sext i32 %clk to i64\n  %tpi = ptrtoint ptr %tp to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $5; svc #0\", \"={x0},={x1},={x2},0,1,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %cl, i64 %tpi, i64 113)\n  %rv = extractvalue { i64, i64, i64 } %r, 0\n  %r32 = trunc i64 %rv to i32\n  ret i32 %r32\n}\n\n")
+                else:
+                    append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %r = call i32 asm sideeffect \"mov $3, %rax; syscall\", \"={eax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i32 %clk, ptr %tp, i64 228)\n  ret i32 %r\n}\n\n")
             let fs_uname_missing as i32 = self.rt_body_missing("define i32 @uname(ptr" to cstr)
             if fs_uname_missing == 1 to i32:
-                append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $2, %rax; syscall\", \"={rax},{rdi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 63)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
+                if is_aa:
+                    // uname takes buf in x0 and returns in x0, so the
+                    // output x0 is TIED to the buf input.
+                    append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov x8, $2; svc #0\", \"={x0},0,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 160)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
+                else:
+                    append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $2, %rax; syscall\", \"={rax},{rdi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 63)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
             let fs_getenv_missing as i32 = self.rt_body_missing("define ptr @getenv(ptr" to cstr)
             if fs_getenv_missing == 1 to i32:
                 // Phase 5 slice 8: @fs_env_rw is the copy-on-write
@@ -2243,7 +2326,10 @@ struct LLVMCodegen:
             if fs_sysconf_missing == 1 to i32:
                 append_cstr(out, "declare i64 @llvm.ctpop.i64(i64)\n@fs_affmask = global i64 0\n\n")
                 append_cstr(out, "define internal i64 @fs_auxv_find(i64 %want) {\nentry:\n  %env = load ptr, ptr @fs_envp\n  %en = icmp eq ptr %env, null\n  br i1 %en, label %nf, label %wenv\nwenv:\n  %si = phi ptr [ %env, %entry ], [ %sn, %step ]\n  %sv = load ptr, ptr %si\n  %snz = icmp ne ptr %sv, null\n  br i1 %snz, label %step, label %aux\nstep:\n  %sn = getelementptr i8, ptr %si, i64 8\n  br label %wenv\naux:\n  %ab = getelementptr i8, ptr %si, i64 8\n  br label %wloop\nwloop:\n  %i = phi i64 [ 0, %aux ], [ %i2, %wstep ]\n  %off = shl i64 %i, 3\n  %tp = getelementptr i8, ptr %ab, i64 %off\n  %t = load i64, ptr %tp\n  %isnull = icmp eq i64 %t, 0\n  br i1 %isnull, label %nf, label %chk\nchk:\n  %eq = icmp eq i64 %t, %want\n  br i1 %eq, label %found, label %wstep\nfound:\n  %voff = add i64 %off, 8\n  %vp = getelementptr i8, ptr %ab, i64 %voff\n  %v = load i64, ptr %vp\n  ret i64 %v\nwstep:\n  %i2 = add i64 %i, 2\n  br label %wloop\nnf:\n  ret i64 -1\n}\n\n")
-                append_cstr(out, "define i64 @sysconf(i32 %name) {\nentry:\n  %n30 = icmp eq i32 %name, 30\n  %n44 = icmp eq i32 %name, 44\n  %psz = or i1 %n30, %n44\n  br i1 %psz, label %pagesz, label %chkcpu\npagesz:\n  %pv = call i64 @fs_auxv_find(i64 6)\n  %pok = icmp sgt i64 %pv, 0\n  %pret = select i1 %pok, i64 %pv, i64 4096\n  ret i64 %pret\nchkcpu:\n  %n84 = icmp eq i32 %name, 84\n  %n58 = icmp eq i32 %name, 58\n  %cc = or i1 %n84, %n58\n  br i1 %cc, label %cpus, label %dflt\ncpus:\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 8, ptr @fs_affmask, i64 203)\n  %ok = icmp eq i64 %r, 0\n  br i1 %ok, label %pop, label %dflt\npop:\n  %mv = load i64, ptr @fs_affmask\n  %cnt = call i64 @llvm.ctpop.i64(i64 %mv)\n  %cok = icmp sgt i64 %cnt, 0\n  %cret = select i1 %cok, i64 %cnt, i64 1\n  ret i64 %cret\ndflt:\n  ret i64 -1\n}\n\n")
+            if is_aa:
+                    append_cstr(out, "define i64 @sysconf(i32 %name) {\nentry:\n  %n30 = icmp eq i32 %name, 30\n  %n44 = icmp eq i32 %name, 44\n  %psz = or i1 %n30, %n44\n  br i1 %psz, label %pagesz, label %chkcpu\npagesz:\n  %pv = call i64 @fs_auxv_find(i64 6)\n  %pok = icmp sgt i64 %pv, 0\n  %pret = select i1 %pok, i64 %pv, i64 4096\n  ret i64 %pret\nchkcpu:\n  %n84 = icmp eq i32 %name, 84\n  %n58 = icmp eq i32 %name, 58\n  %cc = or i1 %n84, %n58\n  br i1 %cc, label %cpus, label %dflt\ncpus:\n  %mpi = ptrtoint ptr @fs_affmask to i64\n  %r = call i64 asm sideeffect \"mov x0, xzr; mov x1, #8; mov x2, $1; mov x8, $2; svc #0\", \"={x0},r,I,~{x1},~{x2},~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %mpi, i64 123)\n  %ok = icmp eq i64 %r, 0\n  br i1 %ok, label %pop, label %dflt\npop:\n  %mv = load i64, ptr @fs_affmask\n  %cnt = call i64 @llvm.ctpop.i64(i64 %mv)\n  %cok = icmp sgt i64 %cnt, 0\n  %cret = select i1 %cok, i64 %cnt, i64 1\n  ret i64 %cret\ndflt:\n  ret i64 -1\n}\n\n")
+            else:
+                    append_cstr(out, "define i64 @sysconf(i32 %name) {\nentry:\n  %n30 = icmp eq i32 %name, 30\n  %n44 = icmp eq i32 %name, 44\n  %psz = or i1 %n30, %n44\n  br i1 %psz, label %pagesz, label %chkcpu\npagesz:\n  %pv = call i64 @fs_auxv_find(i64 6)\n  %pok = icmp sgt i64 %pv, 0\n  %pret = select i1 %pok, i64 %pv, i64 4096\n  ret i64 %pret\nchkcpu:\n  %n84 = icmp eq i32 %name, 84\n  %n58 = icmp eq i32 %name, 58\n  %cc = or i1 %n84, %n58\n  br i1 %cc, label %cpus, label %dflt\ncpus:\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 0, i64 8, ptr @fs_affmask, i64 203)\n  %ok = icmp eq i64 %r, 0\n  br i1 %ok, label %pop, label %dflt\npop:\n  %mv = load i64, ptr @fs_affmask\n  %cnt = call i64 @llvm.ctpop.i64(i64 %mv)\n  %cok = icmp sgt i64 %cnt, 0\n  %cret = select i1 %cok, i64 %cnt, i64 1\n  ret i64 %cret\ndflt:\n  ret i64 -1\n}\n\n")
             // Phase 5 slice 8: setenv/unsetenv with a copy-on-write
             // environ, plus a bump-backed calloc. getenv walks the
             // captured (initial-stack) envp, which must not be mutated;

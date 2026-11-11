@@ -2145,3 +2145,126 @@ research/freestanding/):
 Next slices: AArch64 tier (naked _start + capture + syscall-number
 table carry over; different numbers), or std.mem-backed mantiq_malloc
 (replacing the bump allocator) per the spec's later phases.
+
+## std.sys Phase 5 slice 10 — AArch64 freestanding tier LANDED
+
+The --no-libc tier now cross-compiles to AArch64 via
+`--target aarch64-unknown-linux-gnu` on build/run. Same IR shapes as
+x86_64, different asm; three files touched:
+
+- src/layout.nz: Target.aarch64_linux() factory (canonical datalayout
+  obtained from clang --target=aarch64-linux-gnu -emit-llvm:
+  e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-
+  i128:128-n32:64-S128-Fn32; triple aarch64-unknown-linux-gnu),
+  from_triple arm (strstr "aarch64" or "arm64"), is_aarch64()
+  predicate (strcmp pattern from is_python_ext).
+- src/codegen.nz no_libc block: `is_aa` switch at the top; ten
+  inline-asm emits branch x86/aarch64 text; five loop-based mem/str
+  functions become module-asm bodies on aarch64.
+- src/main.nz no-libc link branch: --target=aarch64-linux-gnu added
+  to the zig cc line right after "cc" (zig otherwise overrides the
+  module triple with the host; without it clang compiles the .ll as
+  x86 and ld fails on aarch64 objects).
+
+AArch64 syscall numbers (generic Linux table): read=63, write=64,
+exit=93, clock_gettime=113, sched_getaffinity=123, uname=160,
+getpid=172, mmap=222. abort = exit(134) via syscall 93 (x86 abort is
+also just exit(134), not tgkill).
+
+Inline-asm idioms (ALL proven by aa1.ll + disassembly via
+`llvm-objdump -d --triple=aarch64-linux-gnu`; host objdump cannot
+disassemble aarch64):
+
+- Naked _start: `mov x0, sp` capture ("={x0}" single output) + the
+  SAME portable IR math as x86 (argc at [sp], argv at sp+8, envp =
+  argv + argc*8 + 8); exit tail is
+  "mov x0, $0; mov x8, $1; svc #0" with "r,I" constraints ($0 = rc
+  reg, $1 = the immediate — LLVM prints I operands with automatic
+  #, disasm shows `mov x8, #0x5d // =93`).
+- Tied-struct syscall form for args-in-x0..x2 syscalls:
+  "={x0},={x1},={x2},0,1,2,I" with template "mov x8, $6; svc #0".
+  KEY NUMBERING FACT: tie constraints consume operand numbers —
+  outputs take $0..$2, the three tied inputs take $3..$5, and the I
+  immediate is $6. For 2-tied (clock_gettime) the immediate is $5.
+  Single-output zero-arg (getpid): "={x0},I" with "mov x8, $1".
+  The tie form is REQUIRED (not just stylistic): Linux aarch64 puts
+  args in x0-x2 and the return in x0, so x0 is genuinely
+  read-then-written.
+- fs_mmap_chunk bakes ALL constants into the template (no inputs, no
+  ties): "mov x0, xzr; mov x1, #67108864; ...; mov x8, #222; svc #0"
+  with "={x0},~{x1}..~{x5},~{x8},~{memory}" — simplest form, no
+  constraint matching needed since every arg is constant.
+- sysconf's sched_getaffinity: single-output form with an r input
+  for the mask POINTER (ptrtoint'd @fs_affmask) and I for 123:
+  "mov x0, xzr; mov x1, #8; mov x2, $1; mov x8, $2; svc #0". The
+  first attempt (4 tied outputs + 4 ties + I) failed clang
+  validation with "number of input constraints does not match
+  number of parameters" — the x86 explicit-reg-outputs form
+  ("={rax},{rdi},{rsi},{rdx},imr" with 4 params) does NOT
+  generalize; on aarch64 every input must consume exactly one
+  parameter slot.
+
+Module asm (aarch64 only, replaces the IR define + adds a declare):
+memcpy, memmove, memset, memcmp, strlen — loop bodies as inline asm
+would need label juggling inside expression asm; module-asm
+functions (a) cannot be dropped by clang's .ll -> .o step (compiler
+fact 14 does not apply), (b) need no @llvm.used pin, (c) keep
+numeric local labels (1:, 2f/2b) which tolerate duplication.
+Declares are emitted UP FRONT (before the bump-allocator realloc
+body that calls memcpy and the calloc body that calls memset —
+textual IR requires declare-before-use), each guarded by the same
+rt_body_missing check as the module-asm body so user-defined bodies
+(std.mem imports) suppress both. Bodies:
+- memcpy/memset/memcmp: post-index byte loops (ldrb/strb [x], #1),
+  memcpy/memset return the saved dest (x3), memcmp returns 0/1 to
+  match x86's setne semantics.
+- memmove branches on dest<=src (cmp + b.ls): forward post-index
+  copy, else a reversed end-indexed copy — memmove's overlap
+  contract both directions.
+- strlen: the aa1-proven loop (disasm verified: mov x1, x0; ldrb w3,
+  [x1], #1; cbz w3, 2f...).
+
+@llvm.used pin (8 entries) stays SHARED and working: all pinned
+functions (_start, nz_sys_write/read/getpid, nz_fs_* accessors)
+remain IR-defined inline-asm bodies on aarch64. Only the five
+module-asm functions drop out of IR, and they don't need pins.
+
+Everything else in the freestanding tier is arch-neutral IR emitted
+unchanged: getenv/setenv/unsetenv walks, the /proc/self/cmdline
+shim, fs_auxv_find, the bump allocator (minus fs_mmap_chunk), calloc,
+bcmp, ctpop.
+
+Toolchain facts: clang 23.1.3 has the aarch64 target; zig 0.17.0
+cross-links aarch64 (`zig cc --target=aarch64-linux-gnu ...
+-nostdlib -static -Wl,--gc-sections -Wl,-e,_start`); zig cc feeds
+the .ll to its clang which OVERRIDES the module triple unless
+--target is passed (hence the link-line insertion). No qemu-aarch64
+on this host and binfmt_misc is empty, so runtime verification is
+impossible here — STATIC verification only (link + disassembly);
+qemu-aarch64 is backlog.
+
+VERIFIED (all static: link rc, file shows aarch64 static, nm -u
+empty, llvm-objdump syscall numbers):
+- minimal_aa (2,536 bytes): _start disasm shows mov x0, sp capture,
+  IR math, mov x8, #93; svc #0 exit; entry = _start.
+- fsdemo3_aa (3,536 B), fsdemo9_aa (4,360 B), fsdemo12_aa (8,992 B),
+  fsdemo13_aa (8,840 B), fsdemo14_aa (10,072 B): all 0 undefined.
+- fsdemo8_aa: svc numbers 113 (clock_gettime) + 160 (uname) + the
+  common set; fsdemo11_aa: 123 (sched_getaffinity) present.
+- memcmp/memcpy/memmove/memset/strlen symbols present with correct
+  bodies (memcmp disasm: ldrb/cmp/b.ne/sub loop, w0=1 on mismatch).
+- NO x86 regression: full ladder rebuilt through the new binary —
+  minimal(3)/fsdemo5 echo(0, piped)/fsdemo6 argv(97)/fsdemo7 env(70)
+  /fsdemo8 stdsys(0)/fsdemo9 args(3)/fsdemo10 argv0(3)/fsdemo11
+  sysconf(ps-ok cc-ok)/fsdemo12 setenv(0)/iso11 has_env(1)/iso14
+  page_size(4096)/strlenprobe(5)/envprobe(0) + fsdemo3/4/13/14 (rc=0)
+  + libc iso16 (libc-rmv-ok). fmt clean + idempotent.
+
+Limitation note: the gcc/clang fallback paths in the no-libc link
+branch do not understand --target=aarch64-linux-gnu (host gcc) —
+zig cc is the only working aarch64 link path. Acceptable; fallbacks
+exist for exotic x86 environments.
+
+Next slices: qemu-aarch64 for runtime verification (backlog),
+std.mem-backed mantiq_malloc (replacing the bump allocator) per the
+spec's later phases.
