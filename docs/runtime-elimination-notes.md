@@ -2268,3 +2268,61 @@ exist for exotic x86 environments.
 Next slices: qemu-aarch64 for runtime verification (backlog),
 std.mem-backed mantiq_malloc (replacing the bump allocator) per the
 spec's later phases.
+
+## std.sys Phase 5 slice 11 — std.mem allocators freestanding (malloc/mmap/munmap glue) LANDED
+
+The Milestone-B allocator suite in `std/mem.nz` (Allocator interface,
+PageAllocator, ArenaAllocator, FixedBufferAllocator, HeapAllocator)
+was libc-shaped: ArenaAllocator without backing and HeapAllocator call
+plain `malloc`; the codegen-provided `mantiq_page_alloc`/
+`mantiq_page_free` (h_ helper block, both modes, rt_body_missing-
+guarded) call `mmap`/`munmap`. Probe `fsdemo15.nz` (FixedBuffer →
+Arena → Heap → Page ladder, 11 exit-code checkpoints) built with
+main_p5j freestanding captured the exact worklist: `malloc` ×3,
+`mmap` ×1, `munmap` ×1 — nothing else (free already has a bump-tier
+no-op body from slice 5; memcpy/memset bodies from slices 3-4).
+
+Glue fix (no_libc block, after the bcmp emit, before getpid; three
+new rt_body_missing-guarded emits, mmap/munmap arch-branched on
+is_aa):
+- `malloc(i64)` → `call ptr @mantiq_malloc_raw` (bump delegation,
+  arch-neutral IR; mmap-backed pages are zero-filled so the zeroing
+  the C malloc never promised is free here).
+- `mmap(ptr, i64, i32, i32, i32, i64) → ptr` — real syscall with
+  arguments this time: x86 mirrors the proven fs_mmap_chunk
+  explicit-reg shape ("mov $7, %rax; syscall",
+  "={rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},imr", nr 9); aarch64
+  uses the proven nz_sys_write tied-struct shape (6 outputs
+  { i64 x6 } + 6 ties + I at $12, "mov x8, $12; svc #0", nr 222,
+  extractvalue 0 → inttoptr). i32 prot/flags/fd sext to i64 for the
+  asm operands; define matches std.mem's extern declare exactly
+  (ptr, i64, i32, i32, i32, i64 → ptr).
+- `munmap(ptr, i64) → i32` — x86 "mov $3, %rax; syscall"
+  ("={rax},{rdi},{rsi},imr", nr 11); aarch64 2 outputs + 2 ties +
+  I at $4, nr 215, trunc to i32.
+
+VERIFIED:
+- fsdemo15 x86 freestanding (main_p5k): FBA-ok/Arena-ok/Heap-ok/
+  Page-ok, rc=0 — all four allocator tiers work, 0 undefined.
+- fsdemo15 aarch64 freestanding: link clean, 0 undefined, statically
+  linked; disasm shows the glue inlined at -O2 with mov x8, #222
+  (mmap, in ArenaAllocator_alloc and main) and mov x8, #215 (munmap,
+  in main) — tied-struct 6-arg syscall form confirmed end-to-end.
+- NO x86 regression: full ladder through main_p5k all green —
+  minimal(3)/fsdemo5 echo(0)/fsdemo6 argv(97)/fsdemo7 env(70, env-
+  order dependent)/fsdemo8 stdsys(0)/fsdemo9 args(3)/fsdemo10 argv0(3)
+  /fsdemo11 sysconf(ps-ok cc-ok)/fsdemo12 setenv(0)/fsdemo13(0)/
+  fsdemo14(0)/iso11 has_env(1)/iso14 page_size(4096)/strlenprobe(5)/
+  envprobe(0) + libc iso16 (libc-rmv-ok).
+- NO aarch64 regression: minimal/fsdemo3/4/8/11/13/14 aa builds all
+  0 undefined, statically linked. fmt clean + idempotent.
+
+Scope note: this is the std.mem freestanding story, not the full
+"mantiq_malloc routed through std.mem" endgame — the bump glue still
+serves builtins; std.mem's own Nizam mantiq_malloc (calloc-based)
+remains unreachable-by-design in freestanding (its error paths use
+sprintf/write(2)). The allocator interface tiers are now usable
+freestanding on both arches.
+
+Next slices: qemu-aarch64 runtime verification (backlog, needs
+root); further std-module freestanding stories.
