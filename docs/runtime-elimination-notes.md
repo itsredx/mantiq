@@ -2326,3 +2326,62 @@ freestanding on both arches.
 
 Next slices: qemu-aarch64 runtime verification (backlog, needs
 root); further std-module freestanding stories.
+
+## std.sys Phase 5 slice 12 — qemu-aarch64 runtime verification + ~{x8} clobber fix LANDED
+
+qemu became available mid-session (`sudo pacman -S qemu-user-static`,
+official extra repo — direct invocation, no binfmt needed). First-ever
+RUNTIME verification of the freestanding tier. The ladder immediately
+exposed three aarch64 segfaults that static verification could never
+see: fsdemo8 (std.sys os/hostname), fsdemo14 (after H-ok), fsdemo15
+(after FBA-ok, in the Arena path).
+
+Root cause (one bug, three symptoms): several aarch64 inline-asm
+syscall bodies do `mov x8, $N; svc #0` but did NOT list `~{x8}` in
+the clobber list — nz_sys_write, nz_sys_read, nz_sys_getpid, getpid,
+clock_gettime, uname. LLVM assumes x8 survives the asm and freely
+allocates other values into x8 across the call. The asm's own
+`mov x8, $N` then silently destroys them. fsdemo15's crash made it
+visible under qemu -g (gdbstub): main+272 `stp xzr, xzr, [x8, #-32]`
+faulted at si_addr 0x20 — the %arena zeroinit store's ADDRESS was
+register-allocated into x8, which the inlined write syscall asm had
+just set to the syscall number (64). qemu -strace narrowed it first:
+mmap 64MB ok → write FBA-ok → SIGSEGV si_addr 0x20. The same class
+killed uname (fsdemo8 os/hostname → SIGSEGV before any output) and
+fsdemo14's later sections. x86 never hits this (syscall nr goes in
+%rax via "mov $N, %rax" and %rax is an output there; the x86
+clobber list already had rcx/r11).
+
+Fix: added `~{x8}` to all six aarch64 constraint strings (three
+unique patterns: `0,1,2,I`, `={x0},I`, `0,1,I`, plus uname's
+`={x0},0,I`). sched_getaffinity/sysconf and the new slice-11
+mmap/munmap already had it (fsdemo11 passing was the tell).
+
+VERIFIED (qemu-aarch64-static, runtime, not just static):
+- FULL aarch64 ladder green for the first time: minimal(3),
+  fsdemo3/4(0, strings output correct), fsdemo5 echo(0), fsdemo6
+  argv(97 with arg), fsdemo7 env(env-order byte), fsdemo8 stdsys(0:
+  linux/archpavilion/env ok — was SEGV), fsdemo9 args(3)/fsdemo10
+  argv0(3) with args, fsdemo11 sysconf(ps-ok cc-ok), fsdemo12
+  setenv(a-f-ok), fsdemo13 Dict(alpha L-ok v1b D-ok), fsdemo14(0:
+  H/R/G/V/L2-ok — was SEGV), iso11 has_env(1), iso14 page_size(4096),
+  strlenprobe(5), envprobe(0), fsdemo15(FBA/Arena/Heap/Page-ok —
+  was SEGV), narrow p8a-e (pid, monotonic, os len 5=Linux, hostname
+  len 12=archpavilion, has_env 70), p14a-c (Dict has/remove),
+  p15a/h/i (arena init, backing==None, ptr[Box]==None).
+- NO x86 regression: ladder + libc iso16 all green through main_p5l.
+  fmt clean + idempotent.
+
+Also exposed (NOT yet fixed, backlog): programs importing std.mem
+WITHOUT the std.sys+std.string mix hit a fragile exclusion between
+the glue's mantiq_malloc family and std/mem.nz's Nizam mantiq_malloc
+family (order-dependent): p15b (std.mem only) → Nizam body emitted,
+glue skipped → undefined write/sprintf; p15b2/p15c (std.mem + one
+more import) → BOTH emitted → duplicate symbol error. fsdemo15's
+import mix (std.sys + std.string + std.mem) happens to order
+correctly. Proper fix: make the glue-vs-stdmem exclusion deterministic
+(rt_body_missing should see the std-body stream, or freestanding
+should suppress std.mem's mantiq_malloc family outright).
+
+Next slices: the std.mem exclusion fix (above), then more std-module
+freestanding stories under runtime (not just static) verification.

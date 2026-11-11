@@ -2190,15 +2190,15 @@ struct LLVMCodegen:
             else:
                 append_cstr(out, "define void @_start() naked {\n  %sp = call ptr asm sideeffect \"mov %rsp, %rax\", \"={rax},~{memory},~{dirflag},~{fpsr},~{flags}\"()\n  %fs_argc = load i64, ptr %sp\n  store i64 %fs_argc, ptr @fs_argc\n  %fs_ap = getelementptr i8, ptr %sp, i64 8\n  store ptr %fs_ap, ptr @fs_argv\n  %fs_ai = ptrtoint ptr %fs_ap to i64\n  %fs_sh = shl i64 %fs_argc, 3\n  %fs_e1 = add i64 %fs_ai, %fs_sh\n  %fs_e2 = add i64 %fs_e1, 8\n  %fs_ep = inttoptr i64 %fs_e2 to ptr\n  store ptr %fs_ep, ptr @fs_envp\n  %fs_r = call i32 @main()\n  %fs_rc = sext i32 %fs_r to i64\n  call void asm sideeffect \"mov $1, %rax; mov $0, %rdi; syscall\", \"r,imr,~{rax},~{rdi},~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fs_rc, i64 60)\n  unreachable\n}\n\n")
             if is_aa:
-                append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 64)\n  %w = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %w\n}\n\n")
+                append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 64)\n  %w = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %w\n}\n\n")
             else:
                 append_cstr(out, "define i64 @nz_sys_write(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %w = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 1)\n  ret i64 %w\n}\n\n")
             if is_aa:
-                append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 63)\n  %rr = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %rr\n}\n\n")
+                append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $6; svc #0\", \"={x0},={x1},={x2},0,1,2,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 63)\n  %rr = extractvalue { i64, i64, i64 } %r, 0\n  ret i64 %rr\n}\n\n")
             else:
                 append_cstr(out, "define i64 @nz_sys_read(i64 %fd, ptr %buf, i64 %len) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $4, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fd, i64 %fb, i64 %len, i64 0)\n  ret i64 %r\n}\n\n")
             if is_aa:
-                append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  ret i64 %g\n}\n\n")
+                append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  ret i64 %g\n}\n\n")
             else:
                 append_cstr(out, "define i64 @nz_sys_getpid() {\n  %g = call i64 asm sideeffect \"mov $1, %rax; syscall\", \"={rax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i64 %g\n}\n\n")
             append_cstr(out, "define i64 @nz_fs_argc() {\n  %a = load i64, ptr @fs_argc\n  ret i64 %a\n}\n\n")
@@ -2311,7 +2311,7 @@ struct LLVMCodegen:
             let fs_getpid_missing as i32 = self.rt_body_missing("define i32 @getpid(" to cstr)
             if fs_getpid_missing == 1 to i32:
                 if is_aa:
-                    append_cstr(out, "define i32 @getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  %g32 = trunc i64 %g to i32\n  ret i32 %g32\n}\n\n")
+                    append_cstr(out, "define i32 @getpid() {\n  %g = call i64 asm sideeffect \"mov x8, $1; svc #0\", \"={x0},I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 172)\n  %g32 = trunc i64 %g to i32\n  ret i32 %g32\n}\n\n")
                 else:
                     append_cstr(out, "define i32 @getpid() {\n  %g = call i32 asm sideeffect \"mov $1, %rax; syscall\", \"={eax},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 39)\n  ret i32 %g\n}\n\n")
             let fs_cgtime_missing as i32 = self.rt_body_missing("define i32 @clock_gettime(i32" to cstr)
@@ -2320,7 +2320,7 @@ struct LLVMCodegen:
                     // Tied-struct form: outputs x0-x2 are the tied inputs
                     // (clk, tp), the immediate is operand $5. clk is
                     // sext'd and tp ptrtoint'd so all ties are i64.
-                    append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %cl = sext i32 %clk to i64\n  %tpi = ptrtoint ptr %tp to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $5; svc #0\", \"={x0},={x1},={x2},0,1,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %cl, i64 %tpi, i64 113)\n  %rv = extractvalue { i64, i64, i64 } %r, 0\n  %r32 = trunc i64 %rv to i32\n  ret i32 %r32\n}\n\n")
+                    append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %cl = sext i32 %clk to i64\n  %tpi = ptrtoint ptr %tp to i64\n  %r = call { i64, i64, i64 } asm sideeffect \"mov x8, $5; svc #0\", \"={x0},={x1},={x2},0,1,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %cl, i64 %tpi, i64 113)\n  %rv = extractvalue { i64, i64, i64 } %r, 0\n  %r32 = trunc i64 %rv to i32\n  ret i32 %r32\n}\n\n")
                 else:
                     append_cstr(out, "define i32 @clock_gettime(i32 %clk, ptr %tp) {\n  %r = call i32 asm sideeffect \"mov $3, %rax; syscall\", \"={eax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i32 %clk, ptr %tp, i64 228)\n  ret i32 %r\n}\n\n")
             let fs_uname_missing as i32 = self.rt_body_missing("define i32 @uname(ptr" to cstr)
@@ -2328,7 +2328,7 @@ struct LLVMCodegen:
                 if is_aa:
                     // uname takes buf in x0 and returns in x0, so the
                     // output x0 is TIED to the buf input.
-                    append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov x8, $2; svc #0\", \"={x0},0,I,~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 160)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
+                    append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov x8, $2; svc #0\", \"={x0},0,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 160)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
                 else:
                     append_cstr(out, "define i32 @uname(ptr %buf) {\n  %fb = ptrtoint ptr %buf to i64\n  %r = call i64 asm sideeffect \"mov $2, %rax; syscall\", \"={rax},{rdi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %fb, i64 63)\n  %r32 = trunc i64 %r to i32\n  ret i32 %r32\n}\n\n")
             let fs_getenv_missing as i32 = self.rt_body_missing("define ptr @getenv(ptr" to cstr)
