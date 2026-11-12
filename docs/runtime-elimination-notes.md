@@ -2419,3 +2419,16 @@ VERIFIED:
   + fsdemo15 FBA/Arena/Heap/Page-ok rc=0 under qemu).
 - Full x86 ladder green + libc iso16 (libc-rmv-ok).
 - fmt clean + idempotent.
+
+### std.mem interface certification (fsdemo16, same tree as slice 13)
+
+fsdemo16.nz exercises the Allocator INTERFACE paths (not just direct
+methods) freestanding on both arches: an ArenaAllocator backed by a
+FixedBufferAllocator routed through an interface value (make[Allocator]
+slot + fba.allocator(), arena.init(alp), alloc/alloc/reset/alloc across
+a 70KB FBA — the arena asks its backing for whole 65536-byte chunks, so
+the backing must be sized for that), and the heap path via
+get_default_allocator() through an interface value with alloc/resize/
+free. x86: IF1-ok/IF2-ok rc=0; aarch64 under qemu-aarch64-static:
+IF1-ok/IF2-ok rc=0. Probe source in research/freestanding/fsdemo16.nz.
+No compiler changes — tree byte-identical to the slice-13 gate.
