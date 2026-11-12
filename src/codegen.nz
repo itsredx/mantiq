@@ -3175,6 +3175,17 @@ struct LLVMCodegen:
         let name as String = node_name(node)
         if strcmp(name.data to cstr, "__init__" to cstr) == 0:
             return
+        // Freestanding: the bump-allocator glue is the single provider for
+        // the mantiq_malloc family. std.mem's Nizam versions carry libc
+        // error paths (calloc/sprintf/write) that have no freestanding
+        // bodies; emitting them yields undefined symbols (p15b) or
+        // order-dependent duplicate-symbol errors (p15b2, p15c — the
+        // glue's family guard checks only mantiq_malloc while the std
+        // side emits members independently). Route the whole family to
+        // the glue: skip the Nizam bodies in no-libc builds.
+        if (deref self).no_libc:
+            if strcmp(name.data to cstr, "mantiq_malloc" to cstr) == 0 to i32 or strcmp(name.data to cstr, "mantiq_malloc_raw" to cstr) == 0 to i32 or strcmp(name.data to cstr, "mantiq_free" to cstr) == 0 to i32 or strcmp(name.data to cstr, "mantiq_realloc" to cstr) == 0 to i32:
+                return
         if (deref self).defined_functions.has(name):
             return
         set_dict_bool(ref (deref self).defined_functions, name, True)

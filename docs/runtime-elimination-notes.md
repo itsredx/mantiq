@@ -2385,3 +2385,37 @@ should suppress std.mem's mantiq_malloc family outright).
 
 Next slices: the std.mem exclusion fix (above), then more std-module
 freestanding stories under runtime (not just static) verification.
+
+## std.sys Phase 5 slice 13 — deterministic std.mem exclusion (mantiq_malloc family) LANDED
+
+Fixed the slice-12 backlog item: the exclusion between the freestanding
+bump glue and std/mem.nz's Nizam mantiq_malloc family was
+order-fragile. Root cause map (from the p15b-family probes):
+- p15b (std.mem only): the std emitter emitted the Nizam family
+  (mantiq_malloc + mantiq_malloc_raw — both with libc error paths
+  calling write/sprintf); the glue's family guard (rt_body_missing on
+  mantiq_malloc) saw it and skipped the whole bump family → glue
+  malloc → Nizam raw → Nizam malloc → UNDEFINED write/sprintf.
+- p15b2/p15c (std.mem + std.string or std.sys): std side emitted
+  mantiq_malloc_raw only (NOT mantiq_malloc); the glue's family guard
+  checked ONLY mantiq_malloc → saw it missing → emitted the whole
+  bump family → DUPLICATE mantiq_malloc_raw.
+- fsdemo15 (std.sys + std.string + std.mem): happened to order so
+  nothing was emitted → glue-only ✓ (why the slice-11 probe passed).
+
+Fix (emit_fun_decl, right after the __init__ check): in no-libc
+builds, skip emitting the Nizam mantiq_malloc/mantiq_malloc_raw/
+mantiq_free/mantiq_realloc bodies entirely — the bump glue is the
+single freestanding provider for the family (mantiq_malloc/raw/
+realloc from the no_libc block, mantiq_free no-op from the h_ block).
+libc-mode behavior unchanged (Nizam family still serves there — that
+is the Milestone B design).
+
+VERIFIED:
+- p15b/p15b2/p15b3/p15c: all four previously broken import mixes now
+  BUILD AND RUN on BOTH arches (rc=53 = arena.alloc success) — the
+  exclusion no longer depends on import order.
+- Full aarch64 runtime ladder green through main_p5m (all 17 probes
+  + fsdemo15 FBA/Arena/Heap/Page-ok rc=0 under qemu).
+- Full x86 ladder green + libc iso16 (libc-rmv-ok).
+- fmt clean + idempotent.
