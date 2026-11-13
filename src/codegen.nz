@@ -1415,6 +1415,24 @@ struct LLVMCodegen:
                 return String.make("i32" to cstr)
             return String.make("i64" to cstr)
         return type_to_llvm(t)
+    // Phase 5 slice 14: operand type for an expression, with the global
+    // definition as authority. A use of an imported global can carry a
+    // stale Any-inferred type (module VarDecls are typechecked after
+    // main's functions, so uses inside main cache Any before the module
+    // decl sets the symbol type). The emitted global definition and its
+    // registered LLVM type are what loads and arithmetic must match.
+    public fn operand_llvm_type(self as ptr[LLVMCodegen], n as ptr[Node]) as String:
+        var t as String = self.llvm_type(node_inferred_type(n))
+        if node_kind(n) == NodeType.Identifier:
+            let nm as String = node_name(n)
+            if nm.data != None to ptr[u8] and not (deref self).var_slots
+                .has(nm) and (deref self).global_vars
+                .has(nm):
+                if (deref self).global_types.has(nm):
+                    let gt as String = (deref self).global_types[nm]
+                    if gt.len > 0 to usize and strcmp(gt.data to cstr, "void" to cstr) != 0:
+                        t = gt
+        return t
 
     public fn llvm_type_align(self as ptr[LLVMCodegen], t as String) as i64:
         let c as cstr = self.trimmed(t)
@@ -2127,6 +2145,20 @@ struct LLVMCodegen:
         if __cg_stream_has_def(ref (deref self).metadata_out, needle) != 0 to i32:
             return 0
         return 1
+    // Reference gate for lazy math glue: emit only when the program
+    // actually DECLARES (references) the libm symbol. rt_body_missing
+    // only reports the absence of a body, which would add unused
+    // sqrt/ceil/floor defines to every no-libc module's raw .ll.
+    public fn rt_decl_present(self as ptr[LLVMCodegen], needle as cstr) as i32:
+        if __cg_stream_has_def(ref (deref self).type_out, needle) != 0 to i32:
+            return 1
+        if __cg_stream_has_def(ref (deref self).main_out, needle) != 0 to i32:
+            return 1
+        if __cg_stream_has_def(ref (deref self).outlined_out, needle) != 0 to i32:
+            return 1
+        if __cg_stream_has_def(ref (deref self).metadata_out, needle) != 0 to i32:
+            return 1
+        return 0
     // Registry-based needs-drop query (replaces C-side mantiq_type_needs_drop).
     // Safe fallback when unbridged (empty dict): mirrors the C registry's
     // unregistered-type answer (copyable / flat).
@@ -2308,6 +2340,58 @@ struct LLVMCodegen:
                     append_cstr(out, "define i32 @munmap(ptr %addr, i64 %len) {\n  %ai = ptrtoint ptr %addr to i64\n  %r = call { i64, i64 } asm sideeffect \"mov x8, $4; svc #0\", \"={x0},={x1},0,1,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %ai, i64 %len, i64 215)\n  %b = extractvalue { i64, i64 } %r, 0\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
                 else:
                     append_cstr(out, "define i32 @munmap(ptr %addr, i64 %len) {\n  %ai = ptrtoint ptr %addr to i64\n  %b = call i64 asm sideeffect \"mov $3, %rax; syscall\", \"={rax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %ai, i64 %len, i64 11)\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
+            // Phase 5 slice 14: std.path + std.perf freestanding backing.
+            // strcmp: pure IR byte loop (unsigned-char semantics, arch-
+            // neutral). access: faccessat syscall with AT_FDCWD (-100),
+            // flags 0 — x86_64 nr 269, aarch64 nr 48. getrusage:
+            // syscall — x86_64 nr 98, aarch64 nr 165 (asm-generic).
+            let fs_strcmp_missing as i32 = self.rt_body_missing("define i32 @strcmp(" to cstr)
+            if fs_strcmp_missing == 1 to i32:
+                append_cstr(out, "define i32 @strcmp(ptr %a, ptr %b) {\nentry:\n  br label %l\nl:\n  %i = phi i64 [ 0, %entry ], [ %in, %nx ]\n  %pa = getelementptr i8, ptr %a, i64 %i\n  %pb = getelementptr i8, ptr %b, i64 %i\n  %ca = load i8, ptr %pa\n  %cb = load i8, ptr %pb\n  %eq = icmp eq i8 %ca, %cb\n  br i1 %eq, label %chk, label %df\nchk:\n  %z = icmp eq i8 %ca, 0\n  br i1 %z, label %d0, label %nx\nnx:\n  %in = add i64 %i, 1\n  br label %l\ndf:\n  %ua = zext i8 %ca to i32\n  %ub = zext i8 %cb to i32\n  %d = sub i32 %ua, %ub\n  ret i32 %d\nd0:\n  ret i32 0\n}\n\n")
+            let fs_access_missing as i32 = self.rt_body_missing("define i32 @access(ptr" to cstr)
+            if fs_access_missing == 1 to i32:
+                if is_aa:
+                    append_cstr(out, "define i32 @access(ptr %p, i32 %mode) {\n  %pi = ptrtoint ptr %p to i64\n  %mi = sext i32 %mode to i64\n  %r = call { i64, i64, i64, i64 } asm sideeffect \"mov x8, $8; svc #0\", \"={x0},={x1},={x2},={x3},0,1,2,3,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 -100, i64 %pi, i64 %mi, i64 0, i64 48)\n  %b = extractvalue { i64, i64, i64, i64 } %r, 0\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
+                else:
+                    append_cstr(out, "define i32 @access(ptr %p, i32 %mode) {\n  %pi = ptrtoint ptr %p to i64\n  %mi = sext i32 %mode to i64\n  %b = call i64 asm sideeffect \"mov $5, %rax; syscall\", \"={rax},{rdi},{rsi},{rdx},{r10},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 -100, i64 %pi, i64 %mi, i64 0, i64 269)\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
+            let fs_getrusage_missing as i32 = self.rt_body_missing("define i32 @getrusage(i32" to cstr)
+            if fs_getrusage_missing == 1 to i32:
+                if is_aa:
+                    append_cstr(out, "define i32 @getrusage(i32 %who, ptr %usage) {\n  %wi = sext i32 %who to i64\n  %ui = ptrtoint ptr %usage to i64\n  %r = call { i64, i64 } asm sideeffect \"mov x8, $4; svc #0\", \"={x0},={x1},0,1,I,~{x8},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %wi, i64 %ui, i64 165)\n  %b = extractvalue { i64, i64 } %r, 0\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
+                else:
+                    append_cstr(out, "define i32 @getrusage(i32 %who, ptr %usage) {\n  %wi = sext i32 %who to i64\n  %ui = ptrtoint ptr %usage to i64\n  %b = call i64 asm sideeffect \"mov $3, %rax; syscall\", \"={rax},{rdi},{rsi},imr,~{rcx},~{r11},~{memory},~{dirflag},~{fpsr},~{flags}\"(i64 %wi, i64 %ui, i64 98)\n  %r32 = trunc i64 %b to i32\n  ret i32 %r32\n}\n\n")
+            // Phase 5 slice 14: std.math hardware subset. sqrt/ceil/floor
+            // as inline-asm hardware bodies — x86: sqrtsd / roundsd ($10 =
+            // round up, $9 = round down, both suppressing the precision
+            // exception); aarch64: fsqrt / frintp / frintm. NOT llvm.*
+            // intrinsics: LLVM lowers llvm.ceil/llvm.floor.f64 to libm
+            // calls, which collide with these same-named glue bodies and
+            // self-recurse (observed as jmp-self loops after tail-call
+            // opt). sin/cos/tan/log/exp/pow have no hardware lowering at
+            // all — libm-only backlog.
+            let fs_sqrt_missing as i32 = self.rt_body_missing("define double @sqrt(" to cstr)
+            if fs_sqrt_missing == 1 to i32 and self.rt_decl_present("declare double @sqrt(..." to cstr) == 1 to i32:
+                if is_aa:
+                    // Explicit-register tied form with the register
+                    // hardcoded in the template: the "w" constraint
+                    // printer emits full v-names (fsqrt v0, v0 — invalid
+                    // for the scalar form), and {d0} constraints still
+                    // print v0, so name d0 directly.
+                    append_cstr(out, "define double @sqrt(double %x) {\n  %r = call double asm sideeffect \"fsqrt d0, d0\", \"={d0},0\"(double %x)\n  ret double %r\n}\n\n")
+                else:
+                    append_cstr(out, "define double @sqrt(double %x) {\n  %r = call double asm sideeffect \"sqrtsd $1, $0\", \"=x,x\"(double %x)\n  ret double %r\n}\n\n")
+            let fs_ceil_missing as i32 = self.rt_body_missing("define double @ceil(" to cstr)
+            if fs_ceil_missing == 1 to i32 and self.rt_decl_present("declare double @ceil(..." to cstr) == 1 to i32:
+                if is_aa:
+                    append_cstr(out, "define double @ceil(double %x) {\n  %r = call double asm sideeffect \"frintp d0, d0\", \"={d0},0\"(double %x)\n  ret double %r\n}\n\n")
+                else:
+                    append_cstr(out, "define double @ceil(double %x) {\n  %r = call double asm sideeffect \"roundsd $$10, $1, $0\", \"=x,x\"(double %x)\n  ret double %r\n}\n\n")
+            let fs_floor_missing as i32 = self.rt_body_missing("define double @floor(" to cstr)
+            if fs_floor_missing == 1 to i32 and self.rt_decl_present("declare double @floor(..." to cstr) == 1 to i32:
+                if is_aa:
+                    append_cstr(out, "define double @floor(double %x) {\n  %r = call double asm sideeffect \"frintm d0, d0\", \"={d0},0\"(double %x)\n  ret double %r\n}\n\n")
+                else:
+                    append_cstr(out, "define double @floor(double %x) {\n  %r = call double asm sideeffect \"roundsd $$9, $1, $0\", \"=x,x\"(double %x)\n  ret double %r\n}\n\n")
             let fs_getpid_missing as i32 = self.rt_body_missing("define i32 @getpid(" to cstr)
             if fs_getpid_missing == 1 to i32:
                 if is_aa:
@@ -3106,7 +3190,39 @@ struct LLVMCodegen:
                         init_val = "zeroinitializer" to ptr[u8]
                     if init_node != None to ptr[Node] and node_kind(init_node) == NodeType.NumberLiteral:
                         let s_raw as String = node_str_val(init_node)
-                        if s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
+                        // Float literals: IR globals need the hex bitcast
+                        // form — a bare integer ("3") is a type error for
+                        // double/float globals, and node_val truncated to
+                        // i64 loses the fraction. Detect floats the same
+                        // way the expression path does (literal type kind,
+                        // else "." in the raw text), plus the global's own
+                        // type (int literals on f64 globals must convert).
+                        let inf_tg as ptr[Type] = node_inferred_type(init_node)
+                        var is_flt as bool = False
+                        if inf_tg != None to ptr[Type]:
+                            let kg as TypeKind = (deref inf_tg).kind
+                            if kg == TypeKind.F16 or kg == TypeKind.BFloat16 or kg == TypeKind.F32 or kg == TypeKind.F64 or kg == TypeKind.F128:
+                                is_flt = True
+                        if not is_flt and s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
+                            extern fn strstr(haystack as cstr, needle as cstr) as cstr
+                            if strstr(s_raw.data to cstr, "." to cstr) != None to cstr:
+                                is_flt = True
+                        if strcmp(v_type.data to cstr, "double" to cstr) == 0 to i32 or strcmp(v_type.data to cstr, "float" to cstr) == 0 to i32 or strcmp(v_type.data to cstr, "fp128" to cstr) == 0 to i32:
+                            is_flt = True
+                        if is_flt:
+                            // Hex float constants are always double-width
+                            // in LLVM IR (the parser narrows them to the
+                            // global's type), so format at full precision.
+                            let f_buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                            extern fn format_llvm_float(
+                                val as f64,
+                                is_f32 as i32,
+                                out_buf as ptr[u8],
+                            )
+                            let f_val as f64 = node_val(init_node)
+                            format_llvm_float(f_val, 0 to i32, f_buf)
+                            init_val = f_buf
+                        elif s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:
                             init_val = s_raw.data
                         else:
                             let num_val as i64 = node_val(init_node) to i64
@@ -3121,6 +3237,19 @@ struct LLVMCodegen:
                     elif init_node != None to ptr[Node] and node_kind(init_node) == NodeType.StringLiteral:
                         let _ as ptr[u8] = self.emit_expr(init_node)
                         init_val = "zeroinitializer" to ptr[u8]
+                    // Float-typed globals without an initializer: the
+                    // default "0" is an integer constant — a type error
+                    // for double/float globals. Emit the formatted zero.
+                    if strcmp(v_type.data to cstr, "double" to cstr) == 0 to i32 or strcmp(v_type.data to cstr, "float" to cstr) == 0 to i32 or strcmp(v_type.data to cstr, "fp128" to cstr) == 0 to i32:
+                        if strcmp(init_val to cstr, "0" to cstr) == 0 to i32:
+                            let f_buf0 as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+                            extern fn format_llvm_float(
+                                val as f64,
+                                is_f32 as i32,
+                                out_buf as ptr[u8],
+                            )
+                            format_llvm_float(0.0, 0 to i32, f_buf0)
+                            init_val = f_buf0
                     append_cstr(ref (deref self).type_out, "@")
                     append_str(ref (deref self).type_out, v_name)
                     append_cstr(ref (deref self).type_out, " = internal global ")
@@ -4010,6 +4139,19 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, mod_str to cstr)
                     append_cstr(ref (deref self).main_out, ")\n")
                     return imp_reg
+            // Phase 5 slice 14: global references must load with the
+            // type the definition emitted. Imported globals can arrive
+            // with a stale Any-inferred type (module VarDecls are
+            // checked after main's functions, so a use inside main
+            // caches Any before the module decl sets the symbol type);
+            // global_types is authoritative for anything in global_vars.
+            if not (deref self).var_slots
+                .has(id_nm_str) and (deref self).global_vars
+                .has(id_nm_str):
+                if (deref self).global_types.has(id_nm_str):
+                    let gt as String = (deref self).global_types[id_nm_str]
+                    if gt.len > 0 to usize and strcmp(gt.data to cstr, "void" to cstr) != 0:
+                        var_type = gt
             if not (deref self).var_slots
                 .has(id_nm_str) and (deref self).enum_variant_tags
                 .has(id_nm_str) and ((deref self).program_functions.has(id_nm_str) or (deref self).defined_functions.has(id_nm_str)):
@@ -5788,7 +5930,7 @@ struct LLVMCodegen:
                 return"0" to ptr[u8]
         let left_reg as ptr[u8] = self.emit_expr(left)
         let right_reg as ptr[u8] = self.emit_expr(right)
-        var left_t_str as String = self.llvm_type(node_inferred_type(left))
+        var left_t_str as String = self.operand_llvm_type(left)
         if node_kind(left) == NodeType.CallExpr:
             let c_node as ptr[Node] = node_left(left)
             if c_node != None to ptr[Node]:
@@ -5874,7 +6016,7 @@ struct LLVMCodegen:
                     left_t_str = String.make("i64" to cstr)
         elif node_kind(left) == NodeType.IndexExpr:
             left_t_str = self.index_value_llvm(left)
-        var right_t_str as String = self.llvm_type(node_inferred_type(right))
+        var right_t_str as String = self.operand_llvm_type(right)
         if node_kind(right) == NodeType.CallExpr:
             let c_node as ptr[Node] = node_left(right)
             if c_node != None to ptr[Node]:
@@ -12825,6 +12967,28 @@ struct LLVMCodegen:
             return reg
         elif strcmp(op.data to cstr, "-" to cstr) == 0:
             let is_float as bool = strcmp(t.data to cstr, "float" to cstr) == 0 or strcmp(t.data to cstr, "double" to cstr) == 0 or strcmp(t.data to cstr, "half" to cstr) == 0 or strcmp(t.data to cstr, "bfloat" to cstr) == 0 or strcmp(t.data to cstr, "fp128" to cstr) == 0
+            if strcmp(t.data to cstr, "ptr" to cstr) == 0:
+                // No IR negation for pointers: negate the address as an
+                // integer. Reachable from ptr-erased generic template
+                // bodies (e.g. std.math abs with T erased to ptr), which
+                // only need the module to stay valid IR — the dead-code
+                // sweep then drops the unreachable template.
+                let ti_reg as ptr[u8] = self.fresh_temp()
+                let ts_reg as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, ti_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = ptrtoint ptr ")
+                append_cstr(ref (deref self).main_out, operand_val to cstr)
+                append_cstr(ref (deref self).main_out, " to i64\n  ")
+                append_cstr(ref (deref self).main_out, ts_reg to cstr)
+                append_cstr(ref (deref self).main_out, " = sub i64 0, ")
+                append_cstr(ref (deref self).main_out, ti_reg to cstr)
+                append_cstr(ref (deref self).main_out, "\n  ")
+                append_cstr(ref (deref self).main_out, reg to cstr)
+                append_cstr(ref (deref self).main_out, " = inttoptr i64 ")
+                append_cstr(ref (deref self).main_out, ts_reg to cstr)
+                append_cstr(ref (deref self).main_out, " to ptr\n")
+                return reg
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, reg to cstr)
             if is_float:

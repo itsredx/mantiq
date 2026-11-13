@@ -2432,3 +2432,107 @@ get_default_allocator() through an interface value with alloc/resize/
 free. x86: IF1-ok/IF2-ok rc=0; aarch64 under qemu-aarch64-static:
 IF1-ok/IF2-ok rc=0. Probe source in research/freestanding/fsdemo16.nz.
 No compiler changes — tree byte-identical to the slice-13 gate.
+
+## std.sys Phase 5 slice 14 — std.math/std.path/std.perf freestanding + codegen fixes LANDED
+
+GOAL: make the std.math float trio, std.path (fs ops), and std.perf
+(getrusage timing) usable freestanding on both arches, and fix the
+codegen bugs the probes exposed. Tree delta: src/codegen.nz +
+std/perf.nz only.
+
+The six fixes (all in src/codegen.nz unless noted):
+
+1. Global VarDecl float constants: `@PI = internal global double 3`
+   (node_val truncated to i64). Globals now detect float values
+   (literal type kind / "." in raw text / global type
+   double|float|fp128) and format via format_llvm_float with
+   is_f32 forced 0 (LLVM hex floats are always double-width).
+   No-initializer float globals emit formatted zero instead of "0".
+2. Imported-global loads (identifier path): module VarDecls are
+   checked AFTER main's functions, so a use inside main cached a
+   stale Any-inferred type and emitted `{ ptr, ptr }` loads.
+   Codegen now prefers global_types[name] (the definition is
+   authoritative) for names in global_vars; BinOp operands go
+   through the same fix via the new operand_llvm_type helper
+   (replaces llvm_type(node_inferred_type(...)) at both operand
+   sites in emit_binary_expr).
+3. Unary-neg on ptr operands: was `sub ptr` = invalid IR. Now
+   ptrtoint → `sub i64 0` → inttoptr. Reachable from ptr-erased
+   generic template bodies (std.math abs with T erased to ptr);
+   those bodies only need valid IR since the dead-code sweep drops
+   them.
+4. strcmp/access/getrusage freestanding bodies: strcmp = IR byte
+   loop; access = faccessat (x86 nr 269 dirfd -100 / aarch64 nr 48,
+   "mov $5, %rax; syscall" vs 4-out tied struct); getrusage = x86
+   nr 98 / aarch64 nr 165 ("mov $3, %rax; syscall" vs 2-out tied
+   struct). All guarded by rt_body_missing AND — new — the
+   reference gate rt_decl_present (line-anchored needle across
+   type_out/main_out/outlined_out/metadata_out), so glue bodies are
+   emitted only when the program actually DECLARES the symbol.
+   Without the gate every no-libc module's raw .ll grew unused
+   defines; ppath4-aa's .ll now contains zero math glue bodies.
+5. Math hardware glue, inline-asm bodies NOT llvm.* intrinsics:
+   LLVM lowers llvm.ceil.f64/llvm.floor.f64 to libm calls, which
+   collide with same-named glue → self-recursion (observed as `jmp
+   self` infinite loops after tail-call opt; sqrt survives only
+   because LLVM lowers it to sqrtsd). Final forms:
+   - x86: `sqrtsd $1, $0` (sqrt), `roundsd $$10, $1, $0` (ceil),
+     `roundsd $$9, $1, $0` (floor), constraints "=x,x".
+     LLVM inline-asm immediates need `$$` (bare `$N` = operand
+     reference).
+   - aarch64: `fsqrt d0, d0` / `frintp d0, d0` / `frintm d0, d0`,
+     constraints "={d0},0" with the register hardcoded in the
+     template — the w-constraint printer emits full v-names which
+     are invalid for scalar FP ops; explicit {d0} still prints v0.
+   Guard: fs_sqrt/fs_ceil/fs_floor_missing + rt_decl_present on
+   "declare double @<fn>(..." (the std emitter emits declares in
+   (...) ellipsis form, NOT "(double)").
+6. std/perf.nz: added `from std.string import String,
+   StringBuilder`. std.perf's fmt_ns constructs Strings, but
+   std.string was not emitted when only std.perf is imported →
+   raw .ll had dangling @String___init__ → zig cc first-compile
+   failed → aarch64 fallback chain dead (gcc --target rejected;
+   host GNU ld cannot do aarch64linux emulation). x86 survived via
+   the clang-with-shim fallback; aarch64 REQUIRES a valid raw .ll
+   so zig cc (bundled clang+lld) succeeds first try.
+
+VERIFIED (main_p5n, both arches):
+- pmath3 (sqrt/ceil/floor + float globals PI/E, runtime-opaque
+  args): x86 rc=0, aarch64 under qemu rc=0. pmath3_fs.ll /
+  pmath3_aa.ll snapshot the glue forms.
+- ppath4 (std.path join/basename/dirname through access glue):
+  x86 rc=0, aarch64 rc=0. ppath4-aa .ll has zero math glue bodies
+  (reference-gating proven).
+- pperf (std.perf getrusage timing): x86 rc=0, aarch64 rc=0.
+- igt (imported globals i64/f64 loads + binop operands): x86 rc=0.
+- Full ladder through main_p5n: x86 22/22, aarch64 17/17 (the
+  single fsdemo7 "mismatch" on both arches was a ladder-script
+  artifact: `env -i FOO=bar run ...` cannot invoke a shell
+  function with an empty PATH → rc=127 and no binary ever built.
+  Hand-verified both arches at rc=70 and fixed the script with
+  runenv/runenvaa helpers that apply env -i to the probe binary
+  only). Note: fsdemo7's rc still depends on env ordering (first
+  envp entry's first byte; FOO=bar → 'F' = 70).
+- libc spot checks: iso16 libc mode = libc-rmv-ok rc=0. pmath3/
+  fsdemo10 libc-mode builds fail by design: their probes declare
+  extern nz_sys_getpid/nz_sys_write, which are no_libc-gated
+  codegen glue (not in libtree-sitter-mantiq.a) — freestanding-only
+  symbols; the same failure reproduces byte-identically through
+  the pre-slice-14 wrap binary, so not a slice-14 regression. The
+  garbled last-resort system() fallback output after a failed
+  direct link is likewise pre-existing.
+
+BACKLOG (documented, NOT fixed):
+- sin/cos/tan/log/exp/pow: no hardware lowering on either arch;
+  intrinsics would recurse into libm (see fix 5). pmath2 (full 9)
+  fails with exactly those 6 undefined — kept as the worklist.
+- Generic abs/min/max: the monomorphizer's erased ABI maps T to
+  ptr-width (lower.nz Milestone M), so abs(i64)/abs(f64) cannot be
+  specialized; sema rejects the call site (E0308). Probes
+  minabs2.nz/minglob.nz document the failure; fixing requires T
+  specialization to the element width.
+
+Probe archive: research/freestanding/ (pmath3, ppath4, pperf,
+pmath2, minglob, minabs2, igt_m, igt_main + pmath3_fs.ll /
+pmath3_aa.ll .ll snapshots).
+

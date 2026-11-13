@@ -2,6 +2,9 @@
 // Provides clock_gettime and getrusage wrappers for Nizam programs.
 
 
+from std.string import String, StringBuilder
+
+
 extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
 extern fn printf(format as cstr, ...) as i32
 extern fn fflush(stream as ptr) as i32
