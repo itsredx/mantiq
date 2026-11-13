@@ -270,6 +270,12 @@ struct Sema:
     // Milestone M diagnostics: per-template module path, so generated
     // bodies report errors in their OWN module file, not the main file.
     public var mod_generic_path as Dict[String, String]
+    // Phase 5 slice 15: fn type-param registry (fn base name -> its [T, ...]
+    // param names). Seeded by main from lowerer.fun_generics AFTER the
+    // post-module mono re-run (which merges mod_fun_generics in), so the
+    // typechecker can detect inferred generic calls (min(a, b) with no
+    // explicit [i64]) and specialize them at typecheck time.
+    public var fun_generic_params as Dict[String, List[String]]
     public var fn_scopes as Dict[usize, ptr[Scope]]
     public var errors as List[String]
     public var current_file as String
@@ -294,6 +300,7 @@ struct Sema:
         (deref self).mod_fun_generics = Dict[String, List[String]]()
         (deref self).mod_generic_source = Dict[String, String]()
         (deref self).mod_generic_path = Dict[String, String]()
+        (deref self).fun_generic_params = Dict[String, List[String]]()
         (deref self).fn_scopes = Dict[usize, ptr[Scope]]()
         (deref self).root_ast = None to ptr[Node]
         (deref self).engine = None to ptr[DiagnosticEngine]

@@ -10,7 +10,7 @@ from error import Diagnostic
 import sema
 from sema import Sema, make_scope, make_symbol
 import symbols
-from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, make_node, node_access_modifier, node_auto_drops, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_final, node_is_float, node_is_mut, node_is_override, node_is_variadic, node_kind, node_left, node_module_name, node_name, node_name_ptr, node_op, node_params, node_return_names, node_return_type_annot, node_return_type_annots, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_access_modifier, set_node_body, set_node_cond, set_node_declarations, set_node_inferred_type, set_node_is_async, set_node_is_extern, set_node_is_final, set_node_is_float, set_node_is_mut, set_node_is_override, set_node_is_variadic, set_node_left, set_node_module_name, set_node_name, set_node_op, set_node_params, set_node_return_type_annot, set_node_right, set_node_str_val, set_node_target, set_node_then_branch, set_node_type_annots, set_node_val
+from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, make_node, node_access_modifier, node_auto_drops, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_final, node_is_float, node_is_mut, node_is_override, node_is_variadic, node_kind, node_left, node_module_name, node_name, node_name_ptr, node_op, node_params, node_return_names, node_return_type_annot, node_return_type_annots, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_access_modifier, set_node_body, set_node_cond, set_node_declarations, set_node_else_branch, set_node_inferred_type, set_node_is_async, set_node_is_extern, set_node_is_final, set_node_is_float, set_node_is_mut, set_node_is_override, set_node_is_variadic, set_node_left, set_node_module_name, set_node_name, set_node_op, set_node_params, set_node_return_type_annot, set_node_right, set_node_str_val, set_node_target, set_node_then_branch, set_node_type_annots, set_node_val
 import types
 from types import Type, TypeKind, make_channel_type, make_class_type, make_color_type, make_enum_type, make_interface_type, make_list_type, make_ptr_type, make_struct_type, make_type, make_union_type
 
@@ -959,6 +959,28 @@ struct TypeChecker:
         (deref res).module_name = (deref node).module_name
         set_node_val(res, node_val(node))
         set_node_op(res, node_op(node))
+        // Phase 5 slice 15: CastExpr targets live in node_op (`0 to T`
+        // lowers to op "T"); substitute the param name so the clone's
+        // casts bind to the concrete type instead of the phantom
+        // Struct("T") (which resolved as ptr and broke typed icmps in
+        // the instantiation body).
+        if node_kind(node) == NodeType.CastExpr:
+            let cast_op as String = node_op(node)
+            if cast_op.data != None to ptr[u8] and cast_op.len > 0 to usize and strcmp(cast_op.data to cstr, param_name) == 0:
+                set_node_op(res, (deref concrete_type).name)
+        // Phase 5 slice 15: make_node allocates FRESH (zeroed) data for a
+        // FunDecl clone, so the instantiation's return_type_annot was None
+        // — the mangled fn's Function type resolved its return as Void and
+        // call sites discarded the result (`call void @abs_i64`). Copy the
+        // template's return annot, substituting the param name.
+        if node_kind(node) == NodeType.FunDecl:
+            let src_ret_ann as ptr[TypeAnnotation] = node_return_type_annot(node)
+            if src_ret_ann != None to ptr[TypeAnnotation]:
+                let ret_copy as ptr[TypeAnnotation] = make[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                deref ret_copy = deref src_ret_ann
+                if (deref ret_copy).name.data != None to ptr[u8] and strcmp((deref ret_copy).name.data to cstr, param_name) == 0:
+                    (deref ret_copy).name = String.make((deref concrete_type).name.data to cstr)
+                set_node_return_type_annot(res, ret_copy)
         set_node_is_mut(res, node_is_mut(node))
         set_node_is_async(res, node_is_async(node))
         set_node_name(res, node_name(node))
@@ -997,6 +1019,17 @@ struct TypeChecker:
         set_node_body(res, self.clone_and_substitute(node_body(node), param_name, concrete_type))
         set_node_cond(res, self.clone_and_substitute(node_cond(node), param_name, concrete_type))
         set_node_then_branch(res, self.clone_and_substitute(node_then_branch(node), param_name, concrete_type))
+        // Phase 5 slice 15: IfStmt else branches were dropped by the clone
+        // (min's `else: return b` vanished — the instantiation fell into an
+        // empty else label and returned garbage on that path).
+        if node_kind(node) == NodeType.IfStmt:
+            let eb as Option[ptr[Node]] = node_else_branch(node)
+            let eb_ref as ptr[u8] = (ref eb) to ptr[u8]
+            if option_has_value(eb_ref):
+                let eb_p as ptr[Node] = option_value(eb_ref) to ptr[Node]
+                set_node_else_branch(res, Some(self.clone_and_substitute(eb_p, param_name, concrete_type)))
+            else:
+                set_node_else_branch(res, Empty)
         set_node_str_val(res, node_str_val(node))
 
         let node_decls as List[ptr[Node]] = node_declarations(node)
@@ -1046,6 +1079,148 @@ struct TypeChecker:
         let dummy1 as ptr[Type] = self.typecheck_node(monomorphized)
 
         return monomorphized
+    // Phase 5 slice 15: canonical type name for a value type, used for
+    // instantiation mangling (min_i64) and for the clone's annot rename
+    // (clone_and_substitute sets annot.name = concrete_type.name, so the
+    // name must be the source spelling the type-annot resolver accepts).
+    // Returns "" for non-scalar bindings — those keep the erased ABI
+    // (ptr-width types already work there; struct/ptr ABI changes are
+    // out of slice scope).
+    public fn scalar_type_name(self as ptr[TypeChecker], t as ptr[Type]) as String:
+        if t == None to ptr[Type]:
+            return String.make("" to cstr)
+        let k as TypeKind = (deref t).kind
+        if k == TypeKind.I8:
+            return String.make("i8" to cstr)
+        if k == TypeKind.I16:
+            return String.make("i16" to cstr)
+        if k == TypeKind.I32:
+            return String.make("i32" to cstr)
+        if k == TypeKind.I64:
+            return String.make("i64" to cstr)
+        if k == TypeKind.I128:
+            return String.make("i128" to cstr)
+        if k == TypeKind.ISize:
+            return String.make("isize" to cstr)
+        if k == TypeKind.U8:
+            return String.make("u8" to cstr)
+        if k == TypeKind.U16:
+            return String.make("u16" to cstr)
+        if k == TypeKind.U32:
+            return String.make("u32" to cstr)
+        if k == TypeKind.U64:
+            return String.make("u64" to cstr)
+        if k == TypeKind.USize:
+            return String.make("usize" to cstr)
+        if k == TypeKind.F32:
+            return String.make("f32" to cstr)
+        if k == TypeKind.F64:
+            return String.make("f64" to cstr)
+        return String.make("" to cstr)
+    // Phase 5 slice 15: inferred generic-call specialization. The pre-sema
+    // monomorphizer rewrites only calls carrying EXPLICIT type annots
+    // (min[i64](...)); inferred calls (min(a, b)) kept the raw erased
+    // template (define ptr @min(ptr, ptr)) — ABI-correct only for
+    // ptr-width element types, with the Struct("T") return type E0308ing
+    // against `let x as i64 = min(a, b)`. At typecheck the arg types are
+    // known, so bind the template's single type param from its argument,
+    // instantiate the template (sharing any explicit-annot instantiation
+    // that produced the same mangled name), and rewrite the callee to the
+    // mangled name. Returns 1 when the callee was rewritten.
+    public fn try_specialize_generic_call(
+        self as ptr[TypeChecker],
+        call_node as ptr[Node],
+        callee as ptr[Node],
+    ) as i32:
+        if callee == None to ptr[Node] or node_kind(callee) != NodeType.Identifier:
+            return 0
+        let fn_name as String = node_name(callee)
+        if fn_name.data == None to ptr[u8] or fn_name.len == 0 to usize:
+            return 0
+        if not (deref (deref self).sema).fun_generic_params.has(fn_name):
+            return 0
+        // Explicit-annot calls were already specialized pre-sema.
+        let annots_ptr as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(call_node)
+        if annots_ptr != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+            let annots as List[Option[ptr[TypeAnnotation]]] = deref annots_ptr
+            if annots.length() > 0 to i64:
+                let first as Option[ptr[TypeAnnotation]] = annots[0 to i64]
+                let first_ref as ptr[u8] = (ref first) to ptr[u8]
+                if option_has_value(first_ref):
+                    return 0
+        let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(fn_name)
+        if sym == None to ptr[Symbol] or (deref sym).kind != SymbolKind.Function:
+            return 0
+        let tmpl as ptr[Node] = (deref sym).decl_node
+        if tmpl == None to ptr[Node] or node_kind(tmpl) != NodeType.FunDecl:
+            return 0
+        let tparams as List[String] = (deref (deref self).sema).fun_generic_params[fn_name]
+        if tparams.length() != 1 to i64:
+            // Multi-param generics keep the erased ABI (backlog).
+            return 0
+        let tname as String = tparams[0 to i64]
+        if tname.data == None to ptr[u8] or tname.len == 0 to usize:
+            return 0
+        let tmpl_params as List[ptr[Node]] = node_params(tmpl)
+        let args as List[ptr[Node]] = node_params(call_node)
+        let p_count as i64 = tmpl_params.length()
+        let a_count as i64 = args.length()
+        if a_count != p_count:
+            return 0
+        // Locate the argument position that carries the type param.
+        var bind_idx as i64 = -1 to i64
+        var pi as i64 = 0 to i64
+        while pi < p_count:
+            let p as ptr[Node] = tmpl_params[pi]
+            let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
+            if p_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref p_annots).length() > 0 to i64:
+                let p_opt as Option[ptr[TypeAnnotation]] = (deref p_annots)[0 to i64]
+                let p_ref as ptr[u8] = (ref p_opt) to ptr[u8]
+                if option_has_value(p_ref):
+                    let p_annot as ptr[TypeAnnotation] = option_value(p_ref) to ptr[TypeAnnotation]
+                    if p_annot != None to ptr[TypeAnnotation] and (deref p_annot).name.data != None to ptr[u8] and strcmp((deref p_annot).name.data to cstr, tname.data to cstr) == 0:
+                        bind_idx = pi
+            pi = pi + 1 to i64
+        if bind_idx < 0 to i64:
+            return 0
+        // Infer arg types (the callee-args loop below re-checks against
+        // the concrete params; nested generic calls specialize here).
+        var ai as i64 = 0 to i64
+        while ai < a_count:
+            let a_node as ptr[Node] = args[ai]
+            if a_node != None to ptr[Node]:
+                let _at as ptr[Type] = self.typecheck_node(a_node)
+            ai = ai + 1 to i64
+        let bind_arg as ptr[Node] = args[bind_idx]
+        if bind_arg == None to ptr[Node]:
+            return 0
+        let bind_t as ptr[Type] = node_inferred_type(bind_arg)
+        if bind_t == None to ptr[Type]:
+            return 0
+        let concrete_name as String = self.scalar_type_name(bind_t)
+        if concrete_name.data == None to ptr[u8] or concrete_name.len == 0 to usize:
+            return 0
+        let mangled_sb as StringBuilder = StringBuilder.make()
+        mangled_sb.append(fn_name.data to cstr)
+        mangled_sb.append("_" to cstr)
+        mangled_sb.append(concrete_name.data to cstr)
+        let mangled as String = mangled_sb.to_string()
+        let existing as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(mangled)
+        if existing == None to ptr[Symbol]:
+            let concrete_t as ptr[Type] = make_type((deref bind_t).kind)
+            (deref concrete_t).name = String.make(concrete_name.data to cstr)
+            let mono as ptr[Node] = self.monomorphize(tmpl, tname.data to cstr, concrete_t)
+            if mono == None to ptr[Node]:
+                return 0
+            // Append the instantiation to the program declarations so the
+            // codegen phase walks it and emits the specialized body.
+            let root_ast as ptr[Node] = (deref (deref self).sema).root_ast
+            if root_ast != None to ptr[Node]:
+                let decls as List[ptr[Node]] = node_declarations(root_ast)
+                decls.append(mono)
+                set_node_declarations(root_ast, decls)
+        set_node_name(callee, mangled)
+        return 1
 
     public fn typecheck_node(self as ptr[TypeChecker], node as ptr[Node]) as ptr[Type]:
         extern fn memset(s as ptr, c: i32, n: usize) as ptr
@@ -1511,7 +1686,7 @@ struct TypeChecker:
                 ret_type = make_type(TypeKind.USize)
                 set_node_inferred_type(node, ret_type)
                 return ret_type
-            let callee_t as ptr[Type] = self.typecheck_node(callee)
+            var callee_t as ptr[Type] = self.typecheck_node(callee)
             self.fill_default_call_args(node, callee)
             var generic_ctor_t as ptr[Type] = None to ptr[Type]
             if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier:
@@ -1530,6 +1705,12 @@ struct TypeChecker:
                                     let gc_pa as ptr[TypeAnnotation] = gc_val_p to ptr[TypeAnnotation]
                                     if gc_pa != None to ptr[TypeAnnotation]:
                                         generic_ctor_t = self.resolve_type_annotation(gc_pa)
+                // Phase 5 slice 15: inferred generic-call specialization.
+                // Rewrites the callee to the mangled instantiation name
+                // (min_i64); the concrete callee type then drives the arg
+                // loop and the call's return type below.
+                if self.try_specialize_generic_call(node, callee) == 1 to i32:
+                    callee_t = self.typecheck_node(callee)
             let args as List[ptr[Node]] = node_params(node)
             let arg_count as i64 = args.length()
             var a_idx as i64 = 0 to i64

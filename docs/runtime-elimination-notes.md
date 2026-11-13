@@ -2536,3 +2536,96 @@ Probe archive: research/freestanding/ (pmath3, ppath4, pperf,
 pmath2, minglob, minabs2, igt_m, igt_main + pmath3_fs.ll /
 pmath3_aa.ll .ll snapshots).
 
+## std.sys Phase 5 slice 15 — inferred generic-call T-specialization LANDED
+
+Slice 14's backlog item ("generic abs/min/max cannot be specialized;
+erased ABI maps T to ptr-width") is fixed for scalar bindings.
+
+ROOT CAUSE (two broken paths, one shared symptom):
+- Inferred calls `min(a, b)`: the pre-sema monomorphizer
+  (MonoState.fixup_calls in lower.nz) only rewrites calls carrying
+  EXPLICIT annots (`min[i64](...)`). Inferred calls kept the raw
+  erased template `define ptr @min(ptr, ptr)` — ABI-correct only for
+  ptr-width types (i64 worked by accident on x86_64), and the
+  phantom Struct("T") return type E0308ed against
+  `let x as i64 = min(a, b)`.
+- Explicit calls `abs[i64](p)`: register_instantiation re-parses the
+  template source and renames only ANNOTs (mono_replace_word over
+  all_annotations) — CastExpr targets live in node_op and kept "T",
+  emitting `inttoptr i64 0 to ptr` against typed icmps → invalid IR.
+  Pre-existing since Milestone M (the slice-14 binary fails
+  identically); never exposed because nothing inferred worked first.
+
+DESIGN — specialize at typecheck time, in sema:
+- Sema gained `fun_generic_params: Dict[String, List[String]]`
+  (fn base name → its [T, ...] param names). FunDecl nodes do NOT
+  carry type params; they live only in lowerer.fun_generics. main.nz
+  seeds the dict after `monomorphize_with_sources`, which has already
+  merged mod_fun_generics into lowerer.fun_generics — so one dict
+  covers program-local templates and module templates (std.math).
+- TypeChecker gained `try_specialize_generic_call(call_node, callee)`,
+  hooked in the CallExpr branch after the generic_ctor_t block.
+  Guards: Identifier callee, no explicit annots, exactly 1 type
+  param, arg count == param count. It finds the binding position by
+  matching the param's annot name against the param name, typechecks
+  the args (nested generic calls specialize innermost-first), binds T
+  from the inferred arg type, and mangles `base_T` matching the
+  mono_mangle convention.
+- Sharing: if `lookup_symbol(mangled)` exists, the call is rewritten
+  to the existing instantiation (inferred + explicit call sites in
+  one program emit ONE define). Otherwise `TypeChecker.monomorphize`
+  clones + declares + resolves + typechecks, and the hook APPENDS the
+  clone to `(deref sema).root_ast` declarations — the Program walk
+  uses a fixed count, so append-during-iteration is safe.
+- `callee_t` became `var` and is recomputed after a rewrite; the
+  concrete Function type then drives the arg loop and the call's
+  return type naturally.
+
+SCOPE — scalars only, by decision:
+scalar_type_name returns canonical names for i8..i1024 (I8..I64,
+I128), u8..u64, isize/usize, f32/f64 — and "" for everything else.
+Boolean/Char/struct/ptr bindings keep the erased ABI: for ptr-width
+types the erased template already works, and struct/ptr ABI changes
+are a separate slice. Multi-param generics ([K, V]) are skipped.
+
+THREE clone bugs fixed in clone_and_substitute (typecheck.nz) —
+each verified by bisected probes (t1–t5, t3b/d/f/h/s):
+1. CastExpr targets: `0 to T` lowers to op "T"; the clone copied
+   node_op verbatim → phantom Struct("T") → inttoptr against typed
+   icmps. The clone now substitutes node_op when it equals the param
+   name.
+2. Return annot: make_node allocates FRESH zeroed FunDeclData, so
+   the clone's return_type_annot was None → return resolved Void →
+   `define void @abs_i64` with `ret i64` in the body, call result
+   discarded. The clone now copies the return annot (substituting
+   the param name).
+3. IfStmt else branches were dropped entirely (min's `else:
+   return b` vanished → empty else label → wrong result on the
+   else path). The clone now clones else_branch
+   (set_node_else_branch added to the symbols import).
+
+FOURTH fix — mono_fix_cast_ops (lower.nz): the pre-sema explicit path
+needed the same cast-op repair as clone path (1). New MonoState
+walker mirroring mono_shift_spans' traversal (incl. else_branch)
+renames CastExpr node_op values equal to a type-param name; called
+from register_instantiation after the rewrite_annotation loop,
+before fixup_calls.
+
+VERIFIED (main_p15, both arches, freestanding):
+- minabs2 (abs i64): rc=0 x86 + aarch64. Was E0308 under slice-14.
+- minglob (min/max i64): rc=0 both arches. Was E0308.
+- p15t3 (f64+i64 abs/min/max + nested abs(min(p,q)), runtime-opaque
+  inputs): rc=0 both arches. bisected: t3b (f64 abs+cmp) rc=0,
+  t3f (f64 section) rc=0, t3h (+i64 section) rc=0, t3s (scaled
+  return) rc=3 as expected.
+- p15t5 (inferred min + explicit min[i64] + abs[i64] in one program,
+  shared instantiation): rc=0 both arches; single define i64 @min_i64
+  in the .ll; zero inttoptr in any reachable body.
+- Full slice-14 ladder through main_p15: x86 22/22, aarch64 17/17,
+  import-mix family rc-identical to slice-14 (erased-ABI non-scalar
+  paths unchanged).
+
+Probe archive: research/freestanding/ (minabs2/minglob rewritten as
+regression probes — they now PASS; new p15t3/p15t5).
+
+

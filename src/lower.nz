@@ -3766,6 +3766,9 @@ struct MonoState:
         while bi < a_list.length():
             self.rewrite_annotation(a_list[bi])
             bi = bi + 1 to i64
+        // Phase 5 slice 15: cast targets live in node_op, not annots —
+        // fix them in the freshly lowered instantiation subtree too.
+        self.mono_fix_cast_ops(struct_node, prods, args)
         self.fixup_calls((deref low2).generic_calls)
         (deref self).generated.append(struct_node)
     // Milestone M diagnostics: shift every node span in a generated
@@ -3798,6 +3801,46 @@ struct MonoState:
         while pi2 < sh_params.length():
             self.mono_shift_spans(sh_params[pi2], off)
             pi2 = pi2 + 1 to i64
+    // Phase 5 slice 15: CastExpr targets live in node_op, which the
+    // annot rename loop never touches — explicit-annot instantiations of
+    // abs[T] kept `0 to T`, resolving the target as the phantom
+    // Struct("T") (inttoptr against typed icmps, invalid IR). Rename cast
+    // ops equal to a type-param name to the concrete arg.
+    public fn mono_fix_cast_ops(
+        self as ptr[MonoState],
+        node as ptr[Node],
+        prods as List[String],
+        args as List[String],
+    ):
+        if node == None to ptr[Node]:
+            return
+        if node_kind(node) == NodeType.CastExpr:
+            let cop as String = node_op(node)
+            if cop.data != None to ptr[u8] and cop.len > 0 to usize:
+                var ci as i64 = 0 to i64
+                while ci < prods.length() and ci < args.length():
+                    if strcmp(cop.data to cstr, prods[ci].data to cstr) == 0:
+                        set_node_op(node, args[ci])
+                    ci = ci + 1 to i64
+        self.mono_fix_cast_ops(node_left(node), prods, args)
+        self.mono_fix_cast_ops(node_right(node), prods, args)
+        self.mono_fix_cast_ops(node_body(node), prods, args)
+        self.mono_fix_cast_ops(node_cond(node), prods, args)
+        self.mono_fix_cast_ops(node_then_branch(node), prods, args)
+        let e_opt_raw as Option[ptr[Node]] = node_else_branch(node)
+        let e_opt as ptr[u8] = (ref e_opt_raw) to ptr[u8]
+        if option_has_value(e_opt):
+            self.mono_fix_cast_ops(option_unwrap_ptr(e_opt) to ptr[Node], prods, args)
+        let f_decls as List[ptr[Node]] = node_declarations(node)
+        var fi as i64 = 0 to i64
+        while fi < f_decls.length():
+            self.mono_fix_cast_ops(f_decls[fi], prods, args)
+            fi = fi +1 to i64
+        let f_params as List[ptr[Node]] = node_params(node)
+        var fpi as i64 = 0 to i64
+        while fpi < f_params.length():
+            self.mono_fix_cast_ops(f_params[fpi], prods, args)
+            fpi = fpi + 1 to i64
 
     public fn fixup_calls(self as ptr[MonoState], calls as List[ptr[Node]]):
         var i as i64 = 0 to i64

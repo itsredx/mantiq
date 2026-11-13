@@ -757,6 +757,17 @@ fn compile_source(
     while gm_i < gen_mods.length():
         sema.declare_pass(gen_mods[gm_i])
         gm_i = gm_i + 1 to i64
+    // Phase 5 slice 15: seed the fn type-param registry for the
+    // typechecker's inferred generic-call specialization. By this point
+    // monomorphize_with_sources has merged the module fn generics into
+    // lowerer.fun_generics, so one dict covers program-local templates
+    // (min[T] in main.nz) and module templates (std.math min/max/abs).
+    let fgp_keys as List[String] = (deref lowerer).fun_generics.keys()
+    var fgp_i as i64 = 0 to i64
+    while fgp_i < fgp_keys.length():
+        let fgp_k as String = fgp_keys[fgp_i]
+        (deref sema).fun_generic_params[fgp_k] = (deref lowerer).fun_generics[fgp_k]
+        fgp_i = fgp_i + 1 to i64
     // Generated instantiation bodies are snippets of the module's own source,
     // so their free identifiers refer to the module's siblings (Set's body
     // uses Dict). Those names are only in scope via explicit imports; expose
