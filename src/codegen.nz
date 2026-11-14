@@ -13404,6 +13404,89 @@ struct LLVMCodegen:
         append_str(ref (deref self).main_out, target_type)
         append_cstr(ref (deref self).main_out, "\n")
         return reg
+    // Phase 5 slice 17: coerce a list-literal item's value to the
+    // literal's materialized elem type. The literal's payload comes from
+    // the declared type (typecheck propagation), but an item's own
+    // inferred type can still differ (an i32 variable inside a
+    // List[i64] literal, an int literal inside List[f64]) — storing the
+    // raw value with elem_type would be invalid IR. Int<->int: sext or
+    // trunc; int->float: sitofp; float->int: fptosi; float<->float:
+    // fpext or fptrunc; anything else (ptr/struct): unchanged.
+    public fn coerce_list_item(
+        self as ptr[LLVMCodegen],
+        it_node as ptr[Node],
+        elem_type as String,
+        elem_val as ptr[u8],
+    ) as ptr[u8]:
+        if it_node == None to ptr[Node]:
+            return elem_val
+        let it_t as ptr[Type] = node_inferred_type(it_node)
+        if it_t == None to ptr[Type]:
+            return elem_val
+        let item_t_str as String = type_to_llvm(it_t)
+        if item_t_str.data == None to ptr[u8] or item_t_str.len == 0 to usize:
+            return elem_val
+        if strcmp(item_t_str.data to cstr, elem_type.data to cstr) == 0:
+            return elem_val
+        let it_bits as i32 = llvm_int_bits(item_t_str)
+        let el_bits as i32 = llvm_int_bits(elem_type)
+        let it_f as i32 = llvm_float_rank(item_t_str)
+        let el_f as i32 = llvm_float_rank(elem_type)
+        if it_bits > 0 to i32 and el_bits > 0 to i32:
+            let cv as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, cv to cstr)
+            if it_bits < el_bits:
+                append_cstr(ref (deref self).main_out, " = sext ")
+            else:
+                append_cstr(ref (deref self).main_out, " = trunc ")
+            append_str(ref (deref self).main_out, item_t_str)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, " to ")
+            append_str(ref (deref self).main_out, elem_type)
+            append_cstr(ref (deref self).main_out, "\n")
+            return cv
+        if it_bits > 0 to i32 and el_f > 0 to i32:
+            let cv as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, cv to cstr)
+            append_cstr(ref (deref self).main_out, " = sitofp ")
+            append_str(ref (deref self).main_out, item_t_str)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, " to ")
+            append_str(ref (deref self).main_out, elem_type)
+            append_cstr(ref (deref self).main_out, "\n")
+            return cv
+        if it_f > 0 to i32 and el_bits > 0 to i32:
+            let cv as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, cv to cstr)
+            append_cstr(ref (deref self).main_out, " = fptosi ")
+            append_str(ref (deref self).main_out, item_t_str)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, " to ")
+            append_str(ref (deref self).main_out, elem_type)
+            append_cstr(ref (deref self).main_out, "\n")
+            return cv
+        if it_f > 0 to i32 and el_f > 0 to i32:
+            let cv as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, cv to cstr)
+            if it_f < el_f:
+                append_cstr(ref (deref self).main_out, " = fpext ")
+            else:
+                append_cstr(ref (deref self).main_out, " = fptrunc ")
+            append_str(ref (deref self).main_out, item_t_str)
+            append_cstr(ref (deref self).main_out, " ")
+            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, " to ")
+            append_str(ref (deref self).main_out, elem_type)
+            append_cstr(ref (deref self).main_out, "\n")
+            return cv
+        return elem_val
 
     public fn emit_list_literal(self as ptr[LLVMCodegen], node as ptr[Node]) as ptr[u8]:
         let items as List[ptr[Node]] = node_declarations(node)
@@ -13474,6 +13557,9 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, ")\n")
                 else:
                     let elem_val as ptr[u8] = self.emit_expr(it_node)
+                    // Phase 5 slice 17: same item coercion as the plain
+                    // literal path (see coerce_list_item).
+                    let real_elem_sp as ptr[u8] = self.coerce_list_item(it_node, elem_type, elem_val)
                     let elem_alloca as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, elem_alloca to cstr)
@@ -13483,7 +13569,7 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, "  store ")
                     append_str(ref (deref self).main_out, elem_type)
                     append_cstr(ref (deref self).main_out, " ")
-                    append_cstr(ref (deref self).main_out, elem_val to cstr)
+                    append_cstr(ref (deref self).main_out, real_elem_sp to cstr)
                     append_cstr(ref (deref self).main_out, ", ptr ")
                     append_cstr(ref (deref self).main_out, elem_alloca to cstr)
                     append_cstr(ref (deref self).main_out, "\n")
@@ -13518,7 +13604,12 @@ struct LLVMCodegen:
 
         i = 0 to i64
         while i < count:
-            let elem_val as ptr[u8] = self.emit_expr(get_node_decl(ref items, i))
+            let it_node as ptr[Node] = get_node_decl(ref items, i)
+            let elem_val as ptr[u8] = self.emit_expr(it_node)
+            // Phase 5 slice 17: coerce the item's value to the buffer's
+            // elem type (item inferred type can differ from the
+            // declared elem type — see coerce_list_item).
+            let real_elem as ptr[u8] = self.coerce_list_item(it_node, elem_type, elem_val)
             let idx_temp as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, idx_temp to cstr)
@@ -13530,7 +13621,7 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, "  store ")
             append_str(ref (deref self).main_out, elem_type)
             append_cstr(ref (deref self).main_out, " ")
-            append_cstr(ref (deref self).main_out, elem_val to cstr)
+            append_cstr(ref (deref self).main_out, real_elem to cstr)
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, idx_temp to cstr)
             append_cstr(ref (deref self).main_out, "\n")
@@ -13579,6 +13670,8 @@ struct LLVMCodegen:
         var is_str as bool = False
         var is_heap_str as bool = False
 
+        var k_declared as bool = False
+        var v_declared as bool = False
         if dict_t != None to ptr[Type] and (deref dict_t).kind == TypeKind.Dict:
             // Dict type convention: name = key type name, payload = value type
             // (same convention as dict_declared_key_size / dict_declared_val_size,
@@ -13588,12 +13681,14 @@ struct LLVMCodegen:
             // stored through the narrower slots.
             if (deref dict_t).name.data != None to ptr[u8] and (deref dict_t).name.len > 0 to usize:
                 k_size = self.dict_key_size_from_name((deref dict_t).name.data to cstr)
+                k_declared = True
                 if strcmp((deref dict_t).name.data to cstr, "String" to cstr) == 0:
                     is_heap_str = True
             if (deref dict_t).payload != None to ptr[Type]:
                 let v_t as ptr[Type] = (deref dict_t).payload
                 v_type = type_to_llvm(v_t)
                 v_size = self.type_llvm_byte_size(v_t)
+                v_declared = True
         let items as List[ptr[Node]] = node_declarations(node)
         let count as i64 = items.length()
 
@@ -13603,17 +13698,35 @@ struct LLVMCodegen:
             if inspect_item != None to ptr[Node] and (deref inspect_item).kind != NodeType.SpreadExpr:
                 let ik_t as ptr[Type] = node_inferred_type(inspect_item)
                 if ik_t != None to ptr[Type]:
-                    k_type = type_to_llvm(ik_t)
-                    k_size = self.type_llvm_byte_size(ik_t)
-                    if (deref ik_t).kind == TypeKind.String:
-                        is_heap_str = True
-                    elif (deref ik_t).kind == TypeKind.AsciiStr or (deref ik_t).kind == TypeKind.Utf8Str or (deref ik_t).kind == TypeKind.WebStr or (deref ik_t).kind == TypeKind.RangeStr:
-                        is_str = True
+                    // Phase 5 slice 17: item inference must not override the
+                    // DECLARED key type/width. `{3: 42}` with
+                    // `Dict[i64, i64]` inferred i32 from the key literal and
+                    // hashed 4 bytes at insert, while the read path
+                    // (emit_dict_index_slot) hashes the declared 8 — lookup
+                    // missed, __mantiq_dict_get returned null, and the load
+                    // segfaulted. Keep the declared width; adopt the item's
+                    // LLVM type only when it already matches the declared
+                    // width (struct/f64 keys), else derive it from the
+                    // declared key name.
+                    if k_declared:
+                        if self.type_llvm_byte_size(ik_t) == k_size:
+                            k_type = type_to_llvm(ik_t)
+                        else:
+                            k_type = self.dict_key_llvm_from_name((deref dict_t).name.data to cstr)
+                    else:
+                        k_type = type_to_llvm(ik_t)
+                        k_size = self.type_llvm_byte_size(ik_t)
+                        if (deref ik_t).kind == TypeKind.String:
+                            is_heap_str = True
+                        elif (deref ik_t).kind == TypeKind.AsciiStr or (deref ik_t).kind == TypeKind.Utf8Str or (deref ik_t).kind == TypeKind.WebStr or (deref ik_t).kind == TypeKind.RangeStr:
+                            is_str = True
                 if inspect_i + 1 to i64 < count:
                     let iv_t as ptr[Type] = node_inferred_type(get_node_decl(ref items, inspect_i + 1 to i64))
                     if iv_t != None to ptr[Type]:
-                        v_type = type_to_llvm(iv_t)
-                        v_size = self.type_llvm_byte_size(iv_t)
+                        // Same rule for the value: declared V wins.
+                        if not v_declared:
+                            v_type = type_to_llvm(iv_t)
+                            v_size = self.type_llvm_byte_size(iv_t)
                 break
             inspect_i = inspect_i + 1 to i64
         if k_size <= 0 to i64:
@@ -13672,7 +13785,25 @@ struct LLVMCodegen:
                 let val_node as ptr[Node] = get_node_decl(ref items, idx + 1 to i64)
                 let key_val as ptr[u8] = self.emit_expr(key_node)
                 let val_val as ptr[u8] = self.emit_expr(val_node)
-
+                // Phase 5 slice 17: coerce item values to the declared
+                // K/V storage types (same coercion as list-literal items;
+                // an i32 key literal in a Dict[i64, _] must be sext'd
+                // before storing/hashing 8 bytes).
+                var key_real as ptr[u8] = self.coerce_list_item(key_node, k_type, key_val)
+                var val_real as ptr[u8] = self.coerce_list_item(val_node, v_type, val_val)
+                // String-literal keys/values: emit_expr yields a bare cstr
+                // ptr, but the dict stores the { ptr, len } struct (the
+                // read path wraps via wrap_string_literal_key — the write
+                // path never did, so Dict[String, _] literals were invalid
+                // IR even before this slice).
+                let k_is_st as bool = strcmp(k_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(k_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0
+                if k_is_st and node_kind(key_node) == NodeType.StringLiteral:
+                    let k_wrapped as ptr[u8] = self.wrap_string_literal_key(key_node, key_real)
+                    key_real = k_wrapped
+                let v_is_st as bool = strcmp(v_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(v_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0
+                if v_is_st and node_kind(val_node) == NodeType.StringLiteral:
+                    let v_wrapped as ptr[u8] = self.wrap_string_literal_key(val_node, val_real)
+                    val_real = v_wrapped
                 let k_alloc as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, k_alloc to cstr)
@@ -13682,7 +13813,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "  store ")
                 append_str(ref (deref self).main_out, k_type)
                 append_cstr(ref (deref self).main_out, " ")
-                append_cstr(ref (deref self).main_out, key_val to cstr)
+                append_cstr(ref (deref self).main_out, key_real to cstr)
                 append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, k_alloc to cstr)
                 append_cstr(ref (deref self).main_out, "\n")
@@ -13696,7 +13827,7 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, "  store ")
                 append_str(ref (deref self).main_out, v_type)
                 append_cstr(ref (deref self).main_out, " ")
-                append_cstr(ref (deref self).main_out, val_val to cstr)
+                append_cstr(ref (deref self).main_out, val_real to cstr)
                 append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, v_alloc to cstr)
                 append_cstr(ref (deref self).main_out, "\n")
@@ -13709,7 +13840,7 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, " = extractvalue ")
                     append_str(ref (deref self).main_out, k_type)
                     append_cstr(ref (deref self).main_out, " ")
-                    append_cstr(ref (deref self).main_out, key_val to cstr)
+                    append_cstr(ref (deref self).main_out, key_real to cstr)
                     append_cstr(ref (deref self).main_out, ", 0\n")
 
                     let str_len as ptr[u8] = self.fresh_temp()
@@ -13718,7 +13849,7 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, " = extractvalue ")
                     append_str(ref (deref self).main_out, k_type)
                     append_cstr(ref (deref self).main_out, " ")
-                    append_cstr(ref (deref self).main_out, key_val to cstr)
+                    append_cstr(ref (deref self).main_out, key_real to cstr)
                     append_cstr(ref (deref self).main_out, ", 1\n")
 
                     append_cstr(ref (deref self).main_out, "  ")
@@ -14915,6 +15046,44 @@ struct LLVMCodegen:
         append_i64(ref (deref self).main_out, slen)
         append_cstr(ref (deref self).main_out, ", 1\n")
         return w2
+    // Phase 5 slice 17: declared-key LLVM storage type for dict literals,
+    // mirroring dict_key_size_from_name's name->size table plus the read
+    // path's size->type fallback in emit_dict_index_slot. The write path
+    // must store and hash the key in exactly the form the read path does
+    // (same bytes, same width) or lookups miss.
+    public fn dict_key_llvm_from_name(self as ptr[LLVMCodegen], name as cstr) as String:
+        if strcmp(name, "String" to cstr) == 0 or strcmp(name, "AsciiStr" to cstr) == 0 or strcmp(name, "Utf8Str" to cstr) == 0 or strcmp(name, "WebStr" to cstr) == 0 or strcmp(name, "RangeStr" to cstr) == 0:
+            if (deref self).target.pointer_size == 4 to usize:
+                return String.make("{ ptr, i32, i32 }" to cstr)
+            return String.make("{ ptr, i64, i64 }" to cstr)
+        if strcmp(name, "i8" to cstr) == 0 or strcmp(name, "u8" to cstr) == 0 or strcmp(name, "byte" to cstr) == 0 or strcmp(name, "bool" to cstr) == 0 or strcmp(name, "char" to cstr) == 0:
+            return String.make("i8" to cstr)
+        if strcmp(name, "i16" to cstr) == 0 or strcmp(name, "u16" to cstr) == 0:
+            return String.make("i16" to cstr)
+        if strcmp(name, "i32" to cstr) == 0 or strcmp(name, "u32" to cstr) == 0:
+            return String.make("i32" to cstr)
+        if strcmp(name, "f32" to cstr) == 0:
+            return String.make("float" to cstr)
+        if strcmp(name, "f64" to cstr) == 0:
+            return String.make("double" to cstr)
+        if strcmp(name, "ptr" to cstr) == 0 or strcmp(name, "cstr" to cstr) == 0:
+            return String.make("ptr" to cstr)
+        // isize/usize and everything else: map from the declared width
+        // (same fallback emit_dict_index_slot uses for opaque idx types).
+        let d_sz as i64 = self.dict_key_size_from_name(name)
+        if d_sz == 24 to i64 or d_sz == 12 to i64:
+            if (deref self).target.pointer_size == 4 to usize:
+                return String.make("{ ptr, i32, i32 }" to cstr)
+            return String.make("{ ptr, i64, i64 }" to cstr)
+        if d_sz == 8 to i64:
+            return String.make("i64" to cstr)
+        if d_sz == 4 to i64:
+            return String.make("i32" to cstr)
+        if d_sz == 2 to i64:
+            return String.make("i16" to cstr)
+        if d_sz == 1 to i64:
+            return String.make("i8" to cstr)
+        return String.make("i64" to cstr)
 
     public fn dict_key_size_from_name(self as ptr[LLVMCodegen], name as cstr) as i64:
         if strcmp(name, "String" to cstr) == 0:
@@ -15009,6 +15178,25 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, " to i64\n")
             return w
         return val
+    // Phase 5 slice 17: integral index/key literal formatting that bypasses
+    // emit_expr's float heuristic (bare int literals inside
+    // float-returning fns format as floats — invalid as GEP indices).
+    // Returns None when the node is not a plain int literal.
+    public fn emit_int_index_literal(self as ptr[LLVMCodegen], index as ptr[Node]) as ptr[u8]:
+        if index == None to ptr[Node] or node_kind(index) != NodeType.NumberLiteral:
+            return None to ptr[u8]
+        var idx_flt as bool = node_is_float(index)
+        let idx_inf as ptr[Type] = node_inferred_type(index)
+        if idx_inf != None to ptr[Type]:
+            let ik as TypeKind = (deref idx_inf).kind
+            if ik == TypeKind.F16 or ik == TypeKind.BFloat16 or ik == TypeKind.F32 or ik == TypeKind.F64 or ik == TypeKind.F128:
+                idx_flt = True
+        if idx_flt:
+            return None to ptr[u8]
+        extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+        let ib as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+        let _ii as i32 = sprintf(ib, "%lld" to cstr, node_val(index) to i64)
+        return ib
 
     public fn emit_dict_index_slot(
         self as ptr[LLVMCodegen],
@@ -15042,7 +15230,12 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, coll_val to cstr)
             append_cstr(ref (deref self).main_out, ", 0\n")
             ptr_temp = ext
-        let idx_val as ptr[u8] = self.emit_expr(index)
+        // Phase 5 slice 17: same int-literal bypass as emit_index_addr —
+        // a dict key literal inside a float-returning fn formatted as a
+        // float and corrupted the key bytes.
+        var idx_val as ptr[u8] = self.emit_int_index_literal(index)
+        if idx_val == None to ptr[u8]:
+            idx_val = self.emit_expr(index)
         var idx_type as String = type_to_llvm(node_inferred_type(index))
         if node_kind(index) == NodeType.IndexExpr:
             idx_type = self.index_value_llvm(index)
@@ -15148,7 +15341,16 @@ struct LLVMCodegen:
         if self.node_index_collection_is_dict(node):
             return self.emit_dict_index_slot(node, False)
         let coll_val as ptr[u8] = self.emit_expr(collection)
-        let idx_val as ptr[u8] = self.emit_expr(index)
+        // Phase 5 slice 17: integer index literals must not go through
+        // emit_expr's float formatting — its current_return_type heuristic
+        // (bare int literals inside float-returning fns format as floats)
+        // turned `xs[0]` in a `fn ... as f64` body into
+        // `getelementptr ..., i32 0.000000e+00` (invalid IR). An index is
+        // integral; format the literal directly unless the literal itself
+        // is float-typed.
+        var idx_val as ptr[u8] = self.emit_int_index_literal(index)
+        if idx_val == None to ptr[u8]:
+            idx_val = self.emit_expr(index)
         var real_idx as ptr[u8] = idx_val
         let idx_type as String = type_to_llvm(node_inferred_type(index))
         let is_int_idx as bool = strcmp(idx_type.data to cstr, "i64" to cstr) == 0 or strcmp(idx_type.data to cstr, "i32" to cstr) == 0 or node_kind(index) == NodeType.NumberLiteral

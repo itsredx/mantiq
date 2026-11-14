@@ -1378,9 +1378,32 @@ struct TypeChecker:
                     // Propagate the declared Dict type to dict-literal inits:
                     // typecheck_node(DictLiteral) stores a bare Dict (no name/payload),
                     // which made emit_dict_literal fall back to hardcoded (4,4) sizes.
+                    // Phase 5 slice 17: always override the literal's payload
+                    // AND name with the declared ones — item inference used
+                    // to win whenever the literal already carried a payload,
+                    // so `{3: 42}` with Dict[i64, i64] hashed 4-byte keys at
+                    // insert while lookups hashed the declared 8 (miss ->
+                    // null -> segfault).
                     if node_kind(init_node) == NodeType.DictLiteral and (deref annotated_type).kind == TypeKind.Dict and (deref annotated_type).payload != None to ptr[Type]:
                         let lit_t as ptr[Type] = node_inferred_type(init_node)
-                        if lit_t == None to ptr[Type] or (deref lit_t).payload == None to ptr[Type]:
+                        if lit_t != None to ptr[Type]:
+                            (deref lit_t).payload = (deref annotated_type).payload
+                            (deref lit_t).name = (deref annotated_type).name
+                        else:
+                            set_node_inferred_type(init_node, annotated_type)
+                    // Phase 5 slice 17: propagate the declared List elem
+                    // type into list-literal inits. typecheck_node(List-
+                    // Literal) infers the payload from the FIRST item
+                    // (integer literals default to i32), so
+                    // `let d as List[i64] = [1, 2, 3]` materialized an
+                    // i32 buffer (12 bytes) while index GEPs used the
+                    // declared i64 elem type — reads crossed element
+                    // boundaries (d[1] returned 3, not 2).
+                    if node_kind(init_node) == NodeType.ListLiteral and (deref annotated_type).kind == TypeKind.List and (deref annotated_type).payload != None to ptr[Type]:
+                        let lit_lt as ptr[Type] = node_inferred_type(init_node)
+                        if lit_lt != None to ptr[Type]:
+                            (deref lit_lt).payload = (deref annotated_type).payload
+                        else:
                             set_node_inferred_type(init_node, annotated_type)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
                         let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make("type mismatch in variable initialization" to cstr), node)
@@ -1761,6 +1784,29 @@ struct TypeChecker:
                                 if node_kind(arg_node) == NodeType.NumberLiteral:
                                     set_node_inferred_type(arg_node, expected_t)
                             let dummy_a as ptr[Type] = self.typecheck_node(arg_node)
+                            // Phase 5 slice 17: propagate the param's List
+                            // elem type into list-literal args — same
+                            // first-item inference bug as the VarDecl path
+                            // (`second([1, 2, 3])` with xs as List[i64]
+                            // materialized an i32 buffer).
+                            if a_idx < expected_count and node_kind(arg_node) == NodeType.ListLiteral:
+                                let expected_t2 as ptr[Type] = ref (deref params)[a_idx]
+                                if expected_t2 != None to ptr[Type] and (deref expected_t2).kind == TypeKind.List and (deref expected_t2).payload != None to ptr[Type]:
+                                    let arg_lit_t as ptr[Type] = node_inferred_type(arg_node)
+                                    if arg_lit_t != None to ptr[Type]:
+                                        (deref arg_lit_t).payload = (deref expected_t2).payload
+                            // Phase 5 slice 17: same propagation for dict-
+                            // literal args — declared K (name) and V
+                            // (payload) must win over item inference, or the
+                            // literal hashed narrower keys than the callee's
+                            // lookups.
+                            if a_idx < expected_count and node_kind(arg_node) == NodeType.DictLiteral:
+                                let expected_t3 as ptr[Type] = ref (deref params)[a_idx]
+                                if expected_t3 != None to ptr[Type] and (deref expected_t3).kind == TypeKind.Dict and (deref expected_t3).payload != None to ptr[Type]:
+                                    let arg_dict_t as ptr[Type] = node_inferred_type(arg_node)
+                                    if arg_dict_t != None to ptr[Type]:
+                                        (deref arg_dict_t).payload = (deref expected_t3).payload
+                                        (deref arg_dict_t).name = (deref expected_t3).name
                         a_idx = a_idx + 1 to i64
                 elif (deref callee_t).kind == TypeKind.Closure:
                     let params_c as ptr[List[Type]] = ref (deref callee_t).param_types
@@ -2618,6 +2664,16 @@ struct TypeChecker:
                         ret_type = make_type(TypeKind.Any)
                 elif (deref coll_t).kind == TypeKind.String or (deref coll_t).kind == TypeKind.CStr:
                     ret_type = make_type(TypeKind.U8)
+                elif (deref coll_t).kind == TypeKind.Dict:
+                    // Phase 5 slice 17: dict indexing yields the VALUE type
+                    // (Dict[K, V] resolution stores V in payload, K in
+                    // name). The missing case fell through to Any ->
+                    // "{ ptr, ptr }", so `d[3] to f64` emitted
+                    // `bitcast { ptr, ptr } %i64 to double` (invalid IR).
+                    if (deref coll_t).payload != None to ptr[Type]:
+                        ret_type = (deref coll_t).payload
+                    else:
+                        ret_type = make_type(TypeKind.Any)
                 elif (deref coll_t).kind == TypeKind.Struct and (deref coll_t).name.data != None:
                     let sn as cstr = (deref coll_t).name.data to cstr
                     if strcmp(sn, "Bytes" to cstr) == 0 or strcmp(sn, "ByteArray" to cstr) == 0:

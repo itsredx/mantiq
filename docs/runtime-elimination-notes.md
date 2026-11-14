@@ -2684,3 +2684,138 @@ VERIFIED (main_p16, freestanding, both arches):
 Probe archive: research/freestanding/ (new p16kv1/p16kv3/p16kv4).
 
 
+
+## Slice 17 — literal type coercion + index formatting (uncommitted -> commit)
+
+Four adjacent correctness bugs fixed in the List/Dict literal + indexing
+paths. All were verifiable in one line of user code; three predate this
+work (bisection vs nizam-new-prev.bak, the promoted slice-16 binary).
+
+### 17.1 List-literal elem-type coercion (VarDecl + call args)
+
+Bug: `let d as List[i64] = [1, 2, 3]` materialized an **i32 buffer**
+(12 bytes) while index GEPs used the declared i64 elem type — reads
+crossed element boundaries (`d[1]` returned 3, not 2). Root cause:
+typecheck_node(ListLiteral) sets the literal's payload from the FIRST
+item (integer literals infer i32); the VarDecl's declared elem type
+never flowed back into the literal before codegen.
+
+Fix (two parts, mirrors the existing DictLiteral + NumberLiteral
+propagation patterns):
+- typecheck.nz VarDecl: when the init is a ListLiteral and the
+  annotated type is List with a payload, the declared payload now
+  OVERWRITES the literal's inferred payload (was: no propagation at
+  all).
+- typecheck.nz Function-arg loop: same propagation for list-literal
+  args against the param's elem type (mirrors the NumberLiteral
+  pre-propagation that already existed there).
+- codegen.nz `coerce_list_item(it_node, elem_type, elem_val)`: item
+  inferred type vs the literal's materialized elem type — int<->int
+  sext/trunc, int->float sitofp, float->int fptosi, float<->float
+  fpext/fptrunc, ptr/struct unchanged. Wired into BOTH emit_list_literal
+  item loops (plain + spread-path non-spread items).
+
+VERIFIED (main_p17): matched types (i32/f64), int items -> List[f64]
+(sitofp), i32 var in List[i64] (sext of a register), int literals ->
+List[i8] (trunc), f32 var in List[f64] (fpext), empty list, call-arg
+form `second([1, 2, 3])` with xs as List[i64]. Freestanding regression
+probes p17lsn2 (VarDecl matrix) + p17lsn5 (call-arg form) rc=0 on
+x86 AND aarch64 (p17lsn5 exposed 17.2, see below).
+
+### 17.2 Integer index literals inside float-returning fns
+
+Bug (pre-existing): emit_expr NumberLiteral's `current_return_type`
+heuristic forces is_float for bare int literals inside a
+float-returning fn — so `xs[0]` in a `fn ... as f64` body emitted
+`getelementptr inbounds i64, ptr %p, i32 0.000000e+00` (invalid IR,
+build failure). Found via p17lsn5 (`firstf([7, 8, 9])` reading ys[0]).
+
+Fix: codegen.nz `emit_int_index_literal(index)` — formats a plain int
+literal directly with sprintf %lld, bypassing emit_expr, unless the
+literal's own inferred type is float. Used in emit_index_addr AND
+emit_dict_index_slot (dict key literals had the same hazard). NOTE:
+other literal sites (array size exprs, case labels, ...) may still be
+exposed to the same heuristic — emit_int_index_literal is reusable.
+
+VERIFIED: lsn6 (`xs[0]` in float fn) rc=0; p17lsn5 rc=0 both arches.
+
+### 17.3 Dict IndexExpr type (missing Dict case)
+
+Bug (pre-existing): the IndexExpr typecheck branch had List/Slice/ptr,
+String/CStr, Struct (Bytes/ByteArray/Tuple) and Tuple cases — but NO
+Dict case, so dict reads fell to `Any` -> `{ ptr, ptr }`. With 17.1
+fixed, `d[3] to f64` then emitted `bitcast { ptr, ptr } %i64 to
+double` (invalid IR).
+
+Fix: typecheck.nz IndexExpr gains a Dict case returning the payload
+(V; Dict[K, V] resolution stores V in payload, K in name).
+
+VERIFIED: lsn7 (dict read + to f64 in a float fn), lsn8 (i64 + f64
+return paths) rc=0.
+
+### 17.4 Dict-literal key/value declared-type propagation (+ String wrap)
+
+Bug (pre-existing, SEGFAULT — the headline of this slice):
+`let m as Dict[i64, i64] = {3: 42}; m[3]` crashed rc=139. The declared
+block in emit_dict_literal set k_size=8/v_size=8 from dict_t (name =
+K, payload = V), but the items-inspection loop then CLOBBERED
+k_type/k_size/v_type/v_size from the first key/value item's inferred
+types (i32). Insert hashed 4 bytes; lookup (emit_dict_index_slot ->
+dict_declared_key_size) hashed the declared 8 — miss ->
+__mantiq_dict_get returned null -> `load i64, ptr null`. Confirmed
+pre-existing on nizam-new-prev.bak (lsn9-old rc=139).
+
+Also pre-existing (same path): `Dict[String, i64] = {"one": 1}` was
+invalid IR even on slice-16 — emit_expr(StringLiteral) yields a bare
+cstr ptr but the store expects the { ptr, len } struct; only the READ
+path wrapped (wrap_string_literal_key).
+
+Fix (emit_dict_literal):
+- New k_declared/v_declared flags; the inspection loop no longer lets
+  item inference override declared K/V. When declared, the item's LLVM
+  type is adopted only if its byte size already matches the declared
+  width (struct/f64 keys); otherwise k_type derives from the declared
+  key NAME via new `dict_key_llvm_from_name` (String -> { ptr, len }
+  struct, i8/u8/bool/char -> i8, ..., f32 -> float, f64 -> double,
+  isize/usize/unknown -> size-table fallback, mirroring
+  dict_key_size_from_name + the read path's size->type fallback).
+- Item values are coerced to the declared storage types via
+  coerce_list_item (an i32 key literal in Dict[i64, _] is sext'd before
+  storing/hashing 8 bytes).
+- StringLiteral keys/values are wrapped into the { ptr, len } struct
+  with wrap_string_literal_key (the same wrap the read path applies).
+
+Typecheck companion fixes (mirror 17.1): VarDecl DictLiteral
+propagation now ALWAYS overrides the literal's payload AND name with
+the declared ones (item inference used to win whenever the literal
+carried a payload); the Function-arg loop gains the same DictLiteral
+propagation for dict-literal args.
+
+VERIFIED (main_p17): lsn7/lsn8/lsn9 (literal + read, the former
+segfault) rc=0; lsn10 (literal alone, control) rc=0; lsn11 coercion
+matrix (i32 var key sext, int->f64 value sitofp, f64 keys, f32->f64
+value, String keys, i8 value trunc, call-arg literal, empty dict +
+write-after) rc=0; lsn12 (String-key literal) rc=0; freestanding
+p17lsn9 (full dict matrix, rc-style) rc=0 x86 AND aarch64.
+test_dict_methods (gate) rc=0.
+
+### 17.5 Known gaps left open (unchanged behavior, documented)
+
+- Unannotated dict literals: `let m = {3: 42}; m[3]` — the literal's
+  inferred Dict carries no name, dict_declared_key_size falls back to
+  8 while the literal created a 4-byte-key dict. All dict literals in
+  real code are annotated; propagation covers the annotated + call-arg
+  paths. (Dict use without `import std.collections` also still fails
+  to link — the __mantiq_dict_* bodies live in std/collections.nz.)
+- `List[T, N]` remains spec-defined-but-unimplemented (N parsed then
+  discarded; dynamic semantics instead) — decision deferred to the
+  user; see the List[T, N] status report.
+- emit_expr's current_return_type float heuristic still applies to
+  non-index literal sites.
+
+REGRESSION MATRIX (main_p17): freestanding both arches — minabs2,
+minglob, t3, t5, kv1-kv4, p17lsn2, p17lsn5, p17lsn9 all rc=0;
+libc-mode x86 — lsn1..lsn12 all rc=0; ladder x86 22/22, aarch64
+17/17. fmt clean + idempotent on both touched files.
+
+Probe archive: research/freestanding/ (new p17lsn2, p17lsn5, p17lsn9).
