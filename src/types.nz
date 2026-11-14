@@ -77,6 +77,13 @@ struct Type:
     // second generic arg; 0 = dynamic List[T]). Zero-initialized by the
     // zeroed ast_alloc, like every other field make_type leaves unset.
     public var fixed_len as i64
+    // Phase 5 slice 21: True when this Struct/Enum/Union type was resolved
+    // through a DECLARED symbol (typecheck resolve_base_type_annotation /
+    // call resolution). The codegen's 1-char erasure (unresolved generic
+    // T -> ptr) must not eat real 1-char-named user structs: `struct S`
+    // made `var d as S = S(v = 3)` store a %S value into a ptr slot
+    // (invalid IR). Phantom generics stay unmarked (zero-init False).
+    public var is_declared as bool
 
 
 // ── Helper Constructors ──────────────────────────────────────────────────────

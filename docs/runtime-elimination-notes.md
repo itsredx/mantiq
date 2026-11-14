@@ -3066,3 +3066,55 @@ archived):
 - Slice-19 regression: p19g1..g4 rc=0.
 - Ladder: 21/21 x86 + 21/21 aarch64 (adds p20u1-u3, p20s1-2).
 - fmt clean + idempotent (main.nz).
+
+## Slice 21 — 1-char struct names no longer erased to ptr
+
+Slice 20's verification exposed that "structs with methods break field
+reads" was an ILLUSION: every failing probe used a struct NAMED
+Dict/List (builtin-colliding member/constructor paths). Controlled
+experiments (main_p20):
+- methodless `Box` + ctor + field read: rc=0 (ctl4)
+- `Widget` WITH methods: ctor, field mutation inside the method, field
+  read in main, scalar-return method — ALL rc=0 (ctl6)
+
+The REAL bug surfaced when the probe used a 1-CHAR name (`struct S`):
+type_to_llvm's struct branch erased ANY 1-char name to "ptr" (the
+unresolved-generic-T ABI from slice 14), while the constructor
+dispatch (callee-name path) emits a %S byval value — `var d as S =
+S(v = 3)` produced `store ptr %S-value, ptr %d-slot` where %d was an
+alloca ptr (invalid IR: '%t.1' defined with type '%S' but expected
+'ptr').
+
+### 21.1 is_declared marker
+
+- types.nz: new `Type.is_declared as bool` (zero-init False, same
+  pattern as fixed_len).
+- typecheck.nz: resolve_base_type_annotation's SymbolKind.Struct path
+  and the call/constructor resolution path now MARK the produced type
+  (is_declared = True). The unknown-name fallback (phantom generic
+  params) stays unmarked.
+- codegen.nz type_to_llvm struct branch: the 1-char → ptr erasure now
+  applies ONLY when is_declared is False. Declared 1-char structs take
+  the same %Name-byval convention as multi-char ones. `llvm_type`
+  delegates to the same free fn, so sizes stay consistent.
+- Multi-char generics are UNCHANGED (they already took the %Name path;
+  bound generics are monomorphized away; unbound template bodies keep
+  their pre-existing shape).
+
+### 21.2 Verified (main_p21)
+
+- p21f1: `struct S` (1 char) + ctor + method mutation + field read +
+  scalar-return method — rc=0 (was: invalid IR at compile time).
+- ctl4 (Box), ctl6 (Widget full matrix), s1min (user Dict) — rc=0.
+- Full ladder: 22/22 x86 + 22/22 aarch64 (adds p21f1).
+- fmt clean + idempotent (types.nz, typecheck.nz, codegen.nz).
+
+### 21.3 Still open (struct-name family)
+
+- `List` remains a GLOBAL builtin symbol: no program can declare
+  `struct List` (E0102) — language-level decision needed.
+- A user struct named `Dict` still cannot be CONSTRUCTED without the
+  runtime (`Dict(v = 3)` dispatches to __mantiq_dict_create_with_
+  capacity by callee NAME). Construction-by-name dispatch predates
+  the slice-20 auto-import; fixing it needs the callee resolution to
+  prefer a declared struct symbol over the builtin-name heuristic.

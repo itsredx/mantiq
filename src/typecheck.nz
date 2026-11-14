@@ -873,7 +873,15 @@ struct TypeChecker:
                                 (deref sym).resolved_type = res_t
                                 return res_t
             elif (deref sym).kind == SymbolKind.Struct:
-                return make_struct_type(String.make(name))
+                // Phase 5 slice 21: mark RESOLVED declared structs — the
+                // codegen 1-char erasure (unresolved generic T -> ptr) must
+                // not eat real 1-char-named structs (`struct S`), which
+                // made `var d as S = S(v = 3)` store a %S value into a ptr
+                // slot (invalid IR). Phantom generic params (the fallback
+                // below) stay unmarked.
+                let st21 as ptr[Type] = make_struct_type(String.make(name))
+                (deref st21).is_declared = True
+                return st21
             elif (deref sym).kind == SymbolKind.Enum:
                 return make_enum_type(String.make(name))
             elif (deref sym).kind == SymbolKind.Union:
@@ -1761,7 +1769,12 @@ struct TypeChecker:
                     if (deref sym).resolved_type != None to ptr[Type]:
                         ret_type = (deref sym).resolved_type
                     elif (deref sym).kind == SymbolKind.Struct:
-                        ret_type = make_struct_type(String.make(name))
+                        // Phase 5 slice 21: declared-struct marker (mirrors
+                        // the annotation path) — constructor/call sites
+                        // resolve the struct through its symbol too.
+                        let st21b as ptr[Type] = make_struct_type(String.make(name))
+                        (deref st21b).is_declared = True
+                        ret_type = st21b
                     elif (deref sym).kind == SymbolKind.Function:
                         if (deref sym).decl_node != None to ptr[Node]:
                             if node_kind((deref sym).decl_node) == NodeType.FunDecl:

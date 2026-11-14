@@ -999,7 +999,13 @@ fn type_to_llvm(t as ptr[Type]) as String:
                 if nizam_get_target_ptr_size() == 4 to i32:
                     return String.make("{ ptr, i32, i32 }" to cstr)
                 return String.make("{ ptr, i64, i64 }" to cstr)
-        if t_name != None to cstr and (deref t).name.len > 0 to usize and (deref (t_name to ptr[u8]) == 91 to u8 or (deref t).name.len == 1 to usize):
+        if t_name != None to cstr and (deref t).name.len > 0 to usize and (deref (t_name to ptr[u8]) == 91 to u8 or ((deref t).name.len == 1 to usize and not (deref t).is_declared)):
+            // Phase 5 slice 21: the 1-char erasure now applies ONLY to
+            // UNRESOLVED generic-param types (phantom Struct("T"), never
+            // marked is_declared). A declared `struct S` takes the same
+            // %S-byval convention as any multi-char struct — the old
+            // unconditional erasure made `var d as S = S(v = 3)` store a
+            // %S value into a ptr slot (invalid IR).
             return String.make("ptr" to cstr)
         if t_name != None to cstr:
             extern fn strchr(s as cstr, c as i32) as cstr
