@@ -1155,33 +1155,13 @@ struct TypeChecker:
         if tmpl == None to ptr[Node] or node_kind(tmpl) != NodeType.FunDecl:
             return 0
         let tparams as List[String] = (deref (deref self).sema).fun_generic_params[fn_name]
-        if tparams.length() != 1 to i64:
-            // Multi-param generics keep the erased ABI (backlog).
-            return 0
-        let tname as String = tparams[0 to i64]
-        if tname.data == None to ptr[u8] or tname.len == 0 to usize:
+        if tparams.length() == 0 to i64:
             return 0
         let tmpl_params as List[ptr[Node]] = node_params(tmpl)
         let args as List[ptr[Node]] = node_params(call_node)
         let p_count as i64 = tmpl_params.length()
         let a_count as i64 = args.length()
         if a_count != p_count:
-            return 0
-        // Locate the argument position that carries the type param.
-        var bind_idx as i64 = -1 to i64
-        var pi as i64 = 0 to i64
-        while pi < p_count:
-            let p as ptr[Node] = tmpl_params[pi]
-            let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
-            if p_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref p_annots).length() > 0 to i64:
-                let p_opt as Option[ptr[TypeAnnotation]] = (deref p_annots)[0 to i64]
-                let p_ref as ptr[u8] = (ref p_opt) to ptr[u8]
-                if option_has_value(p_ref):
-                    let p_annot as ptr[TypeAnnotation] = option_value(p_ref) to ptr[TypeAnnotation]
-                    if p_annot != None to ptr[TypeAnnotation] and (deref p_annot).name.data != None to ptr[u8] and strcmp((deref p_annot).name.data to cstr, tname.data to cstr) == 0:
-                        bind_idx = pi
-            pi = pi + 1 to i64
-        if bind_idx < 0 to i64:
             return 0
         // Infer arg types (the callee-args loop below re-checks against
         // the concrete params; nested generic calls specialize here).
@@ -1191,27 +1171,81 @@ struct TypeChecker:
             if a_node != None to ptr[Node]:
                 let _at as ptr[Type] = self.typecheck_node(a_node)
             ai = ai + 1 to i64
-        let bind_arg as ptr[Node] = args[bind_idx]
-        if bind_arg == None to ptr[Node]:
-            return 0
-        let bind_t as ptr[Type] = node_inferred_type(bind_arg)
-        if bind_t == None to ptr[Type]:
-            return 0
-        let concrete_name as String = self.scalar_type_name(bind_t)
-        if concrete_name.data == None to ptr[u8] or concrete_name.len == 0 to usize:
-            return 0
+        // Phase 5 slice 16 (multi-param): for each type param, collect the
+        // scalar binding implied by every value-param position whose annot
+        // carries that param name. All positions must agree on one scalar
+        // type; a param that appears only in the return annot (or nowhere)
+        // cannot be bound — bail and keep the erased ABI. Non-scalar
+        // bindings keep the erased ABI too (scalar_type_name returns "").
+        let bind_names as List[String] = List[String]()
+        let bind_types as List[ptr[Type]] = List[ptr[Type]]()
+        var ti as i64 = 0 to i64
+        while ti < tparams.length():
+            let tname as String = tparams[ti]
+            if tname.data == None to ptr[u8] or tname.len == 0 to usize:
+                return 0
+            var bound_name as String = String.make("" to cstr)
+            var bound_t as ptr[Type] = None to ptr[Type]
+            var pi as i64 = 0 to i64
+            while pi < p_count:
+                let p as ptr[Node] = tmpl_params[pi]
+                let p_annots as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(p)
+                if p_annots != None to ptr[List[Option[ptr[TypeAnnotation]]]] and (deref p_annots).length() > 0 to i64:
+                    let p_opt as Option[ptr[TypeAnnotation]] = (deref p_annots)[0 to i64]
+                    let p_ref as ptr[u8] = (ref p_opt) to ptr[u8]
+                    if option_has_value(p_ref):
+                        let p_annot as ptr[TypeAnnotation] = option_value(p_ref) to ptr[TypeAnnotation]
+                        if p_annot != None to ptr[TypeAnnotation] and (deref p_annot).name.data != None to ptr[u8] and strcmp((deref p_annot).name.data to cstr, tname.data to cstr) == 0:
+                            let a_node as ptr[Node] = args[pi]
+                            if a_node == None to ptr[Node]:
+                                return 0
+                            let a_t as ptr[Type] = node_inferred_type(a_node)
+                            if a_t == None to ptr[Type]:
+                                return 0
+                            let cn as String = self.scalar_type_name(a_t)
+                            if cn.data == None to ptr[u8] or cn.len == 0 to usize:
+                                return 0
+                            if bound_name.len == 0 to usize:
+                                bound_name = cn
+                                bound_t = a_t
+                            elif strcmp(bound_name.data to cstr, cn.data to cstr) != 0:
+                                // Conflicting bindings for one param.
+                                return 0
+                pi = pi + 1 to i64
+            if bound_name.len == 0 to usize:
+                return 0
+            bind_names.append(bound_name)
+            bind_types.append(bound_t)
+            ti = ti + 1 to i64
+        // Mangle: base + "_" + each bound name in tparams order — matches
+        // mono_mangle over the explicit annot args (pick[i64, f64] ->
+        // pick_i64_f64), so inferred and explicit calls share one define.
         let mangled_sb as StringBuilder = StringBuilder.make()
         mangled_sb.append(fn_name.data to cstr)
-        mangled_sb.append("_" to cstr)
-        mangled_sb.append(concrete_name.data to cstr)
+        var mi as i64 = 0 to i64
+        while mi < bind_names.length():
+            mangled_sb.append("_" to cstr)
+            mangled_sb.append(bind_names[mi].data to cstr)
+            mi = mi + 1 to i64
         let mangled as String = mangled_sb.to_string()
         let existing as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(mangled)
         if existing == None to ptr[Symbol]:
-            let concrete_t as ptr[Type] = make_type((deref bind_t).kind)
-            (deref concrete_t).name = String.make(concrete_name.data to cstr)
-            let mono as ptr[Node] = self.monomorphize(tmpl, tname.data to cstr, concrete_t)
-            if mono == None to ptr[Node]:
-                return 0
+            // Instantiate: sequential clone_and_substitute, one pass per
+            // type param, then the declare/resolve/typecheck sequence from
+            // monomorphize under the final mangled name.
+            var mono as ptr[Node] = tmpl
+            var si as i64 = 0 to i64
+            while si < tparams.length():
+                let concrete_t as ptr[Type] = make_type((deref bind_types[si]).kind)
+                (deref concrete_t).name = String.make(bind_names[si].data to cstr)
+                mono = self.clone_and_substitute(mono, tparams[si].data to cstr, concrete_t)
+                if mono == None to ptr[Node]:
+                    return 0
+                si = si + 1 to i64
+            set_node_name(mono, mangled)
+            (deref (deref self).sema).declare_pass(mono)
+            (deref (deref self).sema).resolve_pass(mono)
+            let _mt as ptr[Type] = self.typecheck_node(mono)
             // Append the instantiation to the program declarations so the
             // codegen phase walks it and emits the specialized body.
             let root_ast as ptr[Node] = (deref (deref self).sema).root_ast

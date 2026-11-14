@@ -2628,4 +2628,59 @@ VERIFIED (main_p15, both arches, freestanding):
 Probe archive: research/freestanding/ (minabs2/minglob rewritten as
 regression probes — they now PASS; new p15t3/p15t5).
 
+## std.sys Phase 5 slice 16 — multi-param generic specialization [K, V] LANDED
+
+Slice 15 guarded try_specialize_generic_call to exactly 1 type param
+("multi-param generics keep the erased ABI"). This slice extends it
+to N params. KEY FINDING: the EXPLICIT multi-annot path already
+worked pre-slice-16 — `pick[i64, f64](x, y)` lowers as ONE annot
+whose name carries the full callee+args text; parse_gname splits it,
+resolve_and_mangle(base, args) handles N args, and
+register_instantiation's prods/args loops (including the slice-15
+mono_fix_cast_ops) substitute each param. kv2 verified: define
+double @pick_i64_f64(i64, double), rc=0. The gap was purely the
+INFERRED path.
+
+DESIGN (typecheck.nz try_specialize_generic_call, rewritten):
+- The 1-param guard is gone (tparams.length() >= 1 accepted).
+- Args are typechecked FIRST (unchanged from slice 15; nested generic
+  calls specialize innermost-first).
+- For EACH type param: scan the value-param positions whose annot
+  name carries that param; the inferred arg type at each such
+  position contributes a scalar binding via scalar_type_name. Rules:
+  all positions for one param must agree on one scalar name
+  (conflicting bindings bail), at least one position must exist
+  (a return-only param cannot be bound — bail), and the binding must
+  be scalar ("" from scalar_type_name — bail). Any bail keeps the
+  erased ABI and the call E0308s as before (graceful, no ICE).
+- Mangle: base + "_" + each bound name in tparams order — matches
+  mono_mangle over the explicit annot args (pick[i64, f64] ->
+  pick_i64_f64), so inferred + explicit calls share ONE define via
+  lookup_symbol.
+- Instantiation: sequential clone_and_substitute, one pass per type
+  param (K first, then V — later passes see earlier substitutions in
+  annots and cast ops), then set_node_name(mangled) + declare_pass +
+  resolve_pass + typecheck_node + append to root_ast (the same
+  post-clone sequence as monomorphize, under the final name).
+
+SCOPE: scalar bindings only, same as slice 15. A type param bound by
+NO value position (return-only, e.g. make[T](k as i64) as T) still
+E0308s at the call site — binding from the CALLER'S EXPECTED type
+(backward inference) is future work.
+
+VERIFIED (main_p16, freestanding, both arches):
+- p16kv1 (inferred [K, V]): rc=0 both arches;
+  define double @pick_i64_f64(i64, double).
+- p16kv3 (inferred + explicit same-instantiation sharing + reversed
+  pick[f64, i64] as a distinct define): rc=0 both arches; exactly
+  two specialized defines, both call sites share the first.
+- p16kv4 (3 params via middle position + one-param-two-positions
+  agreement + second instantiation f64): rc=0 both arches.
+- kv5 (return-only param): graceful E0308 (unchanged count).
+- Slice-15 matrix re-run under main_p16: minabs2/minglob/t3/t5
+  rc=0 both arches.
+- Full slice-14 ladder through main_p16: x86 22/22, aarch64 17/17.
+
+Probe archive: research/freestanding/ (new p16kv1/p16kv3/p16kv4).
+
 
