@@ -4081,11 +4081,23 @@ struct LLVMCodegen:
             let val as f64 = node_val(node)
             let inf_t as ptr[Type] = node_inferred_type(node)
             var is_float as bool = node_is_float(node)
+            var inf_is_int as bool = False
             if inf_t != None to ptr[Type]:
                 let tk as TypeKind = (deref inf_t).kind
                 if tk == TypeKind.F16 or tk == TypeKind.BFloat16 or tk == TypeKind.F32 or tk == TypeKind.F64 or tk == TypeKind.F128:
                     is_float = True
-            if not is_float and ((deref self).current_return_type.len > 0 to usize and (strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "float" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "half" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "bfloat" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "fp128" to cstr) == 0)):
+                // Phase 5 slice 19: a CONCRETE int inferred type wins over
+                // the current_return_type heuristic below. All float-context
+                // propagation sites (VarDecl, call args, return stmt) set the
+                // literal's inferred type to the float type first, so an
+                // int-inferred literal inside a float-returning fn is an int
+                // USE (index, case label, call arg, ...) — float-formatting
+                // it produced invalid IR (getelementptr ..., i32
+                // 0.000000e+00) and wrong values. The heuristic now applies
+                // only when the literal has no concrete type info.
+                if tk == TypeKind.I8 or tk == TypeKind.I16 or tk == TypeKind.I32 or tk == TypeKind.I64 or tk == TypeKind.I128 or tk == TypeKind.I256 or tk == TypeKind.I512 or tk == TypeKind.I1024 or tk == TypeKind.ISize or tk == TypeKind.U8 or tk == TypeKind.U16 or tk == TypeKind.U32 or tk == TypeKind.U64 or tk == TypeKind.U128 or tk == TypeKind.U256 or tk == TypeKind.U512 or tk == TypeKind.U1024 or tk == TypeKind.USize:
+                    inf_is_int = True
+            if not is_float and not inf_is_int and ((deref self).current_return_type.len > 0 to usize and (strcmp((deref self).current_return_type.data to cstr, "double" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "float" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "half" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "bfloat" to cstr) == 0 or strcmp((deref self).current_return_type.data to cstr, "fp128" to cstr) == 0)):
                 is_float = True
             let s_raw as String = node_str_val(node)
             if not is_float and s_raw.data != None to ptr[u8] and s_raw.len > 0 to usize:

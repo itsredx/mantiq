@@ -28,7 +28,7 @@ from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
 import sema
 from sema import Sema
 import symbols
-from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, TypeAnnotation, node_declarations, node_kind, node_name, node_return_type_annot, set_node_declarations
+from symbols import ImportDeclData, ImportKind, LanguageMode, Node, NodeType, OptionLayout, Scope, Span, Symbol, TypeAnnotation, make_node, node_body, node_cond, node_declarations, node_else_branch, node_imported_symbols, node_kind, node_left, node_name, node_params, node_return_type_annot, node_right, node_span, node_target, node_then_branch, node_type_annots, set_node_declarations
 import typecheck
 from typecheck import TypeChecker
 import types
@@ -630,6 +630,126 @@ fn split_lines(content as String) as List[String]:
 
 
 // ── Compiler Pipeline ────────────────────────────────────────────────────────
+// Option accessors (same bodies as borrowck.nz/cfg.nz — these are per-file
+// free fns, not shared).
+fn option_has_value(opt as ptr[u8]) as bool:
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).has_val == 1 to u8
+
+
+fn option_value(opt as ptr[u8]) as ptr[u8]:
+    let lay as ptr[OptionLayout] = opt to ptr[OptionLayout]
+    return (deref lay).val_ptr
+
+
+// Phase 5 slice 19: dict runtime bodies (`__mantiq_dict_*`) and list-spread
+// helpers (`__mantiq_list_append/extend`) live in std/collections.nz; a
+// program using dicts or spreads WITHOUT importing it failed at LINK time
+// with a bare "undefined symbol" wall. Scan the AST before the declare
+// pass: when Dict usage (a `Dict`/`Dict[...]` annotation anywhere or a
+// dict literal) or a list spread exists and std.collections is not
+// imported, synthesize the import so the runtime compiles in naturally.
+// Returns a bitmask: bit0 = needs std.collections, bit1 = imports it.
+// Depth-capped: chasing a corrupted pointer must never recurse unbounded
+// (this box has 1.8 GB RAM; the pre-cap bug ballooned to 1 GB in ~16 s).
+fn collections_usage_scan(node as ptr[Node]) as i32:
+    return collections_usage_scan_d(node, 0 to i32)
+
+
+fn collections_usage_scan_d(node as ptr[Node], depth as i32) as i32:
+    if node == None to ptr[Node]:
+        return 0 to i32
+    if depth > 1000 to i32:
+        return 0 to i32
+    var flags as i32 = 0 to i32
+    let nt as NodeType = node_kind(node)
+    if nt == NodeType.ImportDecl:
+        let tgt as String = node_target(node)
+        if tgt.data != None to ptr[u8] and strcmp(tgt.data to cstr, "std.collections" to cstr) == 0:
+            return 2 to i32
+    if nt == NodeType.DictLiteral:
+        flags = flags | 1 to i32
+    if nt == NodeType.ListLiteral:
+        let items as List[ptr[Node]] = node_declarations(node)
+        var i as i64 = 0 to i64
+        while i < items.length():
+            let it as ptr[Node] = items[i]
+            if it != None to ptr[Node] and node_kind(it) == NodeType.SpreadExpr:
+                flags = flags | 1 to i32
+                break
+            i = i + 1 to i64
+    // Annotations: any `Dict`/`Dict[...]` text (covers nesting like
+    // ptr[Dict[K, V]] and Option[Dict[...]] via a contains check).
+    let ta as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+    if ta != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+        let ta_cnt as i64 = (deref ta).length()
+        var ta_i as i64 = 0 to i64
+        while ta_i < ta_cnt:
+            let opt_a as Option[ptr[TypeAnnotation]] = (deref ta)[ta_i]
+            let opt_ref as ptr[OptionLayout] = (ref opt_a) to ptr[OptionLayout]
+            if option_has_value(opt_ref to ptr[u8]):
+                let av as ptr[u8] = option_value(opt_ref to ptr[u8])
+                let an as ptr[TypeAnnotation] = av to ptr[TypeAnnotation]
+                if an != None to ptr[TypeAnnotation] and (deref an).name.data != None to ptr[u8]:
+                    let nm as cstr = (deref an).name.data to cstr
+                    if strcmp(nm, "Dict" to cstr) == 0 or strstr(nm, "Dict[" to cstr) != None to cstr:
+                        flags = flags | 1 to i32
+            ta_i = ta_i + 1 to i64
+    let ra as ptr[TypeAnnotation] = node_return_type_annot(node)
+    if ra != None to ptr[TypeAnnotation] and (deref ra).name.data != None to ptr[u8]:
+        let rnm as cstr = (deref ra).name.data to cstr
+        if strcmp(rnm, "Dict" to cstr) == 0 or strstr(rnm, "Dict[" to cstr) != None to cstr:
+            flags = flags | 1 to i32
+    // Recurse over every child field.
+    let decls as List[ptr[Node]] = node_declarations(node)
+    let d_cnt as i64 = decls.length()
+    var d_i as i64 = 0 to i64
+    while d_i < d_cnt:
+        flags = flags | collections_usage_scan_d(decls[d_i], depth + 1 to i32)
+        d_i = d_i + 1 to i64
+    let prms as List[ptr[Node]] = node_params(node)
+    let p_cnt as i64 = prms.length()
+    var p_i as i64 = 0 to i64
+    while p_i < p_cnt:
+        flags = flags | collections_usage_scan_d(prms[p_i], depth + 1 to i32)
+        p_i = p_i + 1 to i64
+    flags = flags | collections_usage_scan_d(node_left(node), depth + 1 to i32)
+    flags = flags | collections_usage_scan_d(node_right(node), depth + 1 to i32)
+    flags = flags | collections_usage_scan_d(node_body(node), depth + 1 to i32)
+    flags = flags | collections_usage_scan_d(node_cond(node), depth + 1 to i32)
+    flags = flags | collections_usage_scan_d(node_then_branch(node), depth + 1 to i32)
+    // node_else_branch returns Option[ptr[Node]] — extract the payload the
+    // standard way. (Passing the Option where a ptr[Node] was expected made
+    // the scan chase val_ptr garbage on Empty options -> unbounded
+    // recursion on EVERY program -> GBs of RSS -> machine thrash.)
+    let el_opt as Option[ptr[Node]] = node_else_branch(node)
+    let el_ref as ptr[OptionLayout] = (ref el_opt) to ptr[OptionLayout]
+    if option_has_value(el_ref to ptr[u8]):
+        let el_val as ptr[u8] = option_value(el_ref to ptr[u8])
+        flags = flags | collections_usage_scan_d(el_val to ptr[Node], depth + 1 to i32)
+    return flags
+
+
+fn auto_import_collections(root as ptr[Node]):
+    if root == None to ptr[Node]:
+        return
+    let flags as i32 = collections_usage_scan(root)
+    if (flags & 1 to i32) == 0 to i32 or (flags & 2 to i32) != 0 to i32:
+        return
+    let imp as ptr[Node] = make_node(NodeType.ImportDecl, node_span(root))
+    let idata as ptr[ImportDeclData] = make_ast[ImportDeclData](1 to usize) to ptr[ImportDeclData]
+    (deref idata).kind = ImportKind.Normal
+    (deref idata).target = String.make("std.collections" to cstr)
+    (deref idata).imported_symbols = List[String]()
+    (deref idata).imported_symbols.append(String.make("Dict" to cstr))
+    (deref idata).imported_symbols.append(String.make("List" to cstr))
+    (deref idata).alias = Empty
+    (deref imp).data = idata to ptr[u8]
+    let decls as List[ptr[Node]] = node_declarations(root)
+    decls.append(imp)
+    set_node_declarations(root, decls)
+
+
 fn compile_source(
     source_cstr as cstr,
     path_cstr as cstr,
@@ -746,6 +866,10 @@ fn compile_source(
         (deref sema).mode = LanguageMode.Mantiq
     (deref sema).engine = engine
     (deref sema).root_ast = root
+    // Phase 5 slice 19: synthesize `import std.collections` when the program
+    // uses dicts/list-spreads without it (Nizam mode only).
+    if mode == LanguageMode.Nizam to i32:
+        auto_import_collections(root)
     sema.declare_pass(root)
     // Milestone M: module generic templates loaded (and merged into root)
     // during the declare pass; re-run monomorphisation now so module
@@ -1240,6 +1364,9 @@ fn check_source(
         (deref sema).mode = LanguageMode.Mantiq
     (deref sema).engine = engine
     (deref sema).root_ast = root
+    // Phase 5 slice 19: same auto-import for the check pipeline.
+    if mode == LanguageMode.Nizam to i32:
+        auto_import_collections(root)
     sema.declare_pass(root)
     sema.resolve_pass(root)
     sema.analyze_gil_safety(root)

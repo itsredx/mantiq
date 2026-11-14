@@ -80,6 +80,52 @@ fn clone_default_expr(node as ptr[Node]) as ptr[Node]:
     return res
 
 
+// Phase 5 slice 19: Nizam type NAME for a resolved Type — the dict
+// convention stores the KEY type's name text on the Dict type (name =
+// K, payload = V), and dict_key_size_from_name consumes that text.
+// Used by the DictLiteral inference to give unannotated literals a
+// concrete key name. Returns "" for kinds with no scalar name (nested
+// generics etc.) — callers fall back to i64.
+fn nizam_type_name_of(t as ptr[Type]) as String:
+    if t == None to ptr[Type]:
+        return String.make("" to cstr)
+    let k as TypeKind = (deref t).kind
+    if k == TypeKind.I8 or k == TypeKind.U8 or k == TypeKind.Boolean or k == TypeKind.Char:
+        return String.make("i8" to cstr)
+    if k == TypeKind.I16 or k == TypeKind.U16:
+        return String.make("i16" to cstr)
+    if k == TypeKind.I32 or k == TypeKind.U32 or k == TypeKind.Color:
+        return String.make("i32" to cstr)
+    if k == TypeKind.I64 or k == TypeKind.U64:
+        return String.make("i64" to cstr)
+    if k == TypeKind.ISize or k == TypeKind.USize:
+        return String.make("isize" to cstr)
+    if k == TypeKind.I128 or k == TypeKind.U128:
+        return String.make("i128" to cstr)
+    if k == TypeKind.I256 or k == TypeKind.U256:
+        return String.make("i256" to cstr)
+    if k == TypeKind.I512 or k == TypeKind.U512:
+        return String.make("i512" to cstr)
+    if k == TypeKind.I1024 or k == TypeKind.U1024:
+        return String.make("i1024" to cstr)
+    if k == TypeKind.F32:
+        return String.make("f32" to cstr)
+    if k == TypeKind.F64:
+        return String.make("f64" to cstr)
+    if k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.F128:
+        return String.make("f64" to cstr)
+    if k == TypeKind.String:
+        return String.make("String" to cstr)
+    if k == TypeKind.CStr:
+        return String.make("cstr" to cstr)
+    if k == TypeKind.RawPointer:
+        return String.make("ptr" to cstr)
+    if k == TypeKind.Struct or k == TypeKind.Class or k == TypeKind.Enum:
+        if (deref t).name.data != None to ptr[u8]:
+            return (deref t).name
+    return String.make("" to cstr)
+
+
 fn strip_generic_base(name as String) as String:
     if name.data == None to ptr[u8]:
         return String.make("" to cstr)
@@ -2751,10 +2797,30 @@ struct TypeChecker:
             ret_type = make_type(TypeKind.Dict)
             let d_items as List[ptr[Node]] = node_declarations(node)
             let d_count as i64 = d_items.length()
+            // Phase 5 slice 19: infer K/V from the first pair so
+            // UNANNOTATED literals (`let m = {3: 42}`) create AND read with
+            // consistent widths. The bare Dict used to carry no name/
+            // payload: emit_dict_literal created a (4,4) dict from the
+            // item types while dict_declared_key_size (read path) fell
+            // back to 8 — lookups missed and the null load segfaulted.
+            var d_k_t as ptr[Type] = None to ptr[Type]
+            var d_v_t as ptr[Type] = None to ptr[Type]
             var d_i as i64 = 0 to i64
             while d_i < d_count:
-                let _d_t as ptr[Type] = self.typecheck_node(d_items[d_i])
+                let d_it as ptr[Type] = self.typecheck_node(d_items[d_i])
+                if d_i == 0 to i64:
+                    d_k_t = d_it
+                elif d_i == 1 to i64:
+                    d_v_t = d_it
                 d_i = d_i + 1 to i64
+            if d_v_t != None to ptr[Type]:
+                (deref ret_type).payload = d_v_t
+            else:
+                (deref ret_type).payload = make_type(TypeKind.I64)
+            if d_k_t != None to ptr[Type]:
+                (deref ret_type).name = nizam_type_name_of(d_k_t)
+            if (deref ret_type).name.len == 0 to usize:
+                (deref ret_type).name = String.make("i64" to cstr)
         elif nt == NodeType.IndexExpr:
             let coll_t as ptr[Type] = self.typecheck_node(node_left(node))
             let _dummy_idx as ptr[Type] = self.typecheck_node(node_right(node))

@@ -2907,3 +2907,102 @@ against the archive.
 - fixed_len is not part of type equality (see 18.2).
 - Bounds: indexing OOB is still unchecked (pre-existing, dynamic
   lists included).
+
+## Slice 19 — the three known gaps closed
+
+### 19.1 Float heuristic no longer corrupts int literals
+
+emit_expr NumberLiteral (codegen.nz) decides float formatting by:
+node_is_float → the literal's inferred type (float kinds) → the
+current_return_type heuristic → str_val contains ".". The heuristic
+ fired for ANY integer literal emitted inside a fn whose current IR
+return type is float/double — but every float-context propagation
+site (VarDecl ~1420, call args ~1857, ReturnStmt ~2215 in
+typecheck.nz) already sets the literal's inferred type, so the
+heuristic only ever mattered for UNPROPAGATED literals, and on int
+USE sites inside float fns (indices, sizes) it produced invalid IR /
+wrong values.
+
+Fix: inf_is_int — when the literal's inferred type is a CONCRETE
+integer kind (I8..I1024, U8..U1024, ISize, USize), the heuristic is
+suppressed. Float formatting still applies when the inferred type is
+a float kind (propagation wins first). No behavior change for
+legitimately-float literals.
+
+### 19.2 Unannotated dict literals infer K/V from the first pair
+
+The DictLiteral typecheck branch used to return a bare Dict (no name,
+no payload): emit_dict_literal created a (4,4) dict from the item
+types while the read path (dict_declared_key_size) fell back to the
+declared-8 default — `let m = {3: 42}` then `m[3]` missed the lookup
+and segfaulted on the null load.
+
+Fix (typecheck.nz): the branch now captures the first pair's types —
+payload = V's Type, name = new helper nizam_type_name_of(K's Type)
+(kind→Nizam name text: i8/i16/i32/i64/isize/i128.../f32/f64/String/
+cstr/ptr/struct names; "" fallback → "i64"). Empty `{}` keeps the
+i64/i64 default so creation and reads stay consistent. Annotated
+literals are unaffected: the VarDecl declared-type propagation
+(slice 17) still overrides both afterwards.
+
+### 19.3 Auto-import of std.collections
+
+Dict runtime bodies (__mantiq_dict_*) and list-spread helpers
+(__mantiq_list_append/extend) live in std/collections.nz; a program
+using dicts or spreads WITHOUT `import std.collections` failed at
+LINK time with a bare "undefined symbol" wall (a compile-ERROR
+experience for a type-system-level concern).
+
+Fix (main.nz, before sema.declare_pass in BOTH compile_source and
+check_source): collections_usage_scan walks the AST and sets
+bit0 when it sees a DictLiteral, a list literal containing a
+SpreadExpr, or any annotation whose text is "Dict" / contains
+"Dict[" (covers nesting like ptr[Dict[K, V]]); bit1 when an
+ImportDecl already targets std.collections. auto_import_collections
+synthesizes the import (Normal kind, target "std.collections",
+imported symbols Dict + List, Program-span) when bit0 is set and
+bit1 is clear — programs that already import are untouched
+(bit1 short-circuit), and programs using neither get no import.
+
+KNOWN LIMIT (documented, same class as before): List METHOD calls
+(append/length on a list var) are not detectable pre-typecheck by
+this scan — a program that only does `let l = List[i64](); l.append(1)`
+without importing still hits the strict-mode E0316. Spreads and
+dicts (the runtime-elimination surface we care about) are covered.
+
+### 19.4 Incident: unbounded recursion via an Option passed as ptr
+
+First build of the auto-import pass passed `node_else_branch(node)`
+(returns Option[ptr[Node]]) directly into the ptr[Node]-taking
+scanner. The implicit conversion hands over val_ptr, which for an
+Empty option is UNINITIALIZED garbage — the scanner dereferenced it
+as a Node and recursed through arbitrary memory. Every program
+(2-line trivial included) ballooned to ~1 GB RSS within seconds and
+thrashed the 1.8 GB box into D-state (the user had to force-reboot
+twice; the restarted background driver made it worse by running
+10-25-minute thrash compiles back-to-back).
+
+Fix + hardening: else_branch is now extracted through the standard
+OptionLayout/option_has_value/option_value path, and the scanner is
+depth-capped (collections_usage_scan_d, cap 1000) so any future
+pointer-corruption bug aborts the scan instead of consuming the
+machine. LESSON: in this codebase, Option[T] values must NEVER be
+passed where T is expected — always go through
+(ref opt) to ptr[OptionLayout] + option_has_value/option_value.
+
+### 19.5 Verified (main_p19)
+
+- p19g1: unannotated `{3: 42, 4: 50}` + m[3]/m[4] reads — rc=0 (was:
+  segfault).
+- p19g2: Dict[i64, i64] WITHOUT any import — links + runs, rc=0
+  (was: undefined __mantiq_dict_*).
+- p19g3: list spread [1, ...base] WITHOUT import — rc=0 (was:
+  undefined __mantiq_list_append/extend).
+- p19g4: float contexts with int locals/indices inside float fns —
+  rc=0 (heuristic gated by inf_is_int).
+- p19triv (2-line program): 0.9 s compile, no scan overhead
+  regression (was: 1 GB balloon).
+- Ladder: minabs2 minglob p15t3 p15t5 p16kv1 p16kv3 p16kv4 p17lsn2
+  p17lsn5 p17lsn9 p18n1 — rc=0 x86 AND aarch64 (11/11 both; also
+  proves no double-import for programs with explicit imports).
+- fmt clean + idempotent (main.nz, typecheck.nz, codegen.nz).
