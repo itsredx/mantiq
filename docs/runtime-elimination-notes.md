@@ -2819,3 +2819,91 @@ libc-mode x86 — lsn1..lsn12 all rc=0; ladder x86 22/22, aarch64
 17/17. fmt clean + idempotent on both touched files.
 
 Probe archive: research/freestanding/ (new p17lsn2, p17lsn5, p17lsn9).
+
+## Slice 18 — List[T, N]: the size is real (N enforced)
+
+User decision: implement `List[T, N]` where T is the element type and
+N is the size — "that is all i care about". Scope taken: N becomes a
+REAL, enforced fixed size at the annotation level; the runtime
+representation stays the dynamic { ptr, len, cap } list (the inline
+`[N x T]` no-heap ABI from spec 0011 §3.1 remains future work; every
+existing list operation — append, extend, methods, std.collections —
+keeps working unchanged).
+
+### 18.1 Resolution: N is parsed, stored, no longer discarded
+
+Root cause (from the slice-17 status report): the text-based
+`strncmp(name, "List[", 5)` branch in resolve_base_type_annotation
+split the inner text at the FIRST comma, resolved only the pre-comma
+text as the elem type, and silently DROPPED the post-comma size text.
+The generics-based `strcmp(name, "List")` branch never saw a second
+arg either.
+
+Fix (typecheck.nz, both branches):
+- New `Type.fixed_len as i64` field (types.nz; zero-initialized by the
+  zeroed ast_alloc like every field make_type leaves unset — 0 means
+  dynamic `List[T]`).
+- The `List[` text branch parses the post-comma text as a STRICT
+  decimal (digits only; non-numeric text — e.g. a generic param name —
+  leaves the list dynamic). `List[i64, 3]` now resolves to
+  kind=List, payload=i64, fixed_len=3.
+- The `List` generics branch honors gen_list[1] the same way
+  (symmetry; that branch is currently unreachable in the lowerer —
+  `.generics` is never Some — but kept correct for tooling paths).
+
+### 18.2 Enforcement: literals must supply exactly N items
+
+New count validation wherever a declared List type meets a
+ListLiteral (same two sites as the slice-17 propagation):
+- VarDecl init: after the elem-type propagation, if the annotated
+  type has fixed_len > 0 and the literal (with no SpreadExpr items —
+  spreads make the count dynamic and SKIP the check) has a different
+  item count, report E0308
+  "list literal item count (X) does not match fixed-size List[T, N]
+  with N = Y" with an explanation + help line.
+- Function-arg loop: the same check for list-literal arguments
+  against the param's fixed_len.
+
+Type identity is intentionally NOT extended: fixed_len does not
+participate in is_implicitly_convertible, so `List[i64, 3]` still
+assigns/passes where `List[i64]` is expected and vice versa (same
+runtime representation; no std.collections churn). Cross-variable
+fixed-size mismatch checking is future work if wanted.
+
+### 18.3 Verified (main_p18)
+
+- n1: `List[i64, 3] = [1, 2, 3]` — a[1]=2 (declared elem type wins,
+  slice-17 coercion), length()=3; `List[f64, 2] = [1, 2]` coercion;
+  generic `List[T, 1]` via wrapv[i32](100) — rc=0.
+- n2: `List[i64, 3] = [1, 2]` — compile-time E0308 with the count
+  message (pre-slice-18: silent, wrong).
+- n3: `sum3([1, 2, 3, 4])` against `xs as List[i64, 3]` — E0308.
+- n4: spread item `[1, ...base]` with N=3 — compiles (count check
+  skipped), values correct.
+- n5: multi-digit N (`List[i64, 12]`, 12 items) — rc=0. Non-numeric
+  N text (`List[i64, x]`) is rejected EARLIER by the strict-mode
+  import check (E0316) — N must be a decimal literal.
+- p18n1 (freestanding rc-style, full matrix incl. generic + spread +
+  multi-digit): rc=0 on x86 AND aarch64.
+- Regression: archived probes minabs2, minglob, p15t3, p15t5,
+  p16kv1, p16kv3, p16kv4, p17lsn2, p17lsn5, p17lsn9 — rc=0 both
+  arches (11/11 x86, 11/11 aarch64 via the rebuilt ladder.sh, now
+  driven from research/freestanding/ so server restarts can't wipe
+  it). fmt clean + idempotent (types.nz, typecheck.nz).
+
+NOTE: /tmp/opencode was wiped by server restarts mid-slice — the dev
+probes (lsn*, kv*, t*, ladder programs) were lost; coverage lives on
+via the archived research/freestanding/ probes. ladder.sh was rebuilt
+against the archive.
+
+### 18.4 Gaps left open (documented)
+
+- Runtime representation is still the dynamic heap list; no inline
+  `[N x T]`, no value-copy assignment semantics (spec 0011 §3.1's
+  no-heap fixed arrays remain future work).
+- append/extend on a fixed-size list still grow it (dynamic runtime);
+  forbidding mutation on List[T, N] would need method-level type
+  tracking.
+- fixed_len is not part of type equality (see 18.2).
+- Bounds: indexing OOB is still unchecked (pre-existing, dynamic
+  lists included).

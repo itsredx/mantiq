@@ -73,6 +73,10 @@ struct Type:
     public var name as String
     public var param_types as List[Type]
     public var return_type as ptr[Type]
+    // Phase 5 slice 18: fixed length for List[T, N] (N parsed from the
+    // second generic arg; 0 = dynamic List[T]). Zero-initialized by the
+    // zeroed ast_alloc, like every other field make_type leaves unset.
+    public var fixed_len as i64
 
 
 // ── Helper Constructors ──────────────────────────────────────────────────────

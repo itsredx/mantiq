@@ -372,6 +372,25 @@ struct TypeChecker:
                     let elem_type as ptr[Type] = self.resolve_type_annotation(ref elem_annot)
                     let t as ptr[Type] = make_type(TypeKind.List)
                     (deref t).payload = elem_type
+                    // Phase 5 slice 18: honor a second generic arg as the
+                    // fixed size (mirrors the text-based List[ branch).
+                    if (deref gen_list).length() > 1 to i64:
+                        var len_annot as TypeAnnotation = (deref gen_list)[1]
+                        let len_name as String = (deref len_annot).name
+                        if len_name.data != None to ptr[u8] and len_name.len > 0 to usize:
+                            var p_len as i64 = 0 to i64
+                            var p_ok as bool = True
+                            var p_i as usize = 0 to usize
+                            while p_i < len_name.len:
+                                let p_ch as u8 = deref ((len_name.data to usize + p_i) to ptr[u8])
+                                if p_ch >= 48 to u8 and p_ch <= 57 to u8:
+                                    p_len = p_len * 10 to i64 + (p_ch - 48 to u8) to i64
+                                else:
+                                    p_ok = False
+                                    break
+                                p_i = p_i + 1 to usize
+                            if p_ok:
+                                (deref t).fixed_len = p_len
                     return t
             let t as ptr[Type] = make_type(TypeKind.List)
             (deref t).payload = make_type(TypeKind.Any)
@@ -602,10 +621,36 @@ struct TypeChecker:
                     (deref inner_annot).return_type = None to ptr[TypeAnnotation]
                     let elem_type as ptr[Type] = self.resolve_type_annotation(inner_annot)
                     free(k_buf to ptr)
-                    free(inner_buf to ptr)
                     free(inner_annot to ptr)
+                    // Phase 5 slice 18: the second generic arg is the FIXED
+                    // SIZE N (`List[i64, 3]` = a list of i64 with exactly 3
+                    // elements). Pre-slice-18 the size text was parsed and
+                    // silently discarded here, so N changed nothing. Parse
+                    // the strict-decimal size; non-numeric text (a generic
+                    // param name etc.) leaves the list dynamic (fixed_len 0).
+                    var v_len2 as usize = (inner_buf to usize + inner_len to usize) -(comma_pos to usize + 1 to usize)
+                    var v_off2 as usize = 0 to usize
+                    while v_len2 > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off2) to ptr[u8])) <= 32 to u8:
+                        v_off2 = v_off2 + 1 to usize
+                        v_len2 = v_len2 - 1 to usize
+                    while v_len2 > 0 to usize and (deref ((comma_pos to usize + 1 to usize + v_off2 + v_len2 - 1 to usize) to ptr[u8])) <= 32 to u8:
+                        v_len2 = v_len2 - 1 to usize
+                    var parsed_len as i64 = 0 to i64
+                    var all_digits as bool = v_len2 > 0 to usize
+                    var d_i2 as usize = 0 to usize
+                    while d_i2 < v_len2:
+                        let d_ch as u8 = deref ((comma_pos to usize + 1 to usize + v_off2 + d_i2) to ptr[u8])
+                        if d_ch >= 48 to u8 and d_ch <= 57 to u8:
+                            parsed_len = parsed_len * 10 to i64 + (d_ch - 48 to u8) to i64
+                        else:
+                            all_digits = False
+                            break
+                        d_i2 = d_i2 + 1 to usize
+                    free(inner_buf to ptr)
                     let t as ptr[Type] = make_type(TypeKind.List)
                     (deref t).payload = elem_type
+                    if all_digits:
+                        (deref t).fixed_len = parsed_len
                     return t
             var i_len as usize = inner_len
             var i_off as usize = 0 to usize
@@ -1405,6 +1450,34 @@ struct TypeChecker:
                             (deref lit_lt).payload = (deref annotated_type).payload
                         else:
                             set_node_inferred_type(init_node, annotated_type)
+                    // Phase 5 slice 18: List[T, N] literals must carry
+                    // exactly N items (N is the size). Spread items make
+                    // the count dynamic — skip the check for those.
+                    if node_kind(init_node) == NodeType.ListLiteral and (deref annotated_type).kind == TypeKind.List and (deref annotated_type).fixed_len > 0 to i64:
+                        let fl_items as List[ptr[Node]] = node_declarations(init_node)
+                        var fl_i as i64 = 0 to i64
+                        var fl_has_spread as bool = False
+                        while fl_i < fl_items.length():
+                            let fl_it as ptr[Node] = fl_items[fl_i]
+                            if fl_it != None to ptr[Node] and (deref fl_it).kind == NodeType.SpreadExpr:
+                                fl_has_spread = True
+                                break
+                            fl_i = fl_i + 1 to i64
+                        if not fl_has_spread:
+                            let fl_count as i64 = fl_items.length()
+                            if fl_count != (deref annotated_type).fixed_len:
+                                extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+                                extern fn free(p as ptr)
+                                let msg_buf as ptr[u8] = make[u8](160 to usize) to ptr[u8]
+                                let _m18 as i32 = sprintf(msg_buf, "list literal item count (%ld) does not match fixed-size List[T, N] with N = %ld" to cstr, fl_count, (deref annotated_type).fixed_len)
+                                let d18 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(msg_buf to cstr), node)
+                                free(msg_buf to ptr)
+                                if d18 != None to ptr[Diagnostic]:
+                                    d18.set_explanation(String.make("N is the fixed size: the literal must supply exactly N items of the element type." to cstr))
+                                    let help_buf as ptr[u8] = make[u8](120 to usize) to ptr[u8]
+                                    let _h18 as i32 = sprintf(help_buf, "Supply exactly %ld item(s), or drop the , N from the annotation." to cstr, (deref annotated_type).fixed_len)
+                                    d18.add_help(String.make(help_buf to cstr))
+                                    free(help_buf to ptr)
                     if not self.is_implicitly_convertible(init_type, annotated_type):
                         let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make("type mismatch in variable initialization" to cstr), node)
                         if d != None to ptr[Diagnostic]:
@@ -1795,6 +1868,35 @@ struct TypeChecker:
                                     let arg_lit_t as ptr[Type] = node_inferred_type(arg_node)
                                     if arg_lit_t != None to ptr[Type]:
                                         (deref arg_lit_t).payload = (deref expected_t2).payload
+                                    // Phase 5 slice 18: fixed-size List[T, N]
+                                    // params validate the literal's item
+                                    // count too (spread args skip — dynamic
+                                    // count).
+                                    if (deref expected_t2).fixed_len > 0 to i64:
+                                        let ca_items as List[ptr[Node]] = node_declarations(arg_node)
+                                        var ca_i as i64 = 0 to i64
+                                        var ca_spread as bool = False
+                                        while ca_i < ca_items.length():
+                                            let ca_it as ptr[Node] = ca_items[ca_i]
+                                            if ca_it != None to ptr[Node] and (deref ca_it).kind == NodeType.SpreadExpr:
+                                                ca_spread = True
+                                                break
+                                            ca_i = ca_i + 1 to i64
+                                        if not ca_spread:
+                                            let ca_count as i64 = ca_items.length()
+                                            if ca_count != (deref expected_t2).fixed_len:
+                                                extern fn sprintf(
+                                                    str as ptr[u8],
+                                                    format as cstr,
+                                                    ...,
+                                                ) as i32
+                                                extern fn free(p as ptr)
+                                                let ca_buf as ptr[u8] = make[u8](160 to usize) to ptr[u8]
+                                                let _ca18 as i32 = sprintf(ca_buf, "list literal item count (%ld) does not match fixed-size List[T, N] with N = %ld" to cstr, ca_count, (deref expected_t2).fixed_len)
+                                                let ca_d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(ca_buf to cstr), arg_node)
+                                                free(ca_buf to ptr)
+                                                if ca_d != None to ptr[Diagnostic]:
+                                                    ca_d.set_explanation(String.make("N is the fixed size: the literal must supply exactly N items of the element type." to cstr))
                             // Phase 5 slice 17: same propagation for dict-
                             // literal args — declared K (name) and V
                             // (payload) must win over item inference, or the
