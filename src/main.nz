@@ -652,10 +652,6 @@ fn option_value(opt as ptr[u8]) as ptr[u8]:
 // Returns a bitmask: bit0 = needs std.collections, bit1 = imports it.
 // Depth-capped: chasing a corrupted pointer must never recurse unbounded
 // (this box has 1.8 GB RAM; the pre-cap bug ballooned to 1 GB in ~16 s).
-fn collections_usage_scan(node as ptr[Node]) as i32:
-    return collections_usage_scan_d(node, 0 to i32)
-
-
 fn collections_usage_scan_d(node as ptr[Node], depth as i32) as i32:
     if node == None to ptr[Node]:
         return 0 to i32
@@ -669,6 +665,24 @@ fn collections_usage_scan_d(node as ptr[Node], depth as i32) as i32:
             return 2 to i32
     if nt == NodeType.DictLiteral:
         flags = flags | 1 to i32
+    // Phase 5 slice 20: a METHOD CALL whose name belongs to the list
+    // method family (the exact set codegen dispatches to __mantiq_list_*)
+    // needs the runtime too — `let l = [1, 2]; l.append(3)` without any
+    // List[ annotation or spread used to die at link time
+    // (undefined __mantiq_list_append). Names are matched WITHOUT type
+    // info, so String/StringBuilder methods with the same names
+    // (StringBuilder.append) false-positive — harmless: the synthesized
+    // import only compiles in runtime bodies nothing else references.
+    // Programs that declare their own List/Dict never reach the
+    // synthesis (auto_import_collections returns early — shadow safety).
+    if nt == NodeType.CallExpr:
+        let cal as ptr[Node] = node_left(node)
+        if cal != None to ptr[Node] and node_kind(cal) == NodeType.MemberExpr:
+            let mname as String = node_name(cal)
+            if mname.data != None to ptr[u8] and mname.len > 0 to usize:
+                let mc as cstr = mname.data to cstr
+                if strcmp(mc, "append" to cstr) == 0 or strcmp(mc, "extend" to cstr) == 0 or strcmp(mc, "insert" to cstr) == 0 or strcmp(mc, "remove" to cstr) == 0 or strcmp(mc, "pop" to cstr) == 0 or strcmp(mc, "sort" to cstr) == 0 or strcmp(mc, "reverse" to cstr) == 0 or strcmp(mc, "copy" to cstr) == 0 or strcmp(mc, "concat" to cstr) == 0 or strcmp(mc, "repeat" to cstr) == 0 or strcmp(mc, "contains" to cstr) == 0 or strcmp(mc, "count" to cstr) == 0 or strcmp(mc, "index" to cstr) == 0 or strcmp(mc, "equals" to cstr) == 0 or strcmp(mc, "to_string" to cstr) == 0 or strcmp(mc, "hex" to cstr) == 0 or strcmp(mc, "decode" to cstr) == 0 or strcmp(mc, "__add__" to cstr) == 0 or strcmp(mc, "__mul__" to cstr) == 0 or strcmp(mc, "__contains__" to cstr) == 0 or strcmp(mc, "__eq__" to cstr) == 0 or strcmp(mc, "__ne__" to cstr) == 0 or strcmp(mc, "__str__" to cstr) == 0 or strcmp(mc, "__repr__" to cstr) == 0:
+                    flags = flags | 1 to i32
     if nt == NodeType.ListLiteral:
         let items as List[ptr[Node]] = node_declarations(node)
         var i as i64 = 0 to i64
@@ -733,7 +747,23 @@ fn collections_usage_scan_d(node as ptr[Node], depth as i32) as i32:
 fn auto_import_collections(root as ptr[Node]):
     if root == None to ptr[Node]:
         return
-    let flags as i32 = collections_usage_scan(root)
+    // Phase 5 slice 20: if the program DECLARES its own List/Dict, do NOT
+    // synthesize the import at all — the imported List/Dict symbols
+    // collide with the user's declarations (E0102 duplicate struct).
+    // Such programs can never coexist with std.collections' types anyway;
+    // they keep the pre-slice-19 behavior (explicit import required).
+    let top_decls as List[ptr[Node]] = node_declarations(root)
+    var td_i as i64 = 0 to i64
+    while td_i < top_decls.length():
+        let td as ptr[Node] = top_decls[td_i]
+        if td != None to ptr[Node]:
+            let tk as NodeType = node_kind(td)
+            if tk == NodeType.FunDecl or tk == NodeType.StructDecl or tk == NodeType.ClassDecl:
+                let tn as String = node_name(td)
+                if tn.data != None to ptr[u8] and (strcmp(tn.data to cstr, "List" to cstr) == 0 or strcmp(tn.data to cstr, "Dict" to cstr) == 0):
+                    return
+        td_i = td_i + 1 to i64
+    let flags as i32 = collections_usage_scan_d(root, 0 to i32)
     if (flags & 1 to i32) == 0 to i32 or (flags & 2 to i32) != 0 to i32:
         return
     let imp as ptr[Node] = make_node(NodeType.ImportDecl, node_span(root))

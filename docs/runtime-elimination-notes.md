@@ -3006,3 +3006,63 @@ passed where T is expected — always go through
   p17lsn5 p17lsn9 p18n1 — rc=0 x86 AND aarch64 (11/11 both; also
   proves no double-import for programs with explicit imports).
 - fmt clean + idempotent (main.nz, typecheck.nz, codegen.nz).
+
+## Slice 20 — List method calls work without import
+
+Slice 19 closed dicts and spreads but left the documented §19.3 limit:
+a program calling list METHODS without `import std.collections` still
+died at link time. Empirically established what actually needs the
+runtime (no-import probes, main_p19):
+- bare `List[i64]()` constructor + `.length()` — INLINE, no runtime
+  (u1: rc=0 without import; the `is_dict_list` flag in the constructor
+  path is dead code — set, never read).
+- `.append` / spread — `__mantiq_list_append`/`extend` (u2/u3: link
+  failure without import).
+
+### 20.1 Method-name heuristic in the usage scan
+
+collections_usage_scan now also sets bit0 for a CallExpr whose callee
+is a MemberExpr with a name in the exact set codegen dispatches to
+__mantiq_list_*: append, extend, insert, remove, pop, sort, reverse,
+copy, concat, repeat, contains, count, index, equals, to_string, hex,
+decode, __add__, __mul__, __contains__, __eq__, __ne__, __str__,
+__repr__. Names are matched WITHOUT type info (pre-typecheck scan), so
+String/StringBuilder methods with the same names false-positive —
+harmless: the synthesized import only compiles in runtime bodies
+nothing else references (lld drops them).
+
+### 20.2 Shadow guard: user List/Dict declarations suppress synthesis
+
+If the program's TOP-LEVEL declarations include a FunDecl/StructDecl/
+ClassDecl named List or Dict, auto_import_collections returns without
+synthesizing (the imported List/Dict symbols collide with the user's
+declarations: E0102 duplicate struct — reproduced on p20s2's first
+draft). Such programs keep the pre-slice-19 behavior (explicit import
+required; note they could not import std.collections anyway without
+renaming).
+
+During the guard's verification, several PRE-EXISTING bugs surfaced
+(all verified identical on main_p19, out of slice-20 scope, probes
+archived):
+- `List` is a GLOBAL builtin symbol (sema init_global_scope), so no
+  program can declare `struct List` today (E0102 on every attempt).
+- A user struct named `Dict` cannot even be CONSTRUCTED without the
+  runtime: `Dict(v = 3)` dispatches to __mantiq_dict_create_with_
+  capacity by NAME.
+- Field reads on structs that HAVE methods yield the struct value,
+  not the field (`d.v != 3` → icmp of { ptr, i64, i64 } vs i64 —
+  invalid IR); scalar-return methods on user structs hit the same
+  shape (`ret i64 %struct`). Method-free structs are fine (p20s2).
+
+### 20.3 Verified (main_p20)
+
+- p20u1: bare `List[i64]()` + length, NO import — rc=0 (unchanged).
+- p20u2: `List[i64]()` + append, NO import — rc=0 (was: link error).
+- p20u3: plain `[1, 2]` + append, NO import — rc=0 (was: link error).
+- p20s1: user `struct Dict` + void count() method — rc=0 (guard
+  suppresses the import; without it: E0102 collision).
+- p20s2: user struct Box + real dict usage — rc=0 (import fires,
+  coexists with the user's type).
+- Slice-19 regression: p19g1..g4 rc=0.
+- Ladder: 21/21 x86 + 21/21 aarch64 (adds p20u1-u3, p20s1-2).
+- fmt clean + idempotent (main.nz).
