@@ -3118,3 +3118,102 @@ alloca ptr (invalid IR: '%t.1' defined with type '%S' but expected
   capacity by callee NAME). Construction-by-name dispatch predates
   the slice-20 auto-import; fixing it needs the callee resolution to
   prefer a declared struct symbol over the builtin-name heuristic.
+
+## Slice 22 — inline `[N x T]` fixed lists (spec 0011 §3.1)
+
+`List[T, N]` is now the INLINE `[N x T]` array the spec declares:
+`N * sizeof(T)` bytes, Move, no destructor, no heap. `List[T]` keeps
+the `{ ptr, i64, i64 }` handle. The two are DIFFERENT types.
+
+### 22.1 Type identity
+
+- `is_implicitly_convertible`: same-kind List conversions now require
+  `fixed_len` equality (0 = dynamic). A fixed list can never flow into
+  a dynamic-typed slot (or vice versa) — the inline array holds no
+  buffer pointer, so a handle-typed consumer would read array items as
+  a pointer.
+- Direct-call args: a List arg's `fixed_len` must equal the param's
+  (new check in the call-args loop; no arg conversion check existed
+  before).
+- Return-stmt list literals adopt the declared return List type
+  (payload + fixed_len) with the VarDecl count/spread validation — the
+  summary for earlier slices claimed ReturnStmt already propagated the
+  whole expected type; in reality it only propagated NumberLiterals.
+- Struct CTOR args (`Holder(xs = [4, 5])`): named/positional literal
+  args adopt the FIELD's List type with the same count/spread
+  validation (the ctor callee is Struct-typed, so the fn-call arg
+  propagation never ran).
+
+### 22.2 Semantics changes
+
+- Spread items in a fixed `List[T, N]` literal → E0308 (was: the
+  slice-18 count check silently skipped spread items). Dynamic count
+  can never be inline.
+- Growth/mutating methods (append/extend/insert/remove/pop/clear/
+  sort/reverse/copy/get/count/index/__add__/...) on a fixed receiver →
+  E0308 at typecheck. Only length/len is allowed (folded to the
+  constant N by codegen). Calling the flat `__mantiq_list_*` runtime on
+  an inline array would read array items as pointers and free them.
+- Fixed-list comparisons (== etc.) are NOT special-cased: they hit the
+  same aggregate-icmp gap user structs have (`icmp eq %P ...` —
+  invalid IR). Pre-existing family, documented as open.
+
+### 22.3 Codegen
+
+- `type_to_llvm`: List with `fixed_len > 0` → `[N x <elem>]`
+  (elem follows the usual erasure rules — unresolved 1-char generic
+  names → ptr). N == 0 stays the flat handle repr.
+- `type_size` / `type_llvm_byte_size`: fixed lists are
+  `N * sizeof(elem)`.
+- `emit_list_literal`: fixed → insertvalue chain from
+  zeroinitializer (`%t.i = insertvalue [N x T] <chain>, <elem> <v>, i`),
+  no malloc, no `__mantiq_list_*`, no drop glue. register_temp is a
+  no-op stub, so the returned temp name carries the type implicitly.
+- `emit_index_addr`: fixed collection → GEP on the collection's
+  STORAGE slot (`getelementptr inbounds [N x T], ptr %slot, i32 0,
+  i32 <idx>`) — the byval convention struct field reads use. Bases:
+  Identifier/MemberExpr via emit_lvalue_ptr; rvalue bases (call
+  results) spill to a temp alloca first. Index WRITES ride the same
+  path (assignments call emit_index_addr for the LHS).
+- `length()` on a fixed list → the CONSTANT N (no load, no
+  extractvalue, arch-independent).
+- Fn-param ABI: fixed `List[T, N]` params pass the ARRAY BY VALUE —
+  the two annotation-text override sites (fn signature + param alloca)
+  now prefer the resolved fixed List type over the flat-handle
+  heuristic; `is_struct_byval("[N x T]")` is False, so call sites pass
+  the array value and definitions `alloca` + `store` it. Verified:
+  `define i64 @sum3([3 x i64] %xs_param)` with a matching call.
+- Drop glue: `emit_auto_drops` skips slots whose registered LLVM type
+  starts with `[`; struct-field drop glue skips fixed-list fields. The
+  flat `__nizam_drop_List_flat` would read array items as a pointer
+  and free them.
+- Monomorphization rides for free: `first_of[T](v as T) as
+  List[T, 1]` re-typechecks the clone → `@first_of_i32` returns
+  `[1 x i32]` by value. Unbound templates keep `[1 x ptr]` (dead code).
+
+### 22.4 Verified (main_p22)
+
+- p22a: fixed literal read, index write, constant length, no-init
+  zeroed, multi-digit N — rc=0; IR confirmed inline (alloca [3 x i64],
+  insertvalue chain, GEP, `icmp ne i64 3, 3`, NO malloc/drop calls).
+- p22b: fixed param by value (`sum3`), generic return `List[T, 1]`
+  mono'd to `[1 x i32]` — rc=0.
+- p22c: dynamic lists still work end-to-end (append/length/index) +
+  f64 fixed elems — rc=0.
+- p22d: fixed list as a struct field — ctor insertvalue, nested GEP
+  read/write, drop glue skipped — rc=0.
+- Negatives: `a.append(...)` / `[1, ...base]` into fixed / fixed var
+  into dynamic slot — each exactly ONE E0308.
+- Ladder: 25/25 x86 + 25/25 aarch64 (adds p22a–p22d; p18n1 case 5
+  updated — spread+fixed is now E0308, replaced with a non-literal
+  items case). fmt clean + idempotent.
+
+### 22.5 Still open (fixed-list family)
+
+- OOB index reads/writes are unbounded GEPs (no bounds checking) —
+  same as dynamic lists today.
+- Read methods (contains/count/index/copy) on fixed lists are blocked;
+  implementing them needs inlined scan loops over the array.
+- Fixed-list `==` shares the aggregate-compare gap with structs.
+- `List[T, 0]` degenerates to the dynamic repr (N = 0 = dynamic
+  sentinel).

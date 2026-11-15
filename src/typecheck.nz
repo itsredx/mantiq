@@ -1021,6 +1021,15 @@ struct TypeChecker:
                     return True
                 let res as bool = self.is_implicitly_convertible(f_pl, t_pl)
                 return res
+            // Phase 5 slice 22 (spec 0011 §3.1): List[T, N] is the inline
+            // [N x T] array; List[T] is the { ptr, i64, i64 } handle. They
+            // are DIFFERENT types, so fixed_len is part of the type
+            // identity (0 = dynamic). A fixed list can never flow into a
+            // dynamic-typed slot (or vice versa) — the inline array holds
+            // no heap buffer, so a handle-typed consumer would read array
+            // items as a pointer.
+            if fk == TypeKind.List:
+                return (deref from_t).fixed_len == (deref to_t).fixed_len
             return True
         if fk == TypeKind.Unknown or tk == TypeKind.Unknown or fk == TypeKind.Error or tk == TypeKind.Error or fk == TypeKind.Void or tk == TypeKind.Void:
             return True
@@ -1505,8 +1514,12 @@ struct TypeChecker:
                         else:
                             set_node_inferred_type(init_node, annotated_type)
                     // Phase 5 slice 18: List[T, N] literals must carry
-                    // exactly N items (N is the size). Spread items make
-                    // the count dynamic — skip the check for those.
+                    // exactly N items (N is the size).
+                    // Phase 5 slice 22: spread items make the count
+                    // dynamic, which can NEVER be inline — E0308 (was:
+                    // silently skipped the count check). Matching literals
+                    // propagate N into the literal's inferred type — the
+                    // inline [N x T] codegen path keys off it.
                     if node_kind(init_node) == NodeType.ListLiteral and (deref annotated_type).kind == TypeKind.List and (deref annotated_type).fixed_len > 0 to i64:
                         let fl_items as List[ptr[Node]] = node_declarations(init_node)
                         var fl_i as i64 = 0 to i64
@@ -1517,7 +1530,23 @@ struct TypeChecker:
                                 fl_has_spread = True
                                 break
                             fl_i = fl_i + 1 to i64
-                        if not fl_has_spread:
+                        if fl_has_spread:
+                            extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+                            extern fn free(p as ptr)
+                            let msg_buf as ptr[u8] = make[u8](200 to usize) to ptr[u8]
+                            let _m22 as i32 = sprintf(msg_buf, "spread item in a fixed-size List[T, %ld] literal" to cstr, (deref annotated_type).fixed_len)
+                            let d22 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(msg_buf to cstr), node)
+                            free(msg_buf to ptr)
+                            if d22 != None to ptr[Diagnostic]:
+                                d22.set_explanation(String.make("A fixed-size List[T, N] is an inline [N x T] array — the item count is part of the type, so a spread (dynamic count) cannot initialize it." to cstr))
+                                d22.add_help(String.make("Use a dynamic List[T], or list the items explicitly (exactly N)." to cstr))
+                            // Poison the literal's type as fixed so the
+                            // generic conversion check below does not add a
+                            // second cascade error for the same root cause.
+                            let fl_lit_t22 as ptr[Type] = node_inferred_type(init_node)
+                            if fl_lit_t22 != None to ptr[Type]:
+                                (deref fl_lit_t22).fixed_len = (deref annotated_type).fixed_len
+                        else:
                             let fl_count as i64 = fl_items.length()
                             if fl_count != (deref annotated_type).fixed_len:
                                 extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
@@ -1532,6 +1561,10 @@ struct TypeChecker:
                                     let _h18 as i32 = sprintf(help_buf, "Supply exactly %ld item(s), or drop the , N from the annotation." to cstr, (deref annotated_type).fixed_len)
                                     d18.add_help(String.make(help_buf to cstr))
                                     free(help_buf to ptr)
+                            else:
+                                let fl_lit_t as ptr[Type] = node_inferred_type(init_node)
+                                if fl_lit_t != None to ptr[Type]:
+                                    (deref fl_lit_t).fixed_len = (deref annotated_type).fixed_len
                     if not self.is_implicitly_convertible(init_type, annotated_type):
                         let d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make("type mismatch in variable initialization" to cstr), node)
                         if d != None to ptr[Diagnostic]:
@@ -1929,8 +1962,12 @@ struct TypeChecker:
                                         (deref arg_lit_t).payload = (deref expected_t2).payload
                                     // Phase 5 slice 18: fixed-size List[T, N]
                                     // params validate the literal's item
-                                    // count too (spread args skip — dynamic
-                                    // count).
+                                    // count too.
+                                    // Phase 5 slice 22: spread args are
+                                    // E0308 (dynamic count can never be
+                                    // inline); matching literals propagate N
+                                    // into the literal's inferred type so the
+                                    // codegen emits the inline [N x T] chain.
                                     if (deref expected_t2).fixed_len > 0 to i64:
                                         let ca_items as List[ptr[Node]] = node_declarations(arg_node)
                                         var ca_i as i64 = 0 to i64
@@ -1941,7 +1978,20 @@ struct TypeChecker:
                                                 ca_spread = True
                                                 break
                                             ca_i = ca_i + 1 to i64
-                                        if not ca_spread:
+                                        if ca_spread:
+                                            extern fn sprintf(
+                                                str as ptr[u8],
+                                                format as cstr,
+                                                ...,
+                                            ) as i32
+                                            extern fn free(p as ptr)
+                                            let ca_buf as ptr[u8] = make[u8](200 to usize) to ptr[u8]
+                                            let _ca22 as i32 = sprintf(ca_buf, "spread item in a fixed-size List[T, %ld] literal argument" to cstr, (deref expected_t2).fixed_len)
+                                            let ca_d22 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(ca_buf to cstr), arg_node)
+                                            free(ca_buf to ptr)
+                                            if ca_d22 != None to ptr[Diagnostic]:
+                                                ca_d22.set_explanation(String.make("A fixed-size List[T, N] is an inline [N x T] array — a spread (dynamic count) cannot initialize it." to cstr))
+                                        else:
                                             let ca_count as i64 = ca_items.length()
                                             if ca_count != (deref expected_t2).fixed_len:
                                                 extern fn sprintf(
@@ -1956,6 +2006,9 @@ struct TypeChecker:
                                                 free(ca_buf to ptr)
                                                 if ca_d != None to ptr[Diagnostic]:
                                                     ca_d.set_explanation(String.make("N is the fixed size: the literal must supply exactly N items of the element type." to cstr))
+                                            else:
+                                                if arg_lit_t != None to ptr[Type]:
+                                                    (deref arg_lit_t).fixed_len = (deref expected_t2).fixed_len
                             // Phase 5 slice 17: same propagation for dict-
                             // literal args — declared K (name) and V
                             // (payload) must win over item inference, or the
@@ -1968,6 +2021,30 @@ struct TypeChecker:
                                     if arg_dict_t != None to ptr[Type]:
                                         (deref arg_dict_t).payload = (deref expected_t3).payload
                                         (deref arg_dict_t).name = (deref expected_t3).name
+                            // Phase 5 slice 22: a FIXED List[T, N] arg can
+                            // only flow into a fixed List[T, M] param with
+                            // M == N — the inline [N x T] array and the
+                            // { ptr, i64, i64 } handle are different types
+                            // with no implicit conversion.
+                            if a_idx < expected_count:
+                                let expected_t4 as ptr[Type] = ref (deref params)[a_idx]
+                                let arg_t22 as ptr[Type] = node_inferred_type(arg_node)
+                                if expected_t4 != None to ptr[Type] and arg_t22 != None to ptr[Type] and (deref expected_t4).kind == TypeKind.List and (deref arg_t22).kind == TypeKind.List:
+                                    let ef22 as i64 = (deref expected_t4).fixed_len
+                                    let af22 as i64 = (deref arg_t22).fixed_len
+                                    if ef22 != af22:
+                                        extern fn sprintf(
+                                            str as ptr[u8],
+                                            format as cstr,
+                                            ...,
+                                        ) as i32
+                                        extern fn free(p as ptr)
+                                        let ab_buf22 as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+                                        let _ab22 as i32 = sprintf(ab_buf22, "List[T, %ld] argument does not match a List[T, %ld] parameter (fixed and dynamic lists are different types)" to cstr, af22, ef22)
+                                        let ab_d22 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(ab_buf22 to cstr), arg_node)
+                                        free(ab_buf22 to ptr)
+                                        if ab_d22 != None to ptr[Diagnostic]:
+                                            ab_d22.set_explanation(String.make("List[T, N] is an inline [N x T] array; List[T] is a heap-backed handle. They never convert implicitly." to cstr))
                         a_idx = a_idx + 1 to i64
                 elif (deref callee_t).kind == TypeKind.Closure:
                     let params_c as ptr[List[Type]] = ref (deref callee_t).param_types
@@ -1981,6 +2058,92 @@ struct TypeChecker:
                                     set_node_inferred_type(arg_node_c, expected_t_c)
                             let dummy_a as ptr[Type] = self.typecheck_node(arg_node_c)
                         a_idx = a_idx + 1 to i64
+                elif (deref callee_t).kind == TypeKind.Struct:
+                    // Phase 5 slice 22: struct CTOR args — list-literal
+                    // args adopt the FIELD's List type (payload +
+                    // fixed_len) with the same count/spread validation as
+                    // VarDecl literals, so the ctor's insertvalue splices
+                    // the inline [N x T] chain instead of a flat handle.
+                    let ctor_name22 as String = node_name(callee)
+                    if ctor_name22.data != None to ptr[u8]:
+                        let ctor_sym22 as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(ctor_name22)
+                        if ctor_sym22 != None to ptr[Symbol] and (deref ctor_sym22).decl_node != None to ptr[Node]:
+                            let sd_fields22 as List[ptr[Node]] = node_declarations((deref ctor_sym22).decl_node)
+                            while a_idx < arg_count:
+                                let ca_arg22 as ptr[Node] = args[a_idx]
+                                if ca_arg22 != None to ptr[Node]:
+                                    let _ca_d22 as ptr[Type] = self.typecheck_node(ca_arg22)
+                                    var ca_fld_nm22 as String = String.make("" to cstr)
+                                    var ca_expr22 as ptr[Node] = ca_arg22
+                                    if node_kind(ca_arg22) == NodeType.BinaryExpr:
+                                        let ca_op22 as String = node_op(ca_arg22)
+                                        if ca_op22.data != None to ptr[u8] and strcmp(ca_op22.data to cstr, "=" to cstr) == 0:
+                                            let ca_l22 as ptr[Node] = node_left(ca_arg22)
+                                            if ca_l22 != None to ptr[Node] and node_kind(ca_l22) == NodeType.Identifier:
+                                                ca_fld_nm22 = node_name(ca_l22)
+                                                ca_expr22 = node_right(ca_arg22)
+                                    if node_kind(ca_expr22) == NodeType.ListLiteral and a_idx < sd_fields22.length():
+                                        var fi22 as i64 = 0 to i64
+                                        var fld_t22 as ptr[Type] = None to ptr[Type]
+                                        while fi22 < sd_fields22.length():
+                                            let fd22 as ptr[Node] = sd_fields22[fi22]
+                                            if fd22 != None to ptr[Node] and (node_kind(fd22) == NodeType.FieldDecl or node_kind(fd22) == NodeType.VarDecl):
+                                                var match22 as bool = False
+                                                if ca_fld_nm22.data != None to ptr[u8]:
+                                                    match22 = node_name(fd22).data != None to ptr[u8] and strcmp(node_name(fd22).data to cstr, ca_fld_nm22.data to cstr) == 0
+                                                else:
+                                                    match22 = fi22 == a_idx
+                                                if match22:
+                                                    let ft_inf22 as ptr[Type] = node_inferred_type(fd22)
+                                                    if ft_inf22 != None to ptr[Type] and (deref ft_inf22).kind == TypeKind.List:
+                                                        fld_t22 = ft_inf22
+                                                    break
+                                            fi22 = fi22 + 1 to i64
+                                        if fld_t22 != None to ptr[Type]:
+                                            let ca_lit_t22 as ptr[Type] = node_inferred_type(ca_expr22)
+                                            if ca_lit_t22 != None to ptr[Type] and (deref ca_lit_t22).kind == TypeKind.List:
+                                                if (deref fld_t22).payload != None to ptr[Type]:
+                                                    (deref ca_lit_t22).payload = (deref fld_t22).payload
+                                                if (deref fld_t22).fixed_len > 0 to i64:
+                                                    let ca_items22 as List[ptr[Node]] = node_declarations(ca_expr22)
+                                                    var ca_i22 as i64 = 0 to i64
+                                                    var ca_spr22 as bool = False
+                                                    while ca_i22 < ca_items22.length():
+                                                        let ca_it22 as ptr[Node] = ca_items22[ca_i22]
+                                                        if ca_it22 != None to ptr[Node] and (deref ca_it22).kind == NodeType.SpreadExpr:
+                                                            ca_spr22 = True
+                                                            break
+                                                        ca_i22 = ca_i22 + 1 to i64
+                                                    if ca_spr22:
+                                                        extern fn sprintf(
+                                                            str as ptr[u8],
+                                                            format as cstr,
+                                                            ...,
+                                                        ) as i32
+                                                        extern fn free(p as ptr)
+                                                        let cb22 as ptr[u8] = make[u8](200 to usize) to ptr[u8]
+                                                        let _cb22 as i32 = sprintf(cb22, "spread item in a fixed-size List[T, %ld] constructor argument" to cstr, (deref fld_t22).fixed_len)
+                                                        let cb_d22 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(cb22 to cstr), ca_arg22)
+                                                        free(cb22 to ptr)
+                                                        if cb_d22 != None to ptr[Diagnostic]:
+                                                            cb_d22.set_explanation(String.make("A fixed-size List[T, N] is an inline [N x T] array — a spread (dynamic count) cannot initialize it." to cstr))
+                                                        (deref ca_lit_t22).fixed_len = (deref fld_t22).fixed_len
+                                                    elif ca_items22.length() != (deref fld_t22).fixed_len:
+                                                        extern fn sprintf(
+                                                            str as ptr[u8],
+                                                            format as cstr,
+                                                            ...,
+                                                        ) as i32
+                                                        extern fn free(p as ptr)
+                                                        let cb2_buf as ptr[u8] = make[u8](160 to usize) to ptr[u8]
+                                                        let _cb22b as i32 = sprintf(cb2_buf, "list literal item count (%ld) does not match fixed-size List[T, N] with N = %ld" to cstr, ca_items22.length(), (deref fld_t22).fixed_len)
+                                                        let cb_d2 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(cb2_buf to cstr), ca_arg22)
+                                                        free(cb2_buf to ptr)
+                                                        if cb_d2 != None to ptr[Diagnostic]:
+                                                            cb_d2.set_explanation(String.make("N is the fixed size: the literal must supply exactly N items of the element type." to cstr))
+                                                    else:
+                                                        (deref ca_lit_t22).fixed_len = (deref fld_t22).fixed_len
+                                a_idx = a_idx + 1 to i64
                 else:
                     while a_idx < arg_count:
                         let dummy_a as ptr[Type] = self.typecheck_node(args[a_idx])
@@ -2072,7 +2235,24 @@ struct TypeChecker:
                                 else:
                                     coll_handled = False
                             elif coll_recv_k == TypeKind.List:
-                                if strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
+                                // Phase 5 slice 22: a fixed List[T, N] is an
+                                // inline [N x T] array with NO heap buffer —
+                                // only length/len is meaningful (a constant
+                                // N). Every buffer-touching method (append,
+                                // clear, pop, ...) would read array items as
+                                // a { ptr, i64, i64 } handle and corrupt
+                                // memory → E0308.
+                                if (deref coll_recv_t).fixed_len > 0 to i64 and strcmp(coll_mname.data to cstr, "length") != 0 and strcmp(coll_mname.data to cstr, "len") != 0:
+                                    extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+                                    extern fn free(p as ptr)
+                                    let f_buf22 as ptr[u8] = make[u8](256 to usize) to ptr[u8]
+                                    let _f22 as i32 = sprintf(f_buf22, "method '%s' is not available on a fixed-size List[T, %ld]" to cstr, coll_mname.data to cstr, (deref coll_recv_t).fixed_len)
+                                    let f_d22 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(f_buf22 to cstr), node)
+                                    free(f_buf22 to ptr)
+                                    if f_d22 != None to ptr[Diagnostic]:
+                                        f_d22.set_explanation(String.make("Fixed-size List[T, N] is an inline [N x T] array: it supports only indexing and length(). Growth methods belong to the dynamic List[T]." to cstr))
+                                    ret_type = make_type(TypeKind.Error)
+                                elif strcmp(coll_mname.data to cstr, "length") == 0 or strcmp(coll_mname.data to cstr, "len") == 0:
                                     ret_type = make_type(TypeKind.USize)
                                 elif strcmp(coll_mname.data to cstr, "clear") == 0:
                                     ret_type = make_type(TypeKind.Void)
@@ -2277,6 +2457,51 @@ struct TypeChecker:
                 // Track inferred return type for validation
                 let self_ptr_r as ptr[TypeChecker] = self
                 (deref self_ptr_r).inferred_return_type = ret_type
+                // Phase 5 slice 22: list-literal returns adopt the
+                // declared List return type (payload AND fixed_len) —
+                // same propagation contract as VarDecl/call-arg literals:
+                // spread → E0308; count mismatch → E0308; match → the
+                // literal's type becomes List[T, N] so the codegen emits
+                // the inline [N x T] chain and the E0309 validation passes.
+                if option_has_value(opt_ret) and node_kind(return_val) == NodeType.ListLiteral:
+                    let rl_exp_p as ptr[u8] = option_value(opt_ret)
+                    let rl_exp_t as ptr[Type] = rl_exp_p to ptr[Type]
+                    if rl_exp_t != None to ptr[Type] and (deref rl_exp_t).kind == TypeKind.List:
+                        let rl_t as ptr[Type] = node_inferred_type(return_val)
+                        if rl_t != None to ptr[Type] and (deref rl_t).kind == TypeKind.List:
+                            if (deref rl_exp_t).payload != None to ptr[Type]:
+                                (deref rl_t).payload = (deref rl_exp_t).payload
+                            if (deref rl_exp_t).fixed_len > 0 to i64:
+                                let rl_items as List[ptr[Node]] = node_declarations(return_val)
+                                var rl_i as i64 = 0 to i64
+                                var rl_spread as bool = False
+                                while rl_i < rl_items.length():
+                                    let rl_it as ptr[Node] = rl_items[rl_i]
+                                    if rl_it != None to ptr[Node] and (deref rl_it).kind == NodeType.SpreadExpr:
+                                        rl_spread = True
+                                        break
+                                    rl_i = rl_i + 1 to i64
+                                if rl_spread:
+                                    extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+                                    extern fn free(p as ptr)
+                                    let rl_buf as ptr[u8] = make[u8](200 to usize) to ptr[u8]
+                                    let _rl22 as i32 = sprintf(rl_buf, "spread item in a fixed-size List[T, %ld] return literal" to cstr, (deref rl_exp_t).fixed_len)
+                                    let rl_d as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(rl_buf to cstr), node)
+                                    free(rl_buf to ptr)
+                                    if rl_d != None to ptr[Diagnostic]:
+                                        rl_d.set_explanation(String.make("A fixed-size List[T, N] is an inline [N x T] array — a spread (dynamic count) cannot initialize it." to cstr))
+                                    (deref rl_t).fixed_len = (deref rl_exp_t).fixed_len
+                                elif rl_items.length() != (deref rl_exp_t).fixed_len:
+                                    extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+                                    extern fn free(p as ptr)
+                                    let rl_buf2 as ptr[u8] = make[u8](160 to usize) to ptr[u8]
+                                    let _rl22b as i32 = sprintf(rl_buf2, "list literal item count (%ld) does not match fixed-size List[T, N] with N = %ld" to cstr, rl_items.length(), (deref rl_exp_t).fixed_len)
+                                    let rl_d2 as ptr[Diagnostic] = (deref (deref self).sema).report_error_node("E0308" to cstr, String.make(rl_buf2 to cstr), node)
+                                    free(rl_buf2 to ptr)
+                                    if rl_d2 != None to ptr[Diagnostic]:
+                                        rl_d2.set_explanation(String.make("N is the fixed size: the literal must supply exactly N items of the element type." to cstr))
+                                else:
+                                    (deref rl_t).fixed_len = (deref rl_exp_t).fixed_len
             else:
                 ret_type = make_type(TypeKind.Void)
         elif nt == NodeType.WhileStmt:

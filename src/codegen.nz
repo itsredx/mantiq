@@ -953,7 +953,28 @@ fn type_to_llvm(t as ptr[Type]) as String:
         return String.make("double" to cstr)
     if k == TypeKind.F128:
         return String.make("fp128" to cstr)
-    if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict or k == TypeKind.QReg:
+    if k == TypeKind.String or k == TypeKind.Dict or k == TypeKind.QReg:
+        extern fn nizam_get_target_ptr_size() as i32
+        if nizam_get_target_ptr_size() == 4 to i32:
+            return String.make("{ ptr, i32, i32 }" to cstr)
+        return String.make("{ ptr, i64, i64 }" to cstr)
+    if k == TypeKind.List:
+        // Phase 5 slice 22 (spec 0011 §3.1): List[T, N] is the INLINE
+        // [N x T] array — N == 0 stays the dynamic { ptr, i64, i64 }
+        // handle repr. The elem type follows the same erasure rules as
+        // anywhere else (unresolved 1-char generic names -> ptr).
+        if (deref t).fixed_len > 0 to i64 and (deref t).payload != None to ptr[Type]:
+            let elem_ll22 as String = type_to_llvm((deref t).payload)
+            let arr_sb22 as StringBuilder = StringBuilder.make()
+            append_cstr(ref arr_sb22, "[" to cstr)
+            append_i64(ref arr_sb22, (deref t).fixed_len)
+            append_cstr(ref arr_sb22, " x " to cstr)
+            append_str(ref arr_sb22, elem_ll22)
+            append_cstr(ref arr_sb22, "]" to cstr)
+            elem_ll22.deinit()
+            let arr_s22 as String = arr_sb22.to_string()
+            arr_sb22.deinit()
+            return arr_s22
         extern fn nizam_get_target_ptr_size() as i32
         if nizam_get_target_ptr_size() == 4 to i32:
             return String.make("{ ptr, i32, i32 }" to cstr)
@@ -1079,6 +1100,9 @@ fn type_size(t as ptr[Type]) as i64:
         return 64 to i64
     if k == TypeKind.I1024 or k == TypeKind.U1024:
         return 128 to i64
+    // Phase 5 slice 22: List[T, N] inline array — N * sizeof(T).
+    if k == TypeKind.List and (deref t).fixed_len > 0 to i64 and (deref t).payload != None to ptr[Type]:
+        return (deref t).fixed_len * type_size((deref t).payload)
     if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict:
         extern fn nizam_get_target_ptr_size() as i32
         return (nizam_get_target_ptr_size() * 3 to i32) to i64
@@ -1674,6 +1698,11 @@ struct LLVMCodegen:
             return self.llvm_type_byte_size(ty)
         if k == TypeKind.ISize or k == TypeKind.USize or k == TypeKind.RawPointer or k == TypeKind.CStr:
             return (deref self).target.pointer_size to i64
+        // Phase 5 slice 22: List[T, N] inline array — N * sizeof(T),
+        // element sizes follow the same llvm repr as the elements
+        // themselves (named structs resolve through their aliases).
+        if k == TypeKind.List and (deref t).fixed_len > 0 to i64 and (deref t).payload != None to ptr[Type]:
+            return (deref t).fixed_len * self.type_llvm_byte_size((deref t).payload)
         if k == TypeKind.String or k == TypeKind.List or k == TypeKind.Dict:
             return ((deref self).target.pointer_size * 3 to usize) to i64
         if k == TypeKind.Option:
@@ -3465,7 +3494,15 @@ struct LLVMCodegen:
                                 elif strcmp(pa_name, "Any" to cstr) == 0:
                                     param_type = String.make("{ ptr, ptr }" to cstr)
                                 elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
-                                    if (deref self).target.pointer_size == 4 to usize:
+                                    // Phase 5 slice 22: a RESOLVED fixed
+                                    // List[T, N] param takes the inline
+                                    // [N x T] repr — the flat handle
+                                    // heuristic would desync the call
+                                    // sites, which pass the array value.
+                                    let sig_inf22 as ptr[Type] = node_inferred_type(param)
+                                    if sig_inf22 != None to ptr[Type] and (deref sig_inf22).kind == TypeKind.List and (deref sig_inf22).fixed_len > 0 to i64 and (deref sig_inf22).payload != None to ptr[Type]:
+                                        param_type = type_to_llvm(sig_inf22)
+                                    elif (deref self).target.pointer_size == 4 to usize:
                                         param_type = String.make("{ ptr, i32, i32 }" to cstr)
                                     else:
                                         param_type = String.make("{ ptr, i64, i64 }" to cstr)
@@ -3533,7 +3570,14 @@ struct LLVMCodegen:
                                 elif strcmp(pa_name, "Any" to cstr) == 0:
                                     p_type = String.make("{ ptr, ptr }" to cstr)
                                 elif strncmp(pa_name, "Dict" to cstr, 4 to usize) == 0 or strncmp(pa_name, "List" to cstr, 4 to usize) == 0 or strncmp(pa_name, "String" to cstr, 6 to usize) == 0:
-                                    if (deref self).target.pointer_size == 4 to usize:
+                                    // Phase 5 slice 22: same fixed-list
+                                    // preference as the signature site —
+                                    // the param alloca must match the
+                                    // [N x T] by-value ABI.
+                                    let pa_inf22 as ptr[Type] = node_inferred_type(p)
+                                    if pa_inf22 != None to ptr[Type] and (deref pa_inf22).kind == TypeKind.List and (deref pa_inf22).fixed_len > 0 to i64 and (deref pa_inf22).payload != None to ptr[Type]:
+                                        p_type = type_to_llvm(pa_inf22)
+                                    elif (deref self).target.pointer_size == 4 to usize:
                                         p_type = String.make("{ ptr, i32, i32 }" to cstr)
                                     else:
                                         p_type = String.make("{ ptr, i64, i64 }" to cstr)
@@ -10216,6 +10260,15 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ")\n")
             return"null" to ptr[u8]
         if strcmp(mname, "length") == 0 or strcmp(mname, "len") == 0:
+            // Phase 5 slice 22: fixed List[T, N] — the length is the
+            // CONSTANT N ([N x T] has no len field to extract). No load,
+            // no extractvalue, arch-independent.
+            if obj_t != None to ptr[Type] and (deref obj_t).kind == TypeKind.List and (deref obj_t).fixed_len > 0 to i64:
+                let n_sb22 as StringBuilder = StringBuilder.make()
+                append_i64(ref n_sb22, (deref obj_t).fixed_len)
+                let n_s22 as String = n_sb22.to_string()
+                n_sb22.deinit()
+                return n_s22.data to ptr[u8]
             var rec_v as ptr[u8] = self.emit_expr(obj_node)
             let obj_inf_ll as String = type_to_llvm(node_inferred_type(obj_node))
             if strcmp(obj_inf_ll.data to cstr, "%DictItems" to cstr) == 0 or strcmp(obj_inf_ll.data to cstr, "{ { ptr, i64, i64 } }" to cstr) == 0:
@@ -13534,6 +13587,47 @@ struct LLVMCodegen:
         let slice_t as cstr = if (deref self).target.pointer_size == 4 to usize: "{ ptr, i32, i32 }" to cstr else: "{ ptr, i64, i64 }" to cstr
         let sz_t as cstr = if (deref self).target.pointer_size == 4 to usize: "i32" to cstr else: "i64" to cstr
 
+        // Phase 5 slice 22 (spec 0011 §3.1): List[T, N] literals are
+        // INLINE [N x T] arrays — an insertvalue chain from
+        // zeroinitializer. No malloc, no __mantiq_list_* calls, no drop
+        // glue (Move-only value). The typecheck has validated
+        // count == N and rejected spread items; count mismatch reaching
+        // here would emit garbage, so fall back to nothing (unreachable).
+        let lit_fixed22 as i64 = 0 to i64
+        if list_t != None to ptr[Type] and (deref list_t).kind == TypeKind.List:
+            lit_fixed22 = (deref list_t).fixed_len
+        if lit_fixed22 > 0 to i64 and not has_spread and count == lit_fixed22:
+            let arr_t22 as String = type_to_llvm(list_t)
+            var chain22 as ptr[u8] = None to ptr[u8]
+            var li22 as i64 = 0 to i64
+            while li22 < count:
+                let it22 as ptr[Node] = get_node_decl(ref items, li22)
+                let ev22 as ptr[u8] = self.emit_expr(it22)
+                // Phase 5 slice 17: same item coercion as the dynamic
+                // literal path (see coerce_list_item).
+                let coerced22 as ptr[u8] = self.coerce_list_item(it22, elem_type, ev22)
+                let next22 as ptr[u8] = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, next22 to cstr)
+                append_cstr(ref (deref self).main_out, " = insertvalue ")
+                append_cstr(ref (deref self).main_out, arr_t22.data to cstr)
+                append_cstr(ref (deref self).main_out, " ")
+                if chain22 == None to ptr[u8]:
+                    append_cstr(ref (deref self).main_out, "zeroinitializer" to cstr)
+                else:
+                    append_cstr(ref (deref self).main_out, chain22 to cstr)
+                append_cstr(ref (deref self).main_out, ", ")
+                append_cstr(ref (deref self).main_out, elem_type.data to cstr)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, coerced22 to cstr)
+                append_cstr(ref (deref self).main_out, ", ")
+                append_i64(ref (deref self).main_out, li22)
+                append_cstr(ref (deref self).main_out, "\n")
+                chain22 = next22
+                li22 = li22 + 1 to i64
+            arr_t22.deinit()
+            if chain22 != None to ptr[u8]:
+                return chain22
         if has_spread:
             let list_alloca as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
@@ -15393,6 +15487,48 @@ struct LLVMCodegen:
             append_str(ref (deref self).main_out, p_int_t)
             append_cstr(ref (deref self).main_out, "\n")
             real_idx = p2i_reg
+        // Phase 5 slice 22: fixed List[T, N] is an INLINE [N x T] array —
+        // element addresses come from the collection's STORAGE slot
+        // (the byval convention struct field reads use), never from a
+        // heap buffer pointer.
+        let coll_t22 as ptr[Type] = node_inferred_type(collection)
+        if coll_t22 != None to ptr[Type] and (deref coll_t22).kind == TypeKind.List and (deref coll_t22).fixed_len > 0 to i64:
+            let arr_t22 as String = type_to_llvm(coll_t22)
+            var base22 as ptr[u8] = None to ptr[u8]
+            let cnk22 as NodeType = node_kind(collection)
+            if cnk22 == NodeType.Identifier or cnk22 == NodeType.MemberExpr:
+                base22 = self.emit_lvalue_ptr(collection)
+            if base22 == None to ptr[u8] or strcmp(base22 to cstr, "null" to cstr) == 0:
+                // Rvalue base (call result, literal, ...): spill it to a
+                // temp slot first — GEP needs a pointer operand.
+                let rv22 as ptr[u8] = self.emit_expr(collection)
+                base22 = self.fresh_temp()
+                append_cstr(ref (deref self).main_out, "  ")
+                append_cstr(ref (deref self).main_out, base22 to cstr)
+                append_cstr(ref (deref self).main_out, " = alloca ")
+                append_cstr(ref (deref self).main_out, arr_t22.data to cstr)
+                append_cstr(ref (deref self).main_out, "\n  store ")
+                append_cstr(ref (deref self).main_out, arr_t22.data to cstr)
+                append_cstr(ref (deref self).main_out, " ")
+                append_cstr(ref (deref self).main_out, rv22 to cstr)
+                append_cstr(ref (deref self).main_out, ", ptr ")
+                append_cstr(ref (deref self).main_out, base22 to cstr)
+                append_cstr(ref (deref self).main_out, "\n")
+            let fp22 as ptr[u8] = self.fresh_temp()
+            append_cstr(ref (deref self).main_out, "  ")
+            append_cstr(ref (deref self).main_out, fp22 to cstr)
+            append_cstr(ref (deref self).main_out, " = getelementptr inbounds ")
+            append_cstr(ref (deref self).main_out, arr_t22.data to cstr)
+            append_cstr(ref (deref self).main_out, ", ptr ")
+            append_cstr(ref (deref self).main_out, base22 to cstr)
+            if strcmp(idx_type.data to cstr, "i32" to cstr) == 0:
+                append_cstr(ref (deref self).main_out, ", i32 0, i32 ")
+            else:
+                append_cstr(ref (deref self).main_out, ", i64 0, i64 ")
+            append_cstr(ref (deref self).main_out, real_idx to cstr)
+            append_cstr(ref (deref self).main_out, "\n")
+            arr_t22.deinit()
+            return fp22
         let coll_type as String = type_to_llvm(node_inferred_type(collection))
         var ptr_temp as ptr[u8] = coll_val
         var is_agg_coll as bool = strcmp(coll_type.data to cstr, "{ ptr, i64, i64 }" to cstr) == 0 or strcmp(coll_type.data to cstr, "{ ptr, i32, i32 }" to cstr) == 0
@@ -15923,6 +16059,13 @@ struct LLVMCodegen:
                     llvm_t = (deref self).var_types[var_name]
                 elif (deref self).var_types.has(orig_name):
                     llvm_t = (deref self).var_types[orig_name]
+                // Phase 5 slice 22: inline [N x T] fixed lists hold NO
+                // heap — the List drop glue would read array items as a
+                // pointer and free them. Skip the drop for array-typed
+                // slots (the Move-only value dies with the slot).
+                if llvm_t.len > 0 to usize and (deref llvm_t.data) == 91 to u8:
+                    i = i + 1 to i64
+                    continue
                 let div_key as StringBuilder = StringBuilder.make()
                 append_cstr(ref div_key, "__divergent_" to cstr)
                 append_str(ref div_key, var_name)
@@ -16312,7 +16455,14 @@ struct LLVMCodegen:
             let d as ptr[Node] = get_node_decl(decls_ptr, d_i2)
             if d != None to ptr[Node] and (node_kind(d) == NodeType.VarDecl or node_kind(d) == NodeType.FieldDecl):
                 let f_sem_t as String = self.compute_sem_type_name(node_inferred_type(d), d)
-                if f_sem_t.len > 0 to usize:
+                // Phase 5 slice 22: fixed [N x T] fields hold NO heap —
+                // the List drop glue would read array items as a pointer
+                // and free them. Skip the drop for fixed-list fields.
+                let f_inf22 as ptr[Type] = node_inferred_type(d)
+                var f_fixed22 as bool = False
+                if f_inf22 != None to ptr[Type] and (deref f_inf22).kind == TypeKind.List and (deref f_inf22).fixed_len > 0 to i64:
+                    f_fixed22 = True
+                if f_sem_t.len > 0 to usize and not f_fixed22:
                     let f_st_c as cstr = f_sem_t.data to cstr
                     let f_nm as String = node_name(d)
                     var f_idx as i32 = 0 to i32
