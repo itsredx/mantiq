@@ -1,0 +1,6 @@
+from std.collections import List
+fn main() -> i32:
+    var xs as List[i64] = List[i64]()
+    xs.append(5 to i64)
+    print(xs.length())
+    return 0

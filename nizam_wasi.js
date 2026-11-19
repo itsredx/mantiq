@@ -54,9 +54,17 @@ if (typeof wasi.getImportObject === "function") {
 }
 importObject.env = importObject.env || {};
 importObject.env.host_system = (cmdPtr) => {
+  // wasm i32 parameters arrive in JS as SIGNED numbers; pointers above
+  // 2GB (the compiler's linear memory routinely exceeds that) must be
+  // normalized to unsigned before indexing the memory buffer.
+  cmdPtr = cmdPtr >>> 0;
   const mem = new Uint8Array(instance.exports.memory.buffer);
   let end = cmdPtr;
-  while (mem[end] !== 0) end++;
+  while (end < mem.length && mem[end] !== 0) end++;
+  if (end >= mem.length) {
+    console.error("[host_system] command pointer out of bounds: ptr=" + cmdPtr + " memlen=" + mem.length);
+    return 1;
+  }
   const cmd = new TextDecoder().decode(mem.subarray(cmdPtr, end));
   try {
     execSync(cmd, { stdio: "inherit" });

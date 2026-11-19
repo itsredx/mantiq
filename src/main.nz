@@ -7,7 +7,7 @@ from std.string import String, StringBuilder
 // system_ref takes ptr[String] with named locals; it returns the ALREADY
 // DECODED exit status (raw wait status had been leaking into returns until
 // now).  mkdir()/access() stay fn-scoped raw externs until std.fs exists.
-from std.sys import now_monotonic_ns, pid, system_ref
+from std.sys import now_monotonic_ns, pid, pointer_size, system_ref
 
 import borrowck
 from borrowck import BorrowChecker
@@ -53,12 +53,12 @@ fn mantiq_free(ptr_val as ptr):
 
 
 fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
-    extern fn malloc(sz as i64) as ptr
+    extern fn malloc(sz as usize) as ptr
     extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
     extern fn malloc_usable_size(p as ptr) as usize
     if new_sz < 0 to i64 or new_sz > 500000000 to i64:
         return None to ptr
-    let out as ptr = malloc(new_sz)
+    let out as ptr = malloc(new_sz to usize)
     if out == None to ptr:
         return None to ptr
     if old_ptr != None to ptr:
@@ -169,8 +169,8 @@ fn mantiq_mkdir_p(dir_path as cstr) as i32:
 fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
     extern fn open(path as cstr, flags as i32, mode as i32) as i32
     extern fn close(fd as i32) as i32
-    extern fn read(fd as i32, buf as ptr, count as usize) as i64
-    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn read(fd as i32, buf as ptr, count as usize) as isize
+    extern fn write(fd as i32, buf as ptr, count as usize) as isize
     extern fn strlen(s as cstr) as usize
     extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
     if src_path == None to cstr or dst_path == None to cstr:
@@ -199,18 +199,18 @@ fn mantiq_copy_file(src_path as cstr, dst_path as cstr) as i32:
     // Leak-mode: 64KB copy buffer intentionally not freed.
     let buf as ptr[u8] = malloc(65536 to usize) to ptr[u8]
     var ok as i32 = 1 to i32
-    var n as i64 = read(src_fd, buf to ptr, 65536 to usize)
+    var n as i64 = read(src_fd, buf to ptr, 65536 to usize) to i64
     while n > 0 to i64:
         var written as i64 = 0 to i64
         while written < n:
-            let w as i64 = write(dst_fd, (buf to usize + written to usize) to ptr, (n - written) to usize)
+            let w as i64 = write(dst_fd, (buf to usize + written to usize) to ptr, (n - written) to usize) to i64
             if w <= 0 to i64:
                 ok = 0 to i32
             written = written + w
         if ok == 0 to i32:
             n = 0 to i64
         else:
-            n = read(src_fd, buf to ptr, 65536 to usize)
+            n = read(src_fd, buf to ptr, 65536 to usize) to i64
     let _c2 as i32 = close(src_fd)
     let _c3 as i32 = close(dst_fd)
     if ok == 0 to i32:
@@ -1051,7 +1051,11 @@ fn compile_source(
             // borrowck auto-drops this local at scope exit, which would free
             // the buffer the List still owns (next-iteration strcmp UAF).
             let lt_name as String = String.make(((deref sema).link_targets[lti]).data to cstr)
-            if strcmp(lt_name.data to cstr, "m" to cstr) != 0:
+            // wasm32: the native libtree-sitter-mantiq.so/.a are foreign
+            // objects (wasm-ld: "unknown file type"); the wasm32 archive
+            // is passed explicitly in the wasm link line below.
+            let is_ts_wasm as bool = target.is_wasm() and strcmp(lt_name.data to cstr, "tree-sitter-mantiq" to cstr) == 0 to i32
+            if strcmp(lt_name.data to cstr, "m" to cstr) != 0 and not is_ts_wasm:
                 extra_flags.append(" -l" to cstr)
                 extra_flags.append(lt_name.data to cstr)
                 if strcmp(lt_name.data to cstr, "python3.12" to cstr) == 0:
@@ -1109,12 +1113,16 @@ fn compile_source(
             else:
                 let ts_a_path as StringBuilder = StringBuilder.make()
                 ts_a_path.append(lib_dir)
-                ts_a_path.append("/libtree-sitter-mantiq.a" to cstr)
+                ts_a_path.append("/libtree-sitter-mantiq.wasm32.a" to cstr)
                 let ts_a_str as String = ts_a_path.to_string()
                 let has_ts_a as bool = access(ts_a_str.data to cstr, 0 to i32) == 0 to i32
                 ts_a_path.deinit()
                 if has_ts_a:
-                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" \"%s/libtree-sitter-mantiq.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, lib_dir, out_file, extra_flags_c)
+                    // wasm32 tree-sitter archive (runtime + grammar + helper,
+                    // all compiled -target wasm32-wasi). Preferred over the
+                    // native libtree-sitter-mantiq.a, whose members wasm-ld
+                    // can only skip with warnings.
+                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" \"%s/libtree-sitter-mantiq.wasm32.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, lib_dir, out_file, extra_flags_c)
                 else:
                     _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, out_file, extra_flags_c)
         elif target.is_python_ext():
@@ -1466,7 +1474,7 @@ fn __fmt_collect_src(path as cstr, out as ptr[cstr], count as ptr[i64], cap as i
             if nb != 46 to u8:
                 let pl as usize = strlen(path)
                 let nl as usize = strlen(name)
-                let cp as ptr[u8] = malloc((pl + nl + 2 to usize) to i64) to ptr[u8]
+                let cp as ptr[u8] = malloc(pl + nl + 2 to usize) to ptr[u8]
                 memcpy(cp to ptr, path to ptr, pl)
                 deref ((cp to usize + pl) to ptr[u8]) = 47 to u8
                 memcpy((cp to usize + pl + 1 to usize) to ptr, name to ptr, nl)
@@ -1508,14 +1516,14 @@ fn __fmt_sort_paths(arr as ptr[cstr], count as i64):
 
 // read all of stdin (16 MB cap — codegen.nz-sized inputs must fit)
 fn __fmt_read_stdin() as cstr:
-    extern fn read(fd as i32, buf as ptr, count as usize) as i64
-    extern fn malloc(sz as i64) as ptr
+    extern fn read(fd as i32, buf as ptr, count as usize) as isize
+    extern fn malloc(sz as usize) as ptr
     let cap as i64 = 16777216 to i64
-    let buf as ptr[u8] = malloc(cap) to ptr[u8]
+    let buf as ptr[u8] = malloc(cap to usize) to ptr[u8]
     var off as i64 = 0 to i64
     var done as bool = False
     while not done:
-        let r as i64 = read(0, (buf to usize + (off to usize)) to ptr, (cap - off) to usize)
+        let r as i64 = read(0, (buf to usize + (off to usize)) to ptr, (cap - off) to usize) to i64
         if r <= 0 to i64:
             done = True
         else:
@@ -1601,8 +1609,8 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         var stdin_path as cstr = None to cstr
         var fmt_dirty as i32 = 0 to i32
         var fmt_missing as bool = False
-        extern fn malloc(sz as i64) as ptr
-        let paths as ptr[cstr] = malloc(8192 to i64 * 8 to i64) to ptr[cstr]
+        extern fn malloc(sz as usize) as ptr
+        let paths as ptr[cstr] = malloc((8192 to usize) * (8 to usize)) to ptr[cstr]
         var pcount as i64 = 0 to i64
         let pcap as i64 = 8192 to i64
         var fmt_i as i32 = 2 to i32
@@ -1748,6 +1756,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         var out_path as cstr = "a.out" to cstr
         var out_specified as bool = False
         var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
+        // host-default target: on a 32-bit host (WASI) the x86_64 default
+        // produces unusable 64-bit IR; default to wasm32-wasi there.
+        // An explicit --target still overrides.
+        if pointer_size() == 4 to usize:
+            target_triple = "wasm32-wasi" to cstr
         var target_specified as bool = False
         var is_debug as bool = False
         var use_cache as bool = True
@@ -1809,6 +1822,11 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
             return 1 to i32
         let input_path as cstr = get_arg(argv, 2 to i32)
         var target_triple as cstr = "x86_64-unknown-linux-gnu" to cstr
+        // host-default target: on a 32-bit host (WASI) the x86_64 default
+        // produces unusable 64-bit IR; default to wasm32-wasi there.
+        // An explicit --target still overrides.
+        if pointer_size() == 4 to usize:
+            target_triple = "wasm32-wasi" to cstr
         var is_debug as bool = False
         var use_cache as bool = True
         var cache_dir as cstr = ".mantiq_cache" to cstr

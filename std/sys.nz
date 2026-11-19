@@ -865,11 +865,20 @@ struct Command:
 // the same literal-materialization reason as the env API (callers bind
 // the command to a named local first).
 fn system_ref(command as ptr[String]) as i32:
-    let prog as String = String.make("/bin/sh" to cstr)
-    let dash_c as String = String.make("-c" to cstr)
+    // Single-string shell execution via libc system() — NOT the
+    // fork/execvp machinery. Under WASI, runtime.c bridges system() to the
+    // env.host_system host import (nizam_wasi.js execSync), so the wasm
+    // compiler can still run its native link step; fork/exec/pipe do not
+    // exist in a wasm sandbox. Native semantics are unchanged
+    // (system() = sh -c, wait status decoded below).
+    extern fn system(cmd as cstr) as i32
     let cmd_s as String = deref command
-    var c as Command = Command.new_ref(ref prog)
-    let _b1 as ptr[Command] = c.add_arg(ref dash_c)
-    let _b2 as ptr[Command] = c.add_arg(ref cmd_s)
-    let r as SpawnResult = spawn_and_wait(ref c, False)
-    return r.status
+    let raw as i32 = system(cmd_s.data to cstr)
+    if raw < 0 to i32:
+        return 0 - sys_err_unknown()
+    // same decode as spawn_and_wait: low 7 bits = signal (0 = clean
+    // exit), exit code = status / 256.
+    let sig as i32 = raw % (256 to i32)
+    if sig == 0 to i32:
+        return raw / (256 to i32)
+    return (128 to i32) +sig

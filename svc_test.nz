@@ -1,0 +1,33 @@
+// wasm32 compare-type regression probe: calls named length/len/strlen/ftell
+// must take their operand type from the callee's DECLARED return type
+// (std length() -> i64), not from the target's usize. On wasm32 the old
+// heuristic typed these operands i32 and emitted `icmp sgt i32` over an
+// i64 value -> llc type error. Expected rc=0 when run natively; wasm32
+// build must succeed with no LLVM type-mismatch errors.
+import std.collections
+import std.mem
+from std.collections import List, Set
+
+fn main() as i32:
+    let xs as List[i64, 3] = [1, 2, 3]
+    if xs.length() != 3 to i64:
+        return 1 to i32
+    if xs.length() < 2:
+        return 2 to i32
+    let n as i64 = xs.length()
+    if n != 3 to i64:
+        return 3 to i32
+    var s as Set[i64] = Set[i64]()
+    s.init()
+    s.add(1 to i64)
+    s.add(2 to i64)
+    if s.length() != 2 to i64:
+        return 4 to i32
+    var t as Set[i64] = Set[i64]()
+    t.init()
+    t.add(1 to i64)
+    if not t.issubset(ref s):
+        return 5 to i32
+    if s.length() > 1:
+        return 0 to i32
+    return 6 to i32

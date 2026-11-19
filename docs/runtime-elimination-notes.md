@@ -3217,3 +3217,374 @@ the `{ ptr, i64, i64 }` handle. The two are DIFFERENT types.
 - Fixed-list `==` shares the aggregate-compare gap with structs.
 - `List[T, 0]` degenerates to the dynamic repr (N = 0 = dynamic
   sentinel).
+
+## Fix — wasm32 end-to-end: glue, widths, and the __main_void GC trap
+
+### F1. why every wasm binary was a ~3KB stub
+
+The wasm link "succeeded" but produced only `_start`: zig's crt1
+resolves `main` ONLY through `__main_void`, and when compiling `.c`
+for wasi clang auto-synthesizes a `__main_void` wrapper — but NOT for
+`.ll` input. Without one, zig libc's weak-undefined `main` reference
+won, resolved to the `undefined_weak:main` unreachable stub, and
+wasm-ld GC-dropped the entire program (all undefined symbols vanished
+with it, which is why the link never complained). Reproduced
+standalone: a hand-patched .ll defining `__main_void` exits 42, the
+same .ll without it traps.
+
+Fix: `emit_rt_glue_bodies` historically returned early for
+`pointer_size != 8` — the whole runtime glue (mantiq_malloc family,
+drop glue, page glue) was 64-bit-only AND the `__main_void` wrapper
+was unreachable on wasm32. The 32-bit path now hands off to a new
+`emit_rt_glue_bodies_32` (32-bit-safe bodies; see F3).
+
+### F2. the 64-bit libc signature mismatch (was masked by F1)
+
+Once program code survived linking, the next failure was ABI:
+our .ll declares libc with 64-bit signatures (calloc(i64,i64),
+memset(ptr,i32,i64), memcmp(ptr,ptr,i64)…), while zig's wasi-libc is
+32-bit. wasm-ld only warns on the mismatch, then the module fails
+validation at instantiate ("unreachable"). Three fixes:
+
+- std/collections.nz: memory externs (`memcmp/memcpy/memmove/memset/
+  calloc`) switched from `n as i64` to `n as usize` (target-width:
+  i64 native, i32 wasm32), and every call site's size argument now
+  carries an explicit `to usize` cast — codegen's declare emission
+  follows the declared types, so the module's declares and calls are
+  uniformly wasi-width on wasm32 and byte-identical on native.
+- std/mem.nz: `PageAllocator.resize` and `arena_resize_fn` gained a
+  local `extern fn memcpy` (the pattern `heap_resize_fn` already
+  used). Without it the FIRST memcpy call in the unit hit the
+  unknown-callee fallback (`declare ptr @memcpy(...)`, variadic), and
+  declare dedup kept the variadic form forever — a variadic canonical
+  signature makes every 3-arg call a validation error.
+- codegen.nz declare blocks that hardcode `memcpy(ptr, ptr, i64)` /
+  `memset(ptr, i32, i64)` / `memcmp(ptr, ptr, i64)` are emitted
+  width-aware where the 32-bit path can reach them (strlen already
+  was, via `pointer_size == 4`).
+
+### F3. emit_rt_glue_bodies_32 (wasm32 glue tier)
+
+- mantiq_malloc: bounds check → `trunc i64 %sz to i32` → wasi-libc
+  malloc → memset zero. It must NOT call calloc: our native declare
+  says calloc(i64,i64) while wasi-libc's is (i32,i32).
+- mantiq_malloc_raw / mantiq_realloc: same trunc pattern over
+  malloc/realloc.
+- mantiq_free: `ret void` (native parity — LEAK-MODE semantics).
+- drop glue (String/StringBuilder/Dict/List_flat): load ptr, free,
+  store null — no gep zeroing of 64-bit-wide len/cap fields (wasm32
+  field offsets/widths differ, and the slot is dead after drop).
+- mantiq_page_alloc / page_free: 64-bit shape with i32-truncated
+  sizes; mmap/munmap declare (ptr,i32,i32,i32,i32,i64) matches
+  wasi-libc; MAP_FAILED compared as `inttoptr (i32 -1 to ptr)`.
+- __main_void wrapper (hidden, calls @main) — the F1 fix; emitted
+  only for wasm targets outside no_libc (freestanding emits its own
+  _start).
+
+### F4. verified
+
+- svc_test.nz (List/Dict/String/Set/Bytes heavy probe, ~640KB IR):
+  native rc=0; wasm32 IR + glue links clean under zig cc
+  (wasi-libc + runtime.c + libtree-sitter-mantiq.a), runs under node
+  WASI with exit 0; `main` patched to `ret i32 7` proves the
+  __main_void → main binding (exit 7).
+- Width audit of the final wasm .ll: every libc call site and declare
+  matches wasi-libc signatures (memcpy/memmove/memset/memcmp all
+  (ptr,…,i32), malloc(i32), realloc(ptr,i32), mmap/munmap wasi form).
+- Native ladder unaffected: same std sources compile natively with
+  usize = i64 (the added casts are no-ops).
+
+### F5. remaining wasm32 debt (deferred)
+
+- Other libc surface with i64 sizes on wasm32 (fread/fwrite/snprintf
+  declares hardcode i64) — safe until a program actually calls them.
+- `--export=__main_void` alternative rejected: it keeps __main_void
+  but not @main; the wrapper in IR is the durable fix.
+- runtime_wasm.o in compiler-service/mantiq is stale (pre-Milestone-C
+  strong `__mantiq_dict_*` + public mantiq_malloc) → duplicate-symbol
+  errors if linked; the live path uses runtime.c + the new glue.
+
+### F6. stage3 width sweep (compiler compiling itself on wasm32)
+
+Building the compiler's own `src/main.nz` for wasm32 exposed a second
+layer of hardcoded 64-bit widths past the user-program surface:
+
+- snprintf prototype in codegen.nz (~8585): `i64` size arg → width-
+  aware (wasi-libc snprintf is `(ptr, i64-as-i32, ptr, ...)`; the
+  declare now follows `pointer_size`).
+- read/write externs in src/main.nz (mantiq_copy_file,
+  __fmt_read_stdin) and std/mem.nz (5 receivers): return type `i64`
+  → `isize` (wasi ssize_t = i32), call sites cast to `i64` where the
+  program logic wants the wide value.
+- Binary-op ptrtoint (both `__cg_name_defined_in` sites in codegen.nz
+  ~6406–6424): pointer→int comparison now emits
+  `ptrtoint ptr → self.llvm_size_type()` instead of hardcoded i64.
+- Deref-of-BinaryExpr inttoptr (codegen.nz ~13303): the reverse
+  direction uses the same `llvm_size_type()`; previously every
+  `deref` of an integer-derived pointer emitted `inttoptr i64`,
+  152 sites in the stage3 pre-fix IR alone.
+- Duplicate `mantiq_page_alloc` definition (stage3, `:336877`): the
+  32-bit glue emitter's `rt_body_missing` needle pinned the param
+  width (`...page_alloc(i64`), but on wasm32 the compiler's own
+  Nizam definition (`src/main.nz`, `req_size as usize`) compiles to
+  an `i32` param, so the needle missed and glue emitted a second
+  body. Needle relaxed to `...page_alloc(` — safe because glue runs
+  at assembly end, after every Nizam definition is already in the
+  streams; the compiled (width-correct) definition now wins, same
+  "user definition beats glue" rule the 64-bit tier follows.
+- Missing 32-bit `__nizam_drop_List` body: the wasm declare branch
+  says `(ptr, i32, ptr)` but only the 64-bit emitter had a body —
+  stage3's IR carried the declare plus i64-typed calls, which LLVM
+  tolerates at IR level but is a wasm module-validation failure
+  (call instruction type ≠ function type). Added the 32-bit body
+  (elem_size i32, slot = String-slot shape `{ ptr, i32, i32 }`, len
+  at gep 4 as i32, no len/cap zeroing) and made the 4 drop_List
+  call sites emit `llvm_size_type()` instead of hardcoded `i64`
+  (the elem_size VALUES were already width-aware: 12 vs 24).
+- Link path (src/main.nz): the wasm32 link line passed
+  `-ltree-sitter-mantiq` (from sema link_targets), which resolves
+  against `-L.` to the NATIVE `.so` — wasm-ld: "unknown file type".
+  Also the explicit `libtree-sitter-mantiq.a` contains native
+  objects (members skipped with warnings). Fixes: tree-sitter is
+  filtered from extra_flags on wasm targets, and the wasm32 link
+  prefers `libtree-sitter-mantiq.wasm32.a` — runtime (tree-sitter
+  0.26.7 lib.c) + grammar parser.c/scanner.c + tree_sitter_helper.c,
+  all compiled `-target wasm32-wasi`, in mantiq/ next to the native
+  archive. Build recipe (archives are gitignored, `*.a`):
+
+      for src in tree-sitter/lib/src/lib.c \
+                 tree-sitter-mantiq/src/parser.c \
+                 tree-sitter-mantiq/src/scanner.c \
+                 tree_sitter_helper.c; do
+          zig cc -Oz -target wasm32-wasi -I tree-sitter/lib/include \
+              -I tree-sitter/lib/src -c "$src" -o "${src%.c}.wasm32.o"
+      done
+      ar rcs libtree-sitter-mantiq.wasm32.a *.wasm32.o
+      rm -f *.wasm32.o
+- runtime.c WASI shims: wasi-libc now ships getpid.o, and runtime.o
+  is linked explicitly (not archive-pulled) — its getpid definition
+  collided with wasi-libc's as soon as the program referenced
+  getpid. getpid dropped from the `__wasi__` shim block (wasi-libc's
+  is used). pipe/fork/dup2/execvp/waitpid (spawn surface; wasi-libc
+  ships none) added as failing stubs instead of undefined symbols.
+- 32-bit `__nizam_list_str_at`: declare (idx as i64) but 64-bit-glue
+  body only → undefined at link. 32-bit body added: signature keeps
+  i64 idx (symbols.nz declares it), slot len read as i32 at gep 4
+  (String-slot shape), gep-by-i64-index valid on wasm32.
+
+Audit method: compiled the pre-fix compiler to wasm32 .ll and
+classified all 152 `inttoptr i64` + 2 `ptrtoint i64` sites — all
+flow through exactly these two codegen fixes. `inttoptr i64
+zeroinitializer` is valid IR on wasm32 and left alone.
+
+### F7. size_t width sweep, part 2: calloc / malloc / memcpy
+
+The first self-hosted wasm build still aborted inside `mantiq_malloc`
+with a 14-byte request (`MALLOC_NULL 14`). The remaining width bugs
+were in the allocator API itself:
+
+- std/mem.nz: `calloc`/`malloc` externs were declared
+  `(nmemb as i64, count as i64)` / `(req_size as i64)`. wasi-libc's
+  `size_t` is 32-bit, so wasm-ld only *warns* about the signature
+  mismatch and the callee reads garbage sizes — calloc then fails
+  and mantiq_malloc aborts. Declared `usize` (i64 native, i32
+  wasm32) with explicit `to usize` at the call sites.
+- src/main.nz: the four `malloc` externs in the runtime support
+  functions (`mantiq_ast_alloc`, `mantiq_intern_string`,
+  `mantiq_page_alloc`'s neighbours, string copying) — same `i64` →
+  `usize` fix.
+- src/fmt.nz: TU-local `memcpy` extern `n as i64` → `usize`.
+- std/mem.nz: `write` externs `as i64` → `isize` (wasi `ssize_t`
+  is i32); call sites that need the wide value cast explicitly.
+
+Verified on a fresh stage3 `.ll`: zero `calloc`/`malloc` declares
+with i64 sizes, and zero wasm-ld signature-mismatch warnings.
+
+### F8. WASI bump allocator: the stage3 → stage4 4GB ceiling
+
+With F7 in, stage3 built and ran, but compiling `src/main.nz` *with*
+stage3 (the stage4 bootstrap) aborted after ~5 minutes with
+`MALLOC_NULL 14` again. Instrumented IR showed the failure at
+`pages=65536` — the full 4GB wasm32 ceiling — while cumulative
+allocation traffic was only ~1.8GB (mantiq_malloc 283MB, direct
+malloc 387MB, calloc 1161MB, realloc 0).
+
+Root cause: wasi-libc's dlmalloc extends linear memory in fixed
+~513-page (~32MB) chunks. A micro-probe (20k × 4KB calloc = 80MB of
+traffic) reproduced it: 5 grows = 160MB of linear memory for 80MB of
+traffic, i.e. ~2x waste; the per-grow remainder is unusable until the
+next extension. `mallopt` does not exist in wasi-libc (link test:
+`undefined symbol: mallopt`), so the extension granularity cannot be
+retuned.
+
+Fix: runtime.c overrides `malloc`/`calloc`/`free`/`realloc`/
+`malloc_usable_size` under `__wasi__` with a monotonic bump
+allocator from `__heap_base`:
+
+- 16-byte header stores the requested size; payloads 16-byte aligned.
+- growth in 8MB steps, with an exact-fit retry when the ceiling is
+  reached (so a large request at the boundary can still succeed).
+- `calloc` performs no memset: linear memory is zero-filled on grow
+  and the bump never reuses a block.
+- `free` is a no-op, matching the compiler's existing leak-mode
+  design (`mantiq_free` is a deliberate no-op: by-value List/String
+  copies alias node-owned buffers, so freeing would reintroduce the
+  shallow-copy UAF family).
+
+Probe after the change: 80MB of traffic → 3 grows (~1.2x). The
+override applies to every wasm32-linked program, not just the
+compiler; batch/playground processes are short-lived, but a
+long-running wasm service would need a real allocator.
+
+### F9. `system()` bridge and process-control stubs on WASI
+
+The compiler shells out for the wasm link step (`zig cc`), which a
+wasm sandbox cannot do through fork/exec. `std.sys system_ref` now
+calls libc `system()` directly (it previously built a `Command`
+with `/bin/sh -c`), and runtime.c bridges `system()` to the
+`env.host_system` host import. `nizam_wasi.js` implements that
+import with `execSync`, so the in-wasm compiler can still run its
+native link step.
+
+Two details:
+
+- `host_system` returns a plain exit status; runtime.c encodes it as
+  a POSIX wait status (`status << 8`) so std.sys's shared decode
+  (`sig = raw % 256`, `code = raw / 256`) works for both the native
+  fork/exec path and the WASI bridge.
+- `pipe`/`fork`/`dup2`/`execvp`/`waitpid` are exported as failing
+  stubs (WASI ships none of them and the compiler's spawn machinery
+  references them). They behave like ENOSYS rather than becoming
+  undefined symbols at link.
+
+Also in runtime.c for WASI: the weak `mantiq_page_alloc`/
+`mantiq_page_free` shims are excluded (`#if !defined(__wasi__)`) —
+they carry i64 sizes and collided with the width-correct i32
+definitions in the program's IR; and `getpid` is no longer defined
+here because wasi-libc ships its own `getpid.o` and runtime.o is
+linked explicitly (not archive-pulled), so the definition collided
+as soon as a program referenced `getpid`.
+
+### F10. the stage4 spin: dict fat-slot width in remove/pop/setdefault/update
+
+With F7 and F8 in, stage3 built and ran, but compiling `src/main.nz`
+with stage3 (the stage4 bootstrap) never finished: 90+ minutes at
+~93% CPU, RSS pinned at exactly 3,264,192 KB, zero syscalls, no
+allocations. A Node inspector CPU profile showed 100% of samples in
+a single wasm function, and `Debugger.pause` gave the stack:
+
+    __mantiq_dict_get_or_insert
+    BorrowChecker_pop_scope
+    BorrowChecker_walk_ast  (x3)
+    compile_source
+
+The dict probe loop was spinning with no inserts and no resizes,
+which requires `occupied` to be full while `count < capacity/2` —
+i.e. a corrupted dict.
+
+Root cause: the `dict.remove` / `dict.pop` / `dict.setdefault` /
+`dict.update` lowering in codegen.nz hardcoded the 64-bit fat Dict
+slot `{ ptr, i64, i64 }` and the 64-bit `MDictRaw.count` offset:
+
+- fat slot field 1 (len) was stored as `store i64` at byte offset 8.
+  On wasm32 the slot is `{ ptr, i32, i32 }` (12 bytes: len@4,
+  cap@8), so the i64 store wrote the low word over `len` and the
+  high word over `cap` — i.e. it decremented `cap`, not `len`.
+- after ~8 removals `cap` underflowed, and the next store wrote
+  into the field after the fat slot. In BorrowChecker the fields
+  are `errors, current_file, symbol_states, auto_drops, scopes, …`,
+  so `symbol_states.remove(...)` in `pop_scope` corrupted the
+  adjacent `auto_drops` dict handle. `pop_scope` then does
+  `auto_drops[node] = drops`, calls `get_or_insert` on the garbage
+  handle, and probes forever.
+- the `getelementptr i8, ptr %handle, i64 36` count reads were the
+  same class of bug: `MDictRaw.count` is at 36 on 64-bit (4 pointers
+  + capacity) but at 20 on wasm32 (4 x i32 + capacity), so the
+  `setdefault`/`update`/dict-literal length updates read `val_size`.
+
+Fix: all four fat-slot GEPs and all three count offsets are now
+gated on `target.pointer_size`:
+
+- wasm32 emits `getelementptr { ptr, i32, i32 } … i32 0, i32 1`
+  plus `load i32` / `sub i32` / `select i1 … i32` / `store i32`;
+  64-bit keeps the i64 forms unchanged.
+- wasm32 emits `i64 20` for the count field; 64-bit keeps `i64 36`.
+- `__mantiq_nz_dict_resize` now clamps the new capacity to the
+  8-slot minimum, so a zero-initialized dict (capacity 0, null
+  buffers) cannot produce a zero-capacity table with mask -1.
+
+Verified:
+
+- a dedicated `dict_test.nz` probe exercising set/setdefault/update/
+  pop/remove with String keys builds for wasm32 and runs rc=0;
+- its `.ll` contains zero `{ ptr, i64, i64 }` GEPs and zero
+  `i64 36` offsets, and the expected `{ ptr, i32, i32 }` + `i64 20`
+  forms;
+- native `svc_test.nz` still builds and runs rc=0 (64-bit path
+  unchanged).
+
+### F11. stage4 completion: allocator header compaction + JS i32
+sign fix
+
+With F10 in, the in-wasm stage4 bootstrap got past the dict
+corruption but hit two more failures, each caught with temporary
+instrumentation (all since removed):
+
+**a. bump-allocator overhead blew the 4GB ceiling.** The full
+compile now emitted its 12.3MB `.ll`, but malloc-NULL hit near the
+end. Instrumented `nz_bump_alloc` counted 43,585,176 allocations /
+4.27GB of traffic before the failed 17.7MB StringBuilder growth —
+vs a 3.35GB native glibc peak. The ~900MB gap was pure per-object
+overhead: F8's 16-byte header + 16-byte rounding costs ~1GB of
+slack across 44M objects. Since the compiler runs in leak-mode
+(`mantiq_free` is a no-op, F8), total traffic must fit under the
+4GB wasm32 ceiling by itself.
+
+Fix: the bump header shrank to a 4-byte size field with 4-byte
+payload alignment (`need = align4(n) + 4`), the growth check is
+overflow-safe (`nz_bump_next > nz_bump_end ||
+need > nz_bump_end - nz_bump_next`), and `realloc`/
+`malloc_usable_size` read the 4-byte header. wasm has no alignment
+faults, so 4-byte-aligned i64/f64 loads are safe. Result: the full
+12,312,232-byte `.ll` writes with no OOM, peak RSS 3.36GB.
+
+**b. `host_system` received a negative pointer.** After (a) the
+link step ran but failed with an empty command. The `[DBG]` probes
+showed `cmd_buf` valid (`sp=235`, first byte 'z') and `String.make`
+producing `data=0xd062d174 len=235`, yet the runner saw
+`ptr=-798830220` — the same bits, because **wasm i32 parameters
+arrive in JS as signed numbers** and the compiler's linear memory
+routinely exceeds 2GB. `mem[negative]` is `undefined`, so the
+command scan walked garbage.
+
+Fix: `nizam_wasi.js` normalizes the pointer with `cmdPtr >>> 0`
+before indexing (plus a bounds-checked scan that returns 1 instead
+of dereferencing past memory end).
+
+**c. undeclared externs got a multivalue struct return.** Found in
+service E2E: a program calling `printf` without an `extern fn`
+declaration (no std import) produced a wasm module that fails
+validation ("expected 1 elements on the stack for fallthru, found
+3"). Sema infers the call as the Any fallback, and emit_call_expr
+emitted `declare { ptr, ptr } @printf(...)` — a multivalue struct
+return that is legal IR on x86 (lowers to registers, so native
+worked by accident) but breaks the wasm ABI, where each call site
+encodes its own signature. The name-based ret-type fixups (printf
+-> i32, strlen -> ptr-int, ...) only ran when the fallback type was
+"ptr", so they never fired for the Any fallback. The fixup entry
+now also accepts the Any fallback when the callee is not function/
+closure-typed (those legitimately return structs).
+
+**Verified end-to-end** (node v20.19.6, WASI runner flags
+`--no-incremental-marking --stack-size=16384 --max-old-space-size=384`):
+
+- stage3 wasm (built from the cleaned, debug-free source) compiles
+  `src/main.nz` in-wasm and links it: stage4 wasm = 3,071,032
+  bytes in 50.54s, peak RSS 3.36GB;
+- the resulting stage4 wasm runs `version` (prints "Mantiq
+  Self-Hosting Compiler v0.1.0"), builds hello/dict/mini probes,
+  and the built probes execute with rc=0 — the compiler now
+  compiles itself under wasm32;
+- module import resolution stays source-directory-relative: probes
+  importing std must live in (or import from) the mantiq tree, not
+  an arbitrary directory.

@@ -206,14 +206,19 @@ __attribute__((weak)) long long mantiq_free_count(void) { return _free_count; }
 
 // Memory Management for Closures and Objects
 // ── Virtual Page Allocation (POSIX mmap / Windows VirtualAlloc) ───────
+// NOT built for WASI: these weak shims carry int64_t sizes, while the
+// wasm32 surface (std/mem.nz externs, codegen glue) is usize-wide
+// (i32). runtime.o is linked explicitly, so an i64 definition here
+// collides with the module's strong i32 definition and triggers
+// wasm-ld signature-mismatch resolution. The glue tier owns these on
+// wasm32.
+#if !defined(__wasi__)
 __attribute__((weak)) void* mantiq_page_alloc(int64_t size) {
     if (size <= 0) return NULL;
     size_t page_sz = 4096;
     size_t aligned = ((size_t)size + page_sz - 1) & ~(page_sz - 1);
 #if defined(_WIN32)
     return VirtualAlloc(NULL, aligned, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#elif defined(__wasi__)
-    return calloc(1, aligned);
 #else
     void* ptr = mmap(NULL, aligned, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (ptr == MAP_FAILED) return NULL;
@@ -227,12 +232,11 @@ __attribute__((weak)) void mantiq_page_free(void* ptr, int64_t size) {
     size_t aligned = ((size_t)size + page_sz - 1) & ~(page_sz - 1);
 #if defined(_WIN32)
     VirtualFree(ptr, 0, MEM_RELEASE);
-#elif defined(__wasi__)
-    free(ptr);
 #else
     munmap(ptr, aligned);
 #endif
 }
+#endif /* !__wasi__ */
 
 // ── 32-Byte Slab Bump Allocator ───────────────────────────────────────
 #define MANTIQ_BOX32_SLAB_SIZE 65536
@@ -1246,15 +1250,130 @@ __attribute__((weak)) void mantiq_fs_close(int fd) {
 
 // ── WASI POSIX Shims ──────────────────────────────────────────────────
 #if defined(__wasi__)
-pid_t getpid(void) {
-    return 1;
+// ── Monotonic allocator for wasm32 ────────────────────────────────────
+// wasi-libc's dlmalloc extends the linear-memory heap in ~32MB chunks
+// (513 wasm pages per extension). Under the wasm32 4GB ceiling that waste
+// doubles the effective footprint, and it made the self-hosted compiler
+// abort with malloc-NULL while bootstrapping itself (stage3 -> stage4).
+// The compiler already runs in leak-mode (mantiq_free is a deliberate
+// no-op: by-value List/String copies alias node-owned buffers, so freeing
+// would reintroduce the shallow-copy UAF family), so a monotonic bump
+// allocator is a drop-in replacement: exact-size blocks, 4-byte aligned,
+// never reused. Linear memory is zero-filled on grow, so calloc needs no
+// memset either.
+extern unsigned char __heap_base;
+static uintptr_t nz_bump_next = 0;
+static uintptr_t nz_bump_end = 0;
+
+static void nz_bump_init(void) {
+    if (nz_bump_next == 0) {
+        nz_bump_next = ((uintptr_t)&__heap_base + 3u) & ~(uintptr_t)3u;
+        nz_bump_end = nz_bump_next;
+    }
 }
+
+static void* nz_bump_alloc(size_t n) {
+    nz_bump_init();
+    if (n > 0x7fffff00u) return 0;                 // overflow guard
+    // 4-byte size header, 4-byte payload alignment. The compiler allocates
+    // ~44M objects per self-build and never frees (leak-mode by design), so
+    // per-object overhead is what decides whether the 4GB wasm32 ceiling is
+    // reachable: 16-byte header + 16-byte rounding cost ~1GB of pure slack
+    // (native glibc peak is 3.35GB; wasm traffic was 4.27GB). wasm loads do
+    // not fault on 4-byte-aligned i64/f64 access, so 4-byte alignment is
+    // safe here.
+    size_t need = ((n + 3u) & ~(size_t)3u) + 4u;
+    if (nz_bump_next > nz_bump_end || need > nz_bump_end - nz_bump_next) {
+        size_t chunk = need + (8u << 20);          // 8MB growth steps
+        size_t pages = (chunk + 65535u) / 65536u;
+        if (__builtin_wasm_memory_grow(0, pages) == (size_t)-1) {
+            pages = (need + 65535u) / 65536u;      // last resort: exact fit
+            if (__builtin_wasm_memory_grow(0, pages) == (size_t)-1) return 0;
+        }
+        nz_bump_end = (uintptr_t)__builtin_wasm_memory_size(0) * 65536u;
+    }
+    uintptr_t hdr = nz_bump_next;
+    *(uint32_t*)hdr = (uint32_t)n;
+    nz_bump_next = hdr + need;
+    return (void*)(hdr + 4u);
+}
+
+void* malloc(size_t n) { return nz_bump_alloc(n); }
+
+void* calloc(size_t a, size_t b) {
+    if (a != 0 && b > (size_t)-1 / a) return 0;
+    return nz_bump_alloc(a * b);   // zeroed by construction, no memset
+}
+
+void free(void* p) { (void)p; }    // leak-mode by design (see above)
+
+void* realloc(void* p, size_t n) {
+    if (!p) return nz_bump_alloc(n);
+    size_t old = *(uint32_t*)((uintptr_t)p - 4u);
+    if (n <= old) return p;
+    void* q = nz_bump_alloc(n);
+    if (q) {
+        unsigned char* d = (unsigned char*)q;
+        const unsigned char* s = (const unsigned char*)p;
+        for (size_t i = 0; i < old; i++) d[i] = s[i];
+    }
+    return q;
+}
+
+size_t malloc_usable_size(void* p) {
+    return p ? *(uint32_t*)((uintptr_t)p - 4u) : 0;
+}
+#endif
+
+#if defined(__wasi__)
+// getpid is NOT defined here: wasi-libc ships its own getpid.o, and
+// runtime.o is linked explicitly (not archive-pulled), so a getpid
+// definition here collides with wasi-libc's as soon as the program
+// references getpid (duplicate symbol at link). wasi-libc's is used.
 
 __attribute__((__import_module__("env"), __import_name__("host_system")))
 extern int host_system(const char *command);
 
 int system(const char *command) {
-    return host_system(command);
+    // host_system returns a plain exit status (0 = ok). Encode it as a
+    // POSIX wait status (code << 8) so std.sys system_ref's shared decode
+    // (sig = raw % 256; code = raw / 256) works for both the native
+    // fork/exec path and this bridge.
+    int st = host_system(command);
+    return st < 0 ? st : (st << 8);
+}
+
+// Process-control surface: WASI has no fork/exec/pipe (the spawn
+// feature is unavailable in a wasm sandbox). wasi-libc ships none of
+// these, and the compiler's spawn machinery references them, so
+// export failing stubs (like a real ENOSYS) instead of undefined
+// symbols at link.
+int pipe(int fds[2]) {
+    (void)fds;
+    return -1;
+}
+
+pid_t fork(void) {
+    return -1;
+}
+
+int dup2(int oldfd, int newfd) {
+    (void)oldfd;
+    (void)newfd;
+    return -1;
+}
+
+int execvp(const char *file, char *const argv[]) {
+    (void)file;
+    (void)argv;
+    return -1;
+}
+
+pid_t waitpid(pid_t pid, int *status, int options) {
+    (void)pid;
+    (void)status;
+    (void)options;
+    return -1;
 }
 #endif
 

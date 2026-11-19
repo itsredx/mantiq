@@ -1424,7 +1424,8 @@ fn __fmt_mod_reorder(data as ptr[u8], lw as i64, ce as i64, out as ptr[StringBui
 
 
 fn fmt_transform(src as String, max_cols as i64) as String:
-    extern fn memcpy(dst as ptr, src_p as ptr, n as i64) as ptr
+    // width-aware: size_t is 32-bit on wasm32
+    extern fn memcpy(dst as ptr, src_p as ptr, n as usize) as ptr
     let data as ptr[u8] = (deref src).data
     if data == None to ptr[u8]:
         return src
@@ -1594,7 +1595,7 @@ fn fmt_transform(src as String, max_cols as i64) as String:
             let rdata as ptr[u8] = res.data
             let newlen as i64 = trim_to + 1 to i64
             let buf as ptr[u8] = make[u8](newlen + 1 to usize) to ptr[u8]
-            memcpy(buf to ptr, rdata to ptr, trim_to)
+            memcpy(buf to ptr, rdata to ptr, trim_to to usize)
             deref ((buf to usize + trim_to) to ptr[u8]) = 10 to u8
             deref ((buf to usize + newlen) to ptr[u8]) = 0 to u8
             let res2 as String = String.make(buf to cstr)

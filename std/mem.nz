@@ -108,6 +108,7 @@ struct PageAllocator:
         var copy_sz as usize = old_sz
         if new_sz < copy_sz:
             copy_sz = new_sz
+        extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
         memcpy(new_ptr to ptr, old_ptr to ptr, copy_sz)
         self.free(old_ptr, old_sz)
         return new_ptr
@@ -258,6 +259,7 @@ fn arena_resize_fn(
         var copy_sz as usize = old_sz
         if new_sz < copy_sz:
             copy_sz = new_sz
+        extern fn memcpy(dst as ptr, src as ptr, n as usize) as ptr
         memcpy(new_ptr to ptr, old_ptr to ptr, copy_sz)
     return new_ptr
 
@@ -416,22 +418,25 @@ fn get_default_allocator() as Allocator:
 // runtime until the interning machinery is ported (Milestone C).
 // mirrors C malloc-size validation + zeroing allocation
 fn mantiq_malloc(sz as i64) as ptr:
-    extern fn calloc(nmemb as i64, count as i64) as ptr
+    // width-aware: libc size_t is 32-bit on wasm32 — an i64-typed calloc
+    // call is ABI garbage there (wasm-ld warns, callee reads junk sizes,
+    // calloc fails -> mantiq_malloc abort). usize mirrors size_t on both.
+    extern fn calloc(nmemb as usize, count as usize) as ptr
     extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
     extern fn strlen(s as cstr) as usize
-    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn write(fd as i32, buf as ptr, count as usize) as isize
     extern fn abort()
     if sz < 0 to i64 or sz > 500000000 to i64:
         let msg as ptr[u8] = make[u8](64 to usize)
         sprintf(msg, "[Runtime] Invalid malloc size: %lld\n" to cstr, sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        let _ as isize = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
     let req_bytes as i64 = (if sz == 0 to i64: 1 to i64 else: sz)
-    let out as ptr = calloc(1 to i64, req_bytes)
+    let out as ptr = calloc(1 to usize, req_bytes to usize)
     if out == None to ptr:
         let msg as ptr[u8] = make[u8](96 to usize)
         sprintf(msg, "[Runtime] Fatal: memory allocation of %lld bytes failed\n" to cstr, sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        let _ as isize = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
     return out
 
@@ -440,20 +445,20 @@ fn mantiq_malloc(sz as i64) as ptr:
 fn mantiq_malloc_raw(sz as i64) as ptr:
     extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
     extern fn strlen(s as cstr) as usize
-    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn write(fd as i32, buf as ptr, count as usize) as isize
     extern fn abort()
     if sz < 0 to i64 or sz > 500000000 to i64:
         let msg as ptr[u8] = make[u8](64 to usize)
         sprintf(msg, "[Runtime] Invalid malloc size: %lld\n" to cstr, sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        let _ as isize = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
-    extern fn malloc(req_size as i64) as ptr
+    extern fn malloc(req_size as usize) as ptr
     let req_bytes as i64 = (if sz == 0 to i64: 1 to i64 else: sz)
-    let out as ptr = malloc(req_bytes)
+    let out as ptr = malloc(req_bytes to usize)
     if out == None to ptr:
         let msg as ptr[u8] = make[u8](96 to usize)
         sprintf(msg, "[Runtime] Fatal: memory allocation of %lld bytes failed\n" to cstr, sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        let _ as isize = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
     return out
 
@@ -479,12 +484,12 @@ fn mantiq_free(ptr_val as ptr):
 fn mantiq_realloc(old_ptr as ptr, new_sz as i64) as ptr:
     extern fn sprintf(buf as ptr[u8], format as cstr, ...) as i32
     extern fn strlen(s as cstr) as usize
-    extern fn write(fd as i32, buf as ptr, count as usize) as i64
+    extern fn write(fd as i32, buf as ptr, count as usize) as isize
     extern fn abort()
     if new_sz < 0 to i64 or new_sz > 500000000 to i64:
         let msg as ptr[u8] = make[u8](64 to usize)
         sprintf(msg, "[Runtime] Invalid realloc size: %lld\n" to cstr, new_sz)
-        let _ as i64 = write(2 to i32, msg to ptr, strlen(msg) to usize)
+        let _ as isize = write(2 to i32, msg to ptr, strlen(msg) to usize)
         abort()
     // LEAK-MODE realloc: never releases the old block. libc realloc frees
     // internally, which dangles every stale shallow List copy pointing at

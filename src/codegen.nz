@@ -405,7 +405,12 @@ fn __cg_filter_declares(text as String) as String:
                                     scur = newcur
             if keep == 1 to i32:
                 if llen > 0 to i64:
-                    (deref op2).append_slice((td to usize + line_start) to ptr[u8], llen)
+                    // add_len is usize (i32 on wasm32): the cast must be
+                    // explicit — an i64 var passed unconverted emitted an
+                    // i64 call against the (ptr, ptr, i32) definition,
+                    // which LLVM lowers to a trapping invalid-bitcast
+                    // thunk on wasm32.
+                    (deref op2).append_slice((td to usize + line_start) to ptr[u8], llen to usize)
                 if i < tleni:
                     append_cstr(ref out2, "\n")
             line_start = i + 1 to i64
@@ -1256,11 +1261,18 @@ fn cond_llvm_type(node as ptr[Node]) as String:
             elif strcmp(c_n, "node_kind" to cstr) == 0 or strcmp(c_n, "strcmp" to cstr) == 0 or strcmp(c_n, "strncmp" to cstr) == 0 or strcmp(c_n, "sprintf" to cstr) == 0 or strcmp(c_n, "fseek" to cstr) == 0 or strcmp(c_n, "fclose" to cstr) == 0:
                 t = String.make("i32" to cstr)
             elif strcmp(c_n, "strlen" to cstr) == 0 or strcmp(c_n, "length" to cstr) == 0 or strcmp(c_n, "len" to cstr) == 0 or strcmp(c_n, "ftell" to cstr) == 0:
-                extern fn nizam_get_target_ptr_size() as i32
-                if nizam_get_target_ptr_size() == 4 to i32:
-                    t = String.make("i32" to cstr)
+                // wasm32 fixup: declared-return-type rule — i64-returning
+                // length/len methods must not be forced to the pointer-int
+                // type on 32-bit targets; usize/isize callees keep it.
+                let cc_inf as ptr[Type] = node_inferred_type(node)
+                if cc_inf != None to ptr[Type] and ((deref cc_inf).kind == TypeKind.I64 or (deref cc_inf).kind == TypeKind.U64 or (deref cc_inf).kind == TypeKind.USize or (deref cc_inf).kind == TypeKind.ISize):
+                    t = type_to_llvm(cc_inf)
                 else:
-                    t = String.make("i64" to cstr)
+                    extern fn nizam_get_target_ptr_size() as i32
+                    if nizam_get_target_ptr_size() == 4 to i32:
+                        t = String.make("i32" to cstr)
+                    else:
+                        t = String.make("i64" to cstr)
     if strcmp(t.data to cstr, "{ ptr, ptr }" to cstr) == 0 or strcmp(t.data to cstr, "void" to cstr) == 0 or t.len == 0 to usize:
         t = String.make("i8" to cstr)
     return t
@@ -1282,6 +1294,13 @@ struct LLVMCodegen:
     public var var_slots as Dict[String, String]
     public var var_counts as Dict[String, i32]
     public var var_types as Dict[String, String]
+    // Emitted LLVM result type per BinaryExpr node address. The arith/cmp
+    // emitters unify operand widths at emission time (e.g. a std
+    // length() call sexts to i64 even when sema inferred USize), so
+    // consumers like emit_cast_expr must consult the EMITTED type, not
+    // node_inferred_type, or they re-cast an i64 register as i32
+    // (wasm32 "zext i32 %t to i64" type errors).
+    public var expr_types as Dict[usize, String]
     public var defined_functions as Dict[String, bool]
     public var program_functions as Dict[String, bool]
     // Structs declaring a zero-arg __init__ (self only). The zero-arg ctor
@@ -1336,6 +1355,7 @@ struct LLVMCodegen:
         (deref self).var_slots = Dict[String, String]()
         (deref self).var_counts = Dict[String, i32]()
         (deref self).var_types = Dict[String, String]()
+        (deref self).expr_types = Dict[usize, String]()
         (deref self).defined_functions = Dict[String, bool]()
         (deref self).program_functions = Dict[String, bool]()
         (deref self).zero_arg_inits = Dict[String, bool]()
@@ -2210,6 +2230,14 @@ struct LLVMCodegen:
     // dependency for this scope. Bodies mirror runtime.c exactly.
     public fn emit_rt_glue_bodies(self as ptr[LLVMCodegen], out as ptr[StringBuilder]):
         if (deref self).target.pointer_size != 8 to usize:
+            // wasm32 (any 32-bit target): the 64-bit glue bodies below do
+            // i64 pointer<->integer math (invalid IR when ptr is i32), so
+            // they hand off to the 32-bit-safe emitter instead of bailing
+            // with nothing — the old bare return left mantiq_malloc /
+            // mantiq_free / drop glue as declare-only on wasm32, which was
+            // masked for months by the GC-drop bug (all code vanished, so
+            // the undefined symbols vanished with it).
+            self.emit_rt_glue_bodies_32(out)
             return
         // Phase 5 freestanding tier (spec 0031): --no-libc builds get _start
         // (calls main, exits via the raw exit syscall) plus syscall glue.
@@ -2783,6 +2811,91 @@ struct LLVMCodegen:
             append_cstr(out, "declare ptr @memcpy(ptr, ptr, i64)\ndeclare i32 @sprintf(ptr, ptr, ...)\n\n")
             append_cstr(out, "@__nz_flt_zero = private unnamed_addr constant [13 x i8] c\"0.000000e+00\\00\"\n@__nz_flt_hex = private unnamed_addr constant [10 x i8] c\"0x%016llX\\00\"\n")
             append_cstr(out, "define void @format_llvm_float(double %val, i32 %is_f32, ptr %out_buf) {\nentry:\n  %z = fcmp oeq double %val, 0.000000e+00\n  br i1 %z, label %zero, label %bits\nzero:\n  %c0 = call ptr @memcpy(ptr %out_buf, ptr @__nz_flt_zero, i64 13)\n  ret void\nbits:\n  %is32 = icmp ne i32 %is_f32, 0\n  br i1 %is32, label %narrow, label %wide\nnarrow:\n  %f = fptrunc double %val to float\n  %d = fpext float %f to double\n  %u1 = bitcast double %d to i64\n  br label %emit\nwide:\n  %u2 = bitcast double %val to i64\n  br label %emit\nemit:\n  %u = phi i64 [ %u1, %narrow ], [ %u2, %wide ]\n  %c1 = call i32 (ptr, ...) @sprintf(ptr %out_buf, ptr @__nz_flt_hex, i64 %u)\n  ret void\n}\n\n")
+    // wasm32 tier of the runtime glue (see the pointer_size handoff in
+    // emit_rt_glue_bodies). 32-bit-safe bodies only: no ptrtoint /
+    // inttoptr over i64, and no gep zeroing of 64-bit-wide len/cap
+    // fields (their offsets and widths differ on wasm32, and the slot is
+    // dead after a drop anyway). Alloc glue truncates sizes to i32 and
+    // calls wasi-libc's malloc/realloc/memset directly (their wasi
+    // signatures are pointer-width); it must NOT route through calloc —
+    // our declares say calloc(i64, i64) on native, and wasi-libc's is
+    // (i32, i32), so glue calls its own malloc + zeroing memset instead.
+    // The page glue reuses the 64-bit shape with i32-truncated sizes
+    // (wasi-libc provides mmap/munmap). Ends with the __main_void
+    // wrapper: zig's crt1 references main ONLY through __main_void, and
+    // zig cc does not synthesize that wrapper for .ll inputs the way
+    // clang does for .c — without it the linker resolves __main_void to
+    // its weak-undefined stub and GC-drops the entire program (every
+    // wasm binary silently became a ~3KB stub).
+    public fn emit_rt_glue_bodies_32(self as ptr[LLVMCodegen], out as ptr[StringBuilder]):
+        if (deref self).no_libc:
+            // freestanding tier emits its own _start and syscall glue
+            return
+        let h_malloc as i32 = self.rt_body_missing("define ptr @mantiq_malloc(i64" to cstr)
+        let h_malloc_raw as i32 = self.rt_body_missing("define ptr @mantiq_malloc_raw(i64" to cstr)
+        let h_free as i32 = self.rt_body_missing("define void @mantiq_free(ptr" to cstr)
+        let h_realloc as i32 = self.rt_body_missing("define ptr @mantiq_realloc(ptr" to cstr)
+        let h_drop_str as i32 = self.rt_body_missing("define void @__nizam_drop_String(ptr" to cstr)
+        let h_drop_strb as i32 = self.rt_body_missing("define void @__nizam_drop_StringBuilder(ptr" to cstr)
+        let h_drop_dict as i32 = self.rt_body_missing("define void @__nizam_drop_Dict(ptr" to cstr)
+        let h_drop_lflat as i32 = self.rt_body_missing("define void @__nizam_drop_List_flat(ptr" to cstr)
+        let h_drop_list as i32 = self.rt_body_missing("define void @__nizam_drop_List(ptr, i32, ptr" to cstr)
+        let h_lstrat as i32 = self.rt_body_missing("define ptr @__nizam_list_str_at(ptr" to cstr)
+        let h_page_alloc as i32 = self.rt_body_missing("define ptr @mantiq_page_alloc(" to cstr)
+        let h_page_free as i32 = self.rt_body_missing("define void @mantiq_page_free(ptr" to cstr)
+        if h_malloc == 1 to i32 or h_malloc_raw == 1 to i32 or h_realloc == 1 to i32:
+            append_cstr(out, "declare ptr @malloc(i32)\ndeclare ptr @realloc(ptr, i32)\ndeclare ptr @memset(ptr, i32, i32)\ndeclare void @abort()\n\n")
+        if h_malloc == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_malloc(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %rt_badm, label %rt_okm\nrt_badm:\n  call void @abort()\n  ret ptr null\nrt_okm:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %m32 = trunc i64 %ms to i32\n  %mp = call ptr @malloc(i32 %m32)\n  %mn = icmp eq ptr %mp, null\n  br i1 %mn, label %rt_failm, label %rt_zerom\nrt_zerom:\n  %zp = call ptr @memset(ptr %mp, i32 0, i32 %m32)\n  ret ptr %mp\nrt_failm:\n  call void @abort()\n  ret ptr null\n}\n\n")
+        if h_malloc_raw == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_malloc_raw(i64 %sz) {\n  %m0 = icmp slt i64 %sz, 0\n  %m1 = icmp sgt i64 %sz, 500000000\n  %m2 = or i1 %m0, %m1\n  br i1 %m2, label %rt_badmr, label %rt_okmr\nrt_badmr:\n  call void @abort()\n  ret ptr null\nrt_okmr:\n  %mz = icmp eq i64 %sz, 0\n  %ms = select i1 %mz, i64 1, i64 %sz\n  %m32 = trunc i64 %ms to i32\n  %mp = call ptr @malloc(i32 %m32)\n  %mn = icmp eq ptr %mp, null\n  br i1 %mn, label %rt_failmr, label %rt_retmr\nrt_failmr:\n  call void @abort()\n  ret ptr null\nrt_retmr:\n  ret ptr %mp\n}\n\n")
+        if h_free == 1 to i32:
+            append_cstr(out, "define void @mantiq_free(ptr %p) {\n  ret void\n}\n\n")
+        if h_realloc == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_realloc(ptr %p, i64 %sz) {\n  %rn = icmp slt i64 %sz, 0\n  %ro = icmp sgt i64 %sz, 500000000\n  %rb = or i1 %rn, %ro\n  br i1 %rb, label %rt_badr, label %rt_okr\nrt_badr:\n  call void @abort()\n  ret ptr null\nrt_okr:\n  %s32 = trunc i64 %sz to i32\n  %np = call ptr @realloc(ptr %p, i32 %s32)\n  ret ptr %np\n}\n\n")
+        // Drop glue: mirror the 64-bit semantics (free the data pointer,
+        // null the slot) minus the len/cap zeroing stores, whose gep
+        // offsets assume the 64-bit layout. The Dict variant matches the
+        // 64-bit body exactly (it never frees — dict storage is released
+        // by the dict machinery itself).
+        if h_drop_dict == 1 to i32:
+            append_cstr(out, "define void @__nizam_drop_Dict(ptr %slot) {\n  %d0 = icmp eq ptr %slot, null\n  br i1 %d0, label %ret0d, label %bodyd\nret0d:\n  ret void\nbodyd:\n  %d = load ptr, ptr %slot\n  %dn = icmp eq ptr %d, null\n  br i1 %dn, label %ret0d, label %nulld\nnulld:\n  store ptr null, ptr %slot\n  ret void\n}\n\n")
+        if h_drop_str == 1 to i32:
+            append_cstr(out, "define void @__nizam_drop_String(ptr %slot) {\n  %s0 = icmp eq ptr %slot, null\n  br i1 %s0, label %ret0s, label %bodys\nret0s:\n  ret void\nbodys:\n  %d = load ptr, ptr %slot\n  %dn = icmp eq ptr %d, null\n  br i1 %dn, label %zfs, label %frs\nfrs:\n  call void @mantiq_free(ptr %d)\n  br label %zfs\nzfs:\n  store ptr null, ptr %slot\n  ret void\n}\n\n")
+        if h_drop_strb == 1 to i32:
+            append_cstr(out, "define void @__nizam_drop_StringBuilder(ptr %slot) {\n  %s0 = icmp eq ptr %slot, null\n  br i1 %s0, label %ret0b, label %bodyb\nret0b:\n  ret void\nbodyb:\n  %d = load ptr, ptr %slot\n  %dn = icmp eq ptr %d, null\n  br i1 %dn, label %zfb, label %frb\nfrb:\n  call void @mantiq_free(ptr %d)\n  br label %zfb\nzfb:\n  store ptr null, ptr %slot\n  ret void\n}\n\n")
+        if h_drop_lflat == 1 to i32:
+            append_cstr(out, "define void @__nizam_drop_List_flat(ptr %slot) {\n  %s0 = icmp eq ptr %slot, null\n  br i1 %s0, label %ret0l, label %bodyl\nret0l:\n  ret void\nbodyl:\n  %d = load ptr, ptr %slot\n  %dn = icmp eq ptr %d, null\n  br i1 %dn, label %zfl, label %frl\nfrl:\n  call void @mantiq_free(ptr %d)\n  br label %zfl\nzfl:\n  store ptr null, ptr %slot\n  ret void\n}\n\n")
+        // Heterogeneous List drop (elem drop-fn loop). wasm32 ABI: elem_size
+        // is i32 (call sites emit llvm_size_type), the slot is the String-
+        // slot shape { ptr, i32, i32 } — len at gep 4 as i32. Same "no gep
+        // zeroing of len/cap" rule as the other 32-bit drops (the slot is
+        // dead after the call).
+        if h_drop_list == 1 to i32:
+            append_cstr(out, "define void @__nizam_drop_List(ptr %list, i32 %elem_size, ptr %elem_drop_fn) {\n  %ll0 = icmp eq ptr %list, null\n  br i1 %ll0, label %ret0g, label %bodyg\nret0g:\n  ret void\nbodyg:\n  %data = load ptr, ptr %list\n  %dn = icmp eq ptr %data, null\n  br i1 %dn, label %ret0g, label %chkg\nchkg:\n  %fn_ok = icmp ne ptr %elem_drop_fn, null\n  %sz_ok = icmp sgt i32 %elem_size, 0\n  %drops = and i1 %fn_ok, %sz_ok\n  %len_p = getelementptr i8, ptr %list, i32 4\n  %len = load i32, ptr %len_p\n  br i1 %drops, label %loop_init, label %freeg\nloop_init:\n  br label %loop_cond\nloop_cond:\n  %i = phi i32 [ 0, %loop_init ], [ %inext, %loop_body ]\n  %more = icmp slt i32 %i, %len\n  br i1 %more, label %loop_body, label %freeg\nloop_body:\n  %off = mul i32 %i, %elem_size\n  %ep = getelementptr i8, ptr %data, i32 %off\n  call void %elem_drop_fn(ptr %ep)\n  %inext = add i32 %i, 1\n  br label %loop_cond\nfreeg:\n  call void @mantiq_free(ptr %data)\n  store ptr null, ptr %list\n  br label %ret0g\n}\n\n")
+        // List[str] indexing helper (symbols.nz declares idx as i64, so the
+        // signature keeps i64 even on wasm32). The slot is the String-slot
+        // shape { ptr, i32, i32 } on wasm32 — len at gep 4 as i32 — and
+        // gep-by-i64-index is valid IR on wasm32 (indexes are sext'd).
+        if h_lstrat == 1 to i32:
+            append_cstr(out, "define ptr @__nizam_list_str_at(ptr %list, i64 %idx) {\n  %at0 = icmp eq ptr %list, null\n  %at1 = icmp slt i64 %idx, 0\n  %as2 = or i1 %at0, %at1\n  br i1 %as2, label %ret0a, label %bodya\nret0a:\n  ret ptr null\nbodya:\n  %data = load ptr, ptr %list\n  %dn = icmp eq ptr %data, null\n  br i1 %dn, label %ret0a, label %idxchk\nidxchk:\n  %len_p = getelementptr i8, ptr %list, i32 4\n  %len = load i32, ptr %len_p\n  %len64 = sext i32 %len to i64\n  %inr = icmp slt i64 %idx, %len64\n  br i1 %inr, label %loadelem, label %ret0a\nloadelem:\n  %off = mul i64 %idx, 12\n  %ep = getelementptr i8, ptr %data, i64 %off\n  %sdata = load ptr, ptr %ep\n  ret ptr %sdata\n}\n\n")
+        if h_page_alloc == 1 to i32:
+            append_cstr(out, "declare ptr @mmap(ptr, i32, i32, i32, i32, i64)\n")
+            append_cstr(out, "define ptr @mantiq_page_alloc(i32 %size) {\nentry:\n  %bad = icmp sle i32 %size, 0\n  br i1 %bad, label %fail, label %go\nfail:\n  ret ptr null\ngo:\n  %al = add i32 %size, 4095\n  %a2 = and i32 %al, -4096\n  %p = call ptr @mmap(ptr null, i32 %a2, i32 3, i32 34, i32 -1, i64 0)\n  %isf = icmp eq ptr %p, inttoptr (i32 -1 to ptr)\n  br i1 %isf, label %fail, label %okp\nokp:\n  ret ptr %p\n}\n\n")
+        if h_page_free == 1 to i32:
+            append_cstr(out, "declare i32 @munmap(ptr, i32)\n")
+            append_cstr(out, "define void @mantiq_page_free(ptr %p, i32 %size) {\nentry:\n  %nul = icmp eq ptr %p, null\n  %neg = icmp sle i32 %size, 0\n  %skip = or i1 %nul, %neg\n  br i1 %skip, label %out, label %go\ngo:\n  %al = add i32 %size, 4095\n  %a2 = and i32 %al, -4096\n  %r = call i32 @munmap(ptr %p, i32 %a2)\n  br label %out\nout:\n  ret void\n}\n\n")
+        if (deref self).target.is_wasm():
+            let h_main_void as i32 = self.rt_body_missing("define i32 @__main_void(" to cstr)
+            if h_main_void == 1 to i32:
+                // WASI-aware entry: zig's wasi crt1 calls __main_void (no
+                // argc/argv), so main's params would be undef and the
+                // compiler saw argc<2 for every invocation. Fetch WASI
+                // preview1 args here and call main(argc, argv). args_get
+                // writes argc pointers into argv and the arg strings into
+                // the buffer.
+                append_cstr(out, "declare i32 @__wasi_args_sizes_get(ptr, ptr)\ndeclare i32 @__wasi_args_get(ptr, ptr)\n")
+                append_cstr(out, "define hidden i32 @__main_void() {\nentry:\n  %argc_p = alloca i32\n  %bufsz_p = alloca i32\n  %rc1 = call i32 @__wasi_args_sizes_get(ptr %argc_p, ptr %bufsz_p)\n  %argc = load i32, ptr %argc_p\n  %bufsz = load i32, ptr %bufsz_p\n  %argv = alloca ptr, i32 %argc\n  %buf = alloca i8, i32 %bufsz\n  %rc2 = call i32 @__wasi_args_get(ptr %argv, ptr %buf)\n  %r = call i32 @main(i32 %argc, ptr %argv)\n  ret i32 %r\n}\n\n")
 
     public fn generate(self as ptr[LLVMCodegen], root as ptr[Node]) as String:
         extern fn nizam_set_target_ptr_size(sz as i32)
@@ -2864,21 +2977,36 @@ struct LLVMCodegen:
         set_dict_bool(ref (deref self).external_decls, String.make("__mantiq_scope_lookup" to cstr), True)
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_isa(ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_malloc(i64)\n")
-        append_cstr(ref (deref self).type_out, "declare ptr @__nizam_str_clone(ptr, i64)\n")
+        // size_t-sized shims: pointer-width params (runtime.c uses size_t,
+        // the Nizam defs are usize) — i64 on native, i32 on wasm32.
+        let cg_sz_t as String = (deref self).target.llvm_size_type()
+        append_cstr(ref (deref self).type_out, "declare ptr @__nizam_str_clone(ptr, ")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ")\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_alloc_box32()\n")
-        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_ast_alloc(i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_ast_alloc(")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ")\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_ast_arena_reset()\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_ast_arena_destroy()\n")
-        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_intern_string(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_intern_string(ptr, ")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ")\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_intern_reset()\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_intern_destroy()\n")
 
-        append_cstr(ref (deref self).type_out, "declare void @mantiq_sha256_hex(ptr, i64, ptr)\n")
+        append_cstr(ref (deref self).type_out, "declare void @mantiq_sha256_hex(ptr, ")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ", ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_sha256_file_hex(ptr, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_mkdir_p(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare i32 @mantiq_copy_file(ptr, ptr)\n")
-        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_create(i64)\n")
-        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_alloc(ptr, i64)\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_create(")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ")\n")
+        append_cstr(ref (deref self).type_out, "declare ptr @mantiq_arena_alloc(ptr, ")
+        append_str(ref (deref self).type_out, cg_sz_t)
+        append_cstr(ref (deref self).type_out, ")\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_reset(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare void @mantiq_arena_destroy(ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @__mantiq_scope_lookup(ptr, ptr, ptr, i64)\n")
@@ -3061,7 +3189,8 @@ struct LLVMCodegen:
         // no longer a link-time dependency for this scope.
         self.emit_rt_glue_bodies(ref out)
         let assembled as String = out.to_string()
-        return __cg_filter_declares(assembled)
+        let filtered as String = __cg_filter_declares(assembled)
+        return filtered
 
     public fn emit_node(self as ptr[LLVMCodegen], node as ptr[Node]):
         if node == None to ptr[Node]:
@@ -3324,6 +3453,22 @@ struct LLVMCodegen:
             let decl as ptr[Node] = get_node_decl(ref decls, i)
             let dk as NodeType = node_kind(decl)
             if dk == NodeType.StructDecl or dk == NodeType.ClassDecl or dk == NodeType.InterfaceDecl or dk == NodeType.EnumDecl or dk == NodeType.UnionDecl:
+                self.emit_node(decl)
+            i = i + 1 to i64
+        // Pass 1.5: emit ALL top-level extern fn declares BEFORE any function
+        // body. Without this, a call site in an earlier-emitted module hits
+        // the unknown-callee fallback first — `declare ret @name(...)` — and
+        // registers the name in external_decls, which then SUPPRESSES the
+        // extern declaration's own typed declare (emit_fun_decl skips when
+        // the name is already in external_decls). Declare dedup keeps the
+        // first declare by name, so the variadic form poisons every typed
+        // call. Legal IR on x86 (variadic declare + fixed-arity calls), but
+        // on wasm32 each call site encodes its own signature and module
+        // validation fails (wasm-ld: function signature mismatch).
+        i = 0 to i64
+        while i < count:
+            let decl as ptr[Node] = get_node_decl(ref decls, i)
+            if node_kind(decl) == NodeType.FunDecl and node_is_extern(decl):
                 self.emit_node(decl)
             i = i + 1 to i64
         // Pass 2: Emit functions, statements, and other program elements
@@ -3804,7 +3949,14 @@ struct LLVMCodegen:
                     if (c_name_ptr to ptr[u8]) != (None to ptr[u8]) and (deref c_name_ptr).data != None:
                         let cn as cstr = (deref c_name_ptr).data to cstr
                         if strcmp(cn, "get_size" to cstr) == 0 or strcmp(cn, "get_align" to cstr) == 0 or strcmp(cn, "strlen" to cstr) == 0 or strcmp(cn, "length" to cstr) == 0 or strcmp(cn, "len" to cstr) == 0 or strcmp(cn, "ftell" to cstr) == 0:
-                            if (deref self).target.pointer_size == 4 to usize:
+                            // wasm32 fixup: declared-return-type rule — an
+                            // i64-returning length/len method must not be
+                            // forced to the pointer-int type on 32-bit
+                            // targets; usize/isize callees keep it.
+                            let v2_inf as ptr[Type] = node_inferred_type(init_node)
+                            if v2_inf != None to ptr[Type] and ((deref v2_inf).kind == TypeKind.I64 or (deref v2_inf).kind == TypeKind.U64 or (deref v2_inf).kind == TypeKind.USize or (deref v2_inf).kind == TypeKind.ISize):
+                                var_type = type_to_llvm(v2_inf)
+                            elif (deref self).target.pointer_size == 4 to usize:
                                 var_type = String.make("i32" to cstr)
                             else:
                                 var_type = String.make("i64" to cstr)
@@ -3915,6 +4067,15 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).main_out, "_drop_flag\n")
             var final_reg as ptr[u8] = val_reg
             var val_type as String = self.llvm_type(node_inferred_type(init_node))
+            if init_node != None to ptr[Node] and node_kind(init_node) == NodeType.BinaryExpr:
+                // Trust the EMITTED BinaryExpr width over the sema-inferred
+                // type (wasm32: std length() emits i64 while inference may
+                // say USize/i32) so the store/cast decisions below agree
+                // with the actual register type.
+                if (deref self).expr_types.has(init_node to usize):
+                    let vd_emitted as String = (deref self).expr_types[init_node to usize]
+                    if vd_emitted.len > 0 to usize:
+                        val_type = vd_emitted
             if node_kind(init_node) == NodeType.StringLiteral and (deref var_type.data) == 123 to u8:
                 let str_ptr as ptr[String] = node_str_val_ptr(init_node)
                 var raw_len as i64 = 0 to i64
@@ -3951,6 +4112,11 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, data_reg to cstr)
                 append_cstr(ref (deref self).main_out, ", 0\n")
 
+                // Field 1/2 of a String-style layout follow the target's
+                // usize width (i32 on wasm32, i64 elsewhere). Emitting a
+                // hardcoded i64 makes insertvalue disagree with the
+                // registered { ptr, i32, i32 } layout.
+                let str_len_tok as cstr = if (deref self).target.pointer_size == 4 to usize: "i32" to cstr else: "i64" to cstr
                 let ins1 as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, ins1 to cstr)
@@ -3958,7 +4124,9 @@ struct LLVMCodegen:
                 append_str(ref (deref self).main_out, var_type)
                 append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, ins0 to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_cstr(ref (deref self).main_out, str_len_tok)
+                append_cstr(ref (deref self).main_out, " ")
                 append_i64(ref (deref self).main_out, raw_len)
                 append_cstr(ref (deref self).main_out, ", 1\n")
 
@@ -3969,7 +4137,9 @@ struct LLVMCodegen:
                 append_str(ref (deref self).main_out, var_type)
                 append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, ins1 to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_cstr(ref (deref self).main_out, str_len_tok)
+                append_cstr(ref (deref self).main_out, " ")
                 append_i64(ref (deref self).main_out, raw_len)
                 append_cstr(ref (deref self).main_out, ", 2\n")
                 final_reg = ins2
@@ -4009,7 +4179,15 @@ struct LLVMCodegen:
                     if (deref (inferred_cat to ptr[u8])) != 105 to u8:
                         let is_ts_byte as bool = strstr(c_n, "_byte_ptr" to cstr) != None to cstr or strstr(c_n, "_row_ptr" to cstr) != None to cstr or strstr(c_n, "_col_ptr" to cstr) != None to cstr or strstr(c_n, "_count_ptr" to cstr) != None to cstr
                         if strcmp(c_n, "strlen" to cstr) == 0 or strcmp(c_n, "length" to cstr) == 0 or strcmp(c_n, "len" to cstr) == 0 or strcmp(c_n, "ftell" to cstr) == 0:
-                            val_type = (deref self).target.llvm_ptr_int()
+                            // wasm32 fixup: declared-return-type rule — an
+                            // i64-returning length/len method must not be
+                            // forced to the pointer-int type on 32-bit
+                            // targets; usize/isize callees keep it.
+                            let vc_inf as ptr[Type] = node_inferred_type(init_node)
+                            if vc_inf != None to ptr[Type] and ((deref vc_inf).kind == TypeKind.I64 or (deref vc_inf).kind == TypeKind.U64 or (deref vc_inf).kind == TypeKind.USize or (deref vc_inf).kind == TypeKind.ISize):
+                                val_type = type_to_llvm(vc_inf)
+                            else:
+                                val_type = (deref self).target.llvm_ptr_int()
                         elif is_ts_byte:
                             val_type = String.make("i64" to cstr)
                         elif strcmp(c_n, "node_kind" to cstr) == 0 or strcmp(c_n, "sprintf" to cstr) == 0 or strcmp(c_n, "strcmp" to cstr) == 0:
@@ -5575,6 +5753,10 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, val_reg to cstr)
                 append_cstr(ref (deref self).main_out, ", 0\n")
 
+                // wasm32: String-style layouts use i32 len/cap fields here;
+                // a hardcoded i64 desyncs insertvalue from the registered
+                // { ptr, i32, i32 } layout.
+                let asgn_len_tok as cstr = if (deref self).target.pointer_size == 4 to usize: "i32" to cstr else: "i64" to cstr
                 let ins1 as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, ins1 to cstr)
@@ -5582,7 +5764,9 @@ struct LLVMCodegen:
                 append_str(ref (deref self).main_out, target_type)
                 append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, ins0 to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_cstr(ref (deref self).main_out, asgn_len_tok)
+                append_cstr(ref (deref self).main_out, " ")
                 append_i64(ref (deref self).main_out, raw_len)
                 append_cstr(ref (deref self).main_out, ", 1\n")
 
@@ -5593,7 +5777,9 @@ struct LLVMCodegen:
                 append_str(ref (deref self).main_out, target_type)
                 append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, ins1 to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_cstr(ref (deref self).main_out, asgn_len_tok)
+                append_cstr(ref (deref self).main_out, " ")
                 append_i64(ref (deref self).main_out, raw_len)
                 append_cstr(ref (deref self).main_out, ", 2\n")
                 val_reg = ins2
@@ -6002,7 +6188,18 @@ struct LLVMCodegen:
                     if strcmp(cn, "strcmp" to cstr) == 0 or strcmp(cn, "strncmp" to cstr) == 0 or strcmp(cn, "fseek" to cstr) == 0 or strcmp(cn, "fclose" to cstr) == 0 or strcmp(cn, "sprintf" to cstr) == 0 or strcmp(cn, "snprintf" to cstr) == 0 or strcmp(cn, "printf" to cstr) == 0 or strcmp(cn, "node_kind" to cstr) == 0:
                         left_t_str = String.make("i32" to cstr)
                     elif strcmp(cn, "strlen" to cstr) == 0 or strcmp(cn, "length" to cstr) == 0 or strcmp(cn, "len" to cstr) == 0 or strcmp(cn, "ftell" to cstr) == 0:
-                        left_t_str = (deref self).target.llvm_ptr_int()
+                        // wasm32 fixup: the DECLARED return type decides —
+                        // std length/len return i64 on every target, while
+                        // strlen/ftell return usize/isize
+                        // (target-dependent). The old blind
+                        // llvm_ptr_int() heuristic typed every one of them
+                        // as i32 on wasm32, which desynced the icmp operand
+                        // type from the actually-emitted i64 call results.
+                        let lc_inf as ptr[Type] = node_inferred_type(left)
+                        if lc_inf != None to ptr[Type] and ((deref lc_inf).kind == TypeKind.I64 or (deref lc_inf).kind == TypeKind.U64 or (deref lc_inf).kind == TypeKind.USize or (deref lc_inf).kind == TypeKind.ISize):
+                            left_t_str = type_to_llvm(lc_inf)
+                        else:
+                            left_t_str = (deref self).target.llvm_ptr_int()
         elif node_kind(left) == NodeType.MemberExpr:
             let field_name as String = node_name(left)
             let obj as ptr[Node] = node_left(left)
@@ -6088,7 +6285,14 @@ struct LLVMCodegen:
                     if strcmp(cn, "strcmp" to cstr) == 0 or strcmp(cn, "strncmp" to cstr) == 0 or strcmp(cn, "fseek" to cstr) == 0 or strcmp(cn, "fclose" to cstr) == 0 or strcmp(cn, "sprintf" to cstr) == 0 or strcmp(cn, "snprintf" to cstr) == 0 or strcmp(cn, "printf" to cstr) == 0 or strcmp(cn, "node_kind" to cstr) == 0:
                         right_t_str = String.make("i32" to cstr)
                     elif strcmp(cn, "strlen" to cstr) == 0 or strcmp(cn, "length" to cstr) == 0 or strcmp(cn, "len" to cstr) == 0 or strcmp(cn, "ftell" to cstr) == 0:
-                        right_t_str = (deref self).target.llvm_ptr_int()
+                        // wasm32 fixup: same declared-return-type rule as
+                        // the left-operand site — std length/len return i64
+                        // everywhere, strlen/ftell are usize/isize.
+                        let rc_inf as ptr[Type] = node_inferred_type(right)
+                        if rc_inf != None to ptr[Type] and ((deref rc_inf).kind == TypeKind.I64 or (deref rc_inf).kind == TypeKind.U64 or (deref rc_inf).kind == TypeKind.USize or (deref rc_inf).kind == TypeKind.ISize):
+                            right_t_str = type_to_llvm(rc_inf)
+                        else:
+                            right_t_str = (deref self).target.llvm_ptr_int()
         elif node_kind(right) == NodeType.MemberExpr:
             let field_name as String = node_name(right)
             let obj as ptr[Node] = node_left(right)
@@ -6264,7 +6468,9 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, i_temp to cstr)
                 append_cstr(ref (deref self).main_out, " = ptrtoint ptr ")
                 append_cstr(ref (deref self).main_out, left_reg to cstr)
-                append_cstr(ref (deref self).main_out, " to i64\n")
+                append_cstr(ref (deref self).main_out, " to ")
+                append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                append_cstr(ref (deref self).main_out, "\n")
                 real_left = i_temp
             if right_is_ptr and (deref right_reg) == 37 to u8:
                 let i_temp as ptr[u8] = self.fresh_temp()
@@ -6272,7 +6478,9 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, i_temp to cstr)
                 append_cstr(ref (deref self).main_out, " = ptrtoint ptr ")
                 append_cstr(ref (deref self).main_out, right_reg to cstr)
-                append_cstr(ref (deref self).main_out, " to i64\n")
+                append_cstr(ref (deref self).main_out, " to ")
+                append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                append_cstr(ref (deref self).main_out, "\n")
                 real_right = i_temp
             if not left_is_ptr and strcmp(left_t_str.data to cstr, operand_type.data to cstr) != 0:
                 let left_bits as i32 = llvm_int_bits(left_t_str)
@@ -6473,6 +6681,11 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, ", ")
         append_cstr(ref (deref self).main_out, real_right to cstr)
         append_cstr(ref (deref self).main_out, "\n")
+        // Record the EMITTED result type so consumers (emit_cast_expr,
+        // emit_var_decl, ...) can trust it over node_inferred_type, which
+        // can disagree with the emitted width on wasm32 (std length()
+        // returns i64 while sema may infer USize for the call).
+        (deref self).expr_types[node to usize] = result_type
         return reg
 
     public fn mono_ctor_name(self as ptr[LLVMCodegen], orig as String, gn as String) as bool:
@@ -6541,7 +6754,17 @@ struct LLVMCodegen:
             if callee_t != None to ptr[Type] and (deref callee_t).kind == TypeKind.Closure:
                 if (deref callee_t).return_type != None to ptr[Type]:
                     ret_type = self.llvm_type((deref callee_t).return_type)
-        if strcmp(ret_type.data to cstr, "ptr" to cstr) == 0:
+        // wasm32 fixup entry: a call to a fully UNDECLARED extern infers
+        // as the Any fallback ({ ptr, ptr } — a multivalue struct return
+        // that is legal IR on x86, where it lowers to registers, but
+        // breaks the wasm ABI: each call site encodes its own signature,
+        // so module validation fails). Known extern names get their real
+        // return widths below; function/closure callees keep the struct.
+        var unknown_extern as bool = strcmp(ret_type.data to cstr, "ptr" to cstr) == 0
+        if not unknown_extern and strcmp(ret_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+            if callee_t == None to ptr[Type] or ((deref callee_t).kind != TypeKind.Function and (deref callee_t).kind != TypeKind.Closure):
+                unknown_extern = True
+        if unknown_extern:
             var is_dict_list as bool = False
             var c_n as cstr = None to cstr
             if (callee_name_ptr to ptr[u8]) != (None to ptr[u8]):
@@ -6990,10 +7213,25 @@ struct LLVMCodegen:
 
                     let m_reg as ptr[u8] = self.fresh_temp()
                     if is_make_ast:
+                        // ast_alloc's size is pointer-width (runtime.c uses
+                        // size_t; the Nizam def is usize) — width-aware type,
+                        // with a trunc on 32-bit (size_temp is an i64 SSA).
+                        let aa_sz as String = (deref self).target.llvm_size_type()
+                        var aa_val as ptr[u8] = size_temp
+                        if (deref self).target.pointer_size == 4 to usize:
+                            let aa_t as ptr[u8] = self.fresh_temp()
+                            append_cstr(ref (deref self).main_out, "  ")
+                            append_cstr(ref (deref self).main_out, aa_t to cstr)
+                            append_cstr(ref (deref self).main_out, " = trunc i64 ")
+                            append_cstr(ref (deref self).main_out, size_temp to cstr)
+                            append_cstr(ref (deref self).main_out, " to i32\n")
+                            aa_val = aa_t
                         append_cstr(ref (deref self).main_out, "  ")
                         append_cstr(ref (deref self).main_out, m_reg to cstr)
-                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_ast_alloc(i64 ")
-                        append_cstr(ref (deref self).main_out, size_temp to cstr)
+                        append_cstr(ref (deref self).main_out, " = call ptr @mantiq_ast_alloc(")
+                        append_str(ref (deref self).main_out, aa_sz)
+                        append_cstr(ref (deref self).main_out, " ")
+                        append_cstr(ref (deref self).main_out, aa_val to cstr)
                         append_cstr(ref (deref self).main_out, ")\n")
                     elif args.length() > 1 to i64:
                         let al_node as ptr[Node] = get_node_decl(ref args, 1 to i64)
@@ -8433,16 +8671,67 @@ struct LLVMCodegen:
             elif strcmp(fn_target_name.data to cstr, "sprintf" to cstr) == 0 or strcmp(fn_target_name.data to cstr, "fprintf" to cstr) == 0:
                 append_cstr(ref (deref self).type_out, "(ptr, ptr, ...)\n")
             elif strcmp(fn_target_name.data to cstr, "snprintf" to cstr) == 0:
-                append_cstr(ref (deref self).type_out, "(ptr, i64, ptr, ...)\n")
+                if (deref self).target.pointer_size == 4 to usize:
+                    append_cstr(ref (deref self).type_out, "(ptr, i32, ptr, ...)\n")
+                else:
+                    append_cstr(ref (deref self).type_out, "(ptr, i64, ptr, ...)\n")
             else:
-                append_cstr(ref (deref self).type_out, "(...)\n")
+                // Typed declare from the call site. A variadic `(...)` declare
+                // here poisons the module: LLVM materializes bitcast thunks to
+                // reconcile the variadic type with the real (fixed-arity)
+                // definition in another TU, and on wasm32 those thunks break
+                // stack discipline (validation fails inside the wrapper). The
+                // call site's arg text in arg_buf is exactly what the call
+                // will pass, so declare that arity. Depth-0 comma split (struct
+                // types like { ptr, i64, i64 } contain commas); each entry is
+                // "<type> <value>" — the type prefix ends at the first
+                // depth-0 space.
+                append_cstr(ref (deref self).type_out, "(")
+                let fb_out as ptr[StringBuilder] = ref (deref self).type_out
+                if arg_buf.buffer != (None to ptr[u8]):
+                    let fb_text as ptr[u8] = arg_buf.buffer
+                    let fb_len as i64 = arg_buf.len to i64
+                    var fb_p as i64 = 0 to i64
+                    var fb_depth as i64 = 0 to i64
+                    // 0 = want type start, 1 = inside type, 2 = skipping value
+                    var fb_state as i32 = 0 to i32
+                    var fb_tok as i64 = 0 to i64
+                    while fb_p < fb_len:
+                        let fb_c as u8 = deref (fb_text to usize + fb_p to usize)
+                        if fb_c == 44 to u8 and fb_depth == 0 to i64:
+                            if fb_state == 1 to i32:
+                                (deref fb_out).append_slice((fb_text to usize + fb_tok to usize) to ptr[u8], (fb_p - fb_tok) to usize)
+                            append_cstr(ref (deref self).type_out, ", ")
+                            fb_state = 0 to i32
+                        elif fb_c == 123 to u8:
+                            fb_depth = fb_depth + 1 to i64
+                            if fb_state == 0 to i32:
+                                fb_tok = fb_p
+                                fb_state = 1 to i32
+                        elif fb_c == 125 to u8:
+                            fb_depth = fb_depth - 1 to i64
+                        elif fb_c == 32 to u8 and fb_depth == 0 to i64:
+                            if fb_state == 1 to i32:
+                                (deref fb_out).append_slice((fb_text to usize + fb_tok to usize) to ptr[u8], (fb_p - fb_tok) to usize)
+                                fb_state = 2 to i32
+                        else:
+                            if fb_state == 0 to i32:
+                                fb_tok = fb_p
+                                fb_state = 1 to i32
+                        fb_p = fb_p + 1 to i64
+                    if fb_state == 1 to i32:
+                        (deref fb_out).append_slice((fb_text to usize + fb_tok to usize) to ptr[u8], (fb_p - fb_tok) to usize)
+                append_cstr(ref (deref self).type_out, ")\n")
         var vararg_proto as cstr = "" to cstr
         if strcmp(fn_target_name.data to cstr, "printf" to cstr) == 0:
             vararg_proto = " (ptr, ...)" to cstr
         elif strcmp(fn_target_name.data to cstr, "sprintf" to cstr) == 0 or strcmp(fn_target_name.data to cstr, "fprintf" to cstr) == 0:
             vararg_proto = " (ptr, ptr, ...)" to cstr
         elif strcmp(fn_target_name.data to cstr, "snprintf" to cstr) == 0:
-            vararg_proto = " (ptr, i64, ptr, ...)" to cstr
+            if (deref self).target.pointer_size == 4 to usize:
+                vararg_proto = " (ptr, i32, ptr, ...)" to cstr
+            else:
+                vararg_proto = " (ptr, i64, ptr, ...)" to cstr
         let is_void as bool = str_eq(ret_type, String.make("void" to cstr))
         if not is_void:
             let reg as ptr[u8] = self.fresh_temp()
@@ -10633,7 +10922,12 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, cnt_p to cstr)
                 append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
                 append_cstr(ref (deref self).main_out, hd_p to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 36\n")
+                // MDictRaw.count: 36 on 64-bit (4 ptrs + cap), 20 on wasm32
+                // (4 x i32 ptrs + cap). Offset 36 on wasm32 reads val_size.
+                if (deref self).target.pointer_size == 4 to usize:
+                    append_cstr(ref (deref self).main_out, ", i64 20\n")
+                else:
+                    append_cstr(ref (deref self).main_out, ", i64 36\n")
                 let cnt_32 as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, cnt_32 to cstr)
@@ -10650,13 +10944,27 @@ struct LLVMCodegen:
                 let dl_gep as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, dl_gep to cstr)
-                append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i64, i64 }, ptr ")
-                append_cstr(ref (deref self).main_out, dl_addr to cstr)
-                append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i64 ")
-                append_cstr(ref (deref self).main_out, cnt_64 to cstr)
-                append_cstr(ref (deref self).main_out, ", ptr ")
-                append_cstr(ref (deref self).main_out, dl_gep to cstr)
-                append_cstr(ref (deref self).main_out, "\n")
+                // Fat Dict slot field 1 (len): { ptr, i64, i64 } on 64-bit,
+                // { ptr, i32, i32 } on wasm32 (len@4, cap@8). The old i64
+                // store at offset 8 clobbered `cap` on wasm32, underflowed
+                // it after ~8 removals and wrote into the next struct field
+                // (BorrowChecker: auto_drops dict handle).
+                if (deref self).target.pointer_size == 4 to usize:
+                    append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i32, i32 }, ptr ")
+                    append_cstr(ref (deref self).main_out, dl_addr to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i32 ")
+                    append_cstr(ref (deref self).main_out, cnt_32 to cstr)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_gep to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                else:
+                    append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i64, i64 }, ptr ")
+                    append_cstr(ref (deref self).main_out, dl_addr to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i64 ")
+                    append_cstr(ref (deref self).main_out, cnt_64 to cstr)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_gep to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
                 let final_val as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, final_val to cstr)
@@ -10719,21 +11027,34 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, ", 1\n")
                 let rl_addr as ptr[u8] = self.emit_lvalue_ptr(obj_node)
                 let rl_gep as ptr[u8] = self.fresh_temp()
+                // Width-aware fat-slot len update (see setdefault comment).
+                let slot_ty as String = if (deref self).target.pointer_size == 4 to usize: String
+                    .make("{ ptr, i32, i32 }" to cstr) else: String
+                    .make("{ ptr, i64, i64 }" to cstr)
+                let int_ty as String = if (deref self).target.pointer_size == 4 to usize: String
+                    .make("i32" to cstr) else: String
+                    .make("i64" to cstr)
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, rl_gep to cstr)
-                append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i64, i64 }, ptr ")
+                append_cstr(ref (deref self).main_out, " = getelementptr ")
+                append_str(ref (deref self).main_out, slot_ty)
+                append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, rl_addr to cstr)
                 append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n")
                 let rl_old as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, rl_old to cstr)
-                append_cstr(ref (deref self).main_out, " = load i64, ptr ")
+                append_cstr(ref (deref self).main_out, " = load ")
+                append_str(ref (deref self).main_out, int_ty)
+                append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, rl_gep to cstr)
                 append_cstr(ref (deref self).main_out, "\n")
                 let rl_new as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, rl_new to cstr)
-                append_cstr(ref (deref self).main_out, " = sub i64 ")
+                append_cstr(ref (deref self).main_out, " = sub ")
+                append_str(ref (deref self).main_out, int_ty)
+                append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, rl_old to cstr)
                 append_cstr(ref (deref self).main_out, ", 1\n")
                 let rl_sel as ptr[u8] = self.fresh_temp()
@@ -10741,12 +11062,18 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, rl_sel to cstr)
                 append_cstr(ref (deref self).main_out, " = select i1 ")
                 append_cstr(ref (deref self).main_out, pop_b to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_str(ref (deref self).main_out, int_ty)
+                append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, rl_new to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 ")
+                append_cstr(ref (deref self).main_out, ", ")
+                append_str(ref (deref self).main_out, int_ty)
+                append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, rl_old to cstr)
                 append_cstr(ref (deref self).main_out, "\n")
-                append_cstr(ref (deref self).main_out, "  store i64 ")
+                append_cstr(ref (deref self).main_out, "  store ")
+                append_str(ref (deref self).main_out, int_ty)
+                append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, rl_sel to cstr)
                 append_cstr(ref (deref self).main_out, ", ptr ")
                 append_cstr(ref (deref self).main_out, rl_gep to cstr)
@@ -10778,21 +11105,34 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, ", 1\n")
             let rl_addr as ptr[u8] = self.emit_lvalue_ptr(obj_node)
             let rl_gep as ptr[u8] = self.fresh_temp()
+            // Width-aware fat-slot len update (see setdefault comment).
+            let slot_ty as String = if (deref self).target.pointer_size == 4 to usize: String
+                .make("{ ptr, i32, i32 }" to cstr) else: String
+                .make("{ ptr, i64, i64 }" to cstr)
+            let int_ty as String = if (deref self).target.pointer_size == 4 to usize: String
+                .make("i32" to cstr) else: String
+                .make("i64" to cstr)
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, rl_gep to cstr)
-            append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i64, i64 }, ptr ")
+            append_cstr(ref (deref self).main_out, " = getelementptr ")
+            append_str(ref (deref self).main_out, slot_ty)
+            append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, rl_addr to cstr)
             append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n")
             let rl_old as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, rl_old to cstr)
-            append_cstr(ref (deref self).main_out, " = load i64, ptr ")
+            append_cstr(ref (deref self).main_out, " = load ")
+            append_str(ref (deref self).main_out, int_ty)
+            append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, rl_gep to cstr)
             append_cstr(ref (deref self).main_out, "\n")
             let rl_new as ptr[u8] = self.fresh_temp()
             append_cstr(ref (deref self).main_out, "  ")
             append_cstr(ref (deref self).main_out, rl_new to cstr)
-            append_cstr(ref (deref self).main_out, " = sub i64 ")
+            append_cstr(ref (deref self).main_out, " = sub ")
+            append_str(ref (deref self).main_out, int_ty)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, rl_old to cstr)
             append_cstr(ref (deref self).main_out, ", 1\n")
             let rl_sel as ptr[u8] = self.fresh_temp()
@@ -10800,12 +11140,18 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).main_out, rl_sel to cstr)
             append_cstr(ref (deref self).main_out, " = select i1 ")
             append_cstr(ref (deref self).main_out, rem_b to cstr)
-            append_cstr(ref (deref self).main_out, ", i64 ")
+            append_cstr(ref (deref self).main_out, ", ")
+            append_str(ref (deref self).main_out, int_ty)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, rl_new to cstr)
-            append_cstr(ref (deref self).main_out, ", i64 ")
+            append_cstr(ref (deref self).main_out, ", ")
+            append_str(ref (deref self).main_out, int_ty)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, rl_old to cstr)
             append_cstr(ref (deref self).main_out, "\n")
-            append_cstr(ref (deref self).main_out, "  store i64 ")
+            append_cstr(ref (deref self).main_out, "  store ")
+            append_str(ref (deref self).main_out, int_ty)
+            append_cstr(ref (deref self).main_out, " ")
             append_cstr(ref (deref self).main_out, rl_sel to cstr)
             append_cstr(ref (deref self).main_out, ", ptr ")
             append_cstr(ref (deref self).main_out, rl_gep to cstr)
@@ -11006,7 +11352,11 @@ struct LLVMCodegen:
                 append_cstr(ref (deref self).main_out, cnt_p to cstr)
                 append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
                 append_cstr(ref (deref self).main_out, hd_p to cstr)
-                append_cstr(ref (deref self).main_out, ", i64 36\n")
+                // MDictRaw.count: 36 on 64-bit, 20 on wasm32.
+                if (deref self).target.pointer_size == 4 to usize:
+                    append_cstr(ref (deref self).main_out, ", i64 20\n")
+                else:
+                    append_cstr(ref (deref self).main_out, ", i64 36\n")
                 let cnt_32 as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, cnt_32 to cstr)
@@ -11023,13 +11373,27 @@ struct LLVMCodegen:
                 let dl_gep as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, dl_gep to cstr)
-                append_cstr(ref (deref self).main_out, " = getelementptr { ptr, i64, i64 }, ptr ")
-                append_cstr(ref (deref self).main_out, dl_addr to cstr)
-                append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i64 ")
-                append_cstr(ref (deref self).main_out, cnt_64 to cstr)
-                append_cstr(ref (deref self).main_out, ", ptr ")
-                append_cstr(ref (deref self).main_out, dl_gep to cstr)
-                append_cstr(ref (deref self).main_out, "\n")
+                // Width-aware fat-slot len update (see setdefault comment).
+                if (deref self).target.pointer_size == 4 to usize:
+                    append_cstr(ref (deref self).main_out, " = getelementptr ")
+                    append_str(ref (deref self).main_out, coll_st)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_addr to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i32 ")
+                    append_cstr(ref (deref self).main_out, cnt_32 to cstr)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_gep to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
+                else:
+                    append_cstr(ref (deref self).main_out, " = getelementptr ")
+                    append_str(ref (deref self).main_out, coll_st)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_addr to cstr)
+                    append_cstr(ref (deref self).main_out, ", i32 0, i32 1\n  store i64 ")
+                    append_cstr(ref (deref self).main_out, cnt_64 to cstr)
+                    append_cstr(ref (deref self).main_out, ", ptr ")
+                    append_cstr(ref (deref self).main_out, dl_gep to cstr)
+                    append_cstr(ref (deref self).main_out, "\n")
             return"null" to ptr[u8]
         if strcmp(mname, "fromkeys") == 0 and is_dict:
             let coll_st as String = if (deref self).target.pointer_size == 4 to usize: String
@@ -13142,7 +13506,9 @@ struct LLVMCodegen:
                 let p_temp as ptr[u8] = self.fresh_temp()
                 append_cstr(ref (deref self).main_out, "  ")
                 append_cstr(ref (deref self).main_out, p_temp to cstr)
-                append_cstr(ref (deref self).main_out, " = inttoptr i64 ")
+                append_cstr(ref (deref self).main_out, " = inttoptr ")
+                append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                append_cstr(ref (deref self).main_out, " ")
                 append_cstr(ref (deref self).main_out, operand_val to cstr)
                 append_cstr(ref (deref self).main_out, " to ptr\n")
                 ptr_reg = p_temp
@@ -13171,6 +13537,16 @@ struct LLVMCodegen:
                             if strcmp(e_cstr, "NodeType" to cstr) == 0 or strcmp(e_cstr, "TypeKind" to cstr) == 0 or strcmp(e_cstr, "LanguageMode" to cstr) == 0 or strcmp(e_cstr, "SymbolKind" to cstr) == 0 or strcmp(e_cstr, "LabelKind" to cstr) == 0 or strcmp(e_cstr, "Severity" to cstr) == 0 or strcmp(e_cstr, "ObjectState" to cstr) == 0 or strcmp(e_cstr, "Endianness" to cstr) == 0 or strcmp(e_cstr, "PassMode" to cstr) == 0 or strcmp(e_cstr, "ImportKind" to cstr) == 0:
                                 return operand_val
         var source_type as String = type_to_llvm(node_inferred_type(operand))
+        if operand != None to ptr[Node] and node_kind(operand) == NodeType.BinaryExpr:
+            // The BinaryExpr emitter unified operand widths at emission
+            // time; its recorded emitted type outranks the (possibly
+            // stale) sema-inferred type here. Without this, wasm32 casts
+            // of `(x.length() - 1) to i64` style exprs re-cast an
+            // already-i64 register as i32 (zext type error).
+            if (deref self).expr_types.has(operand to usize):
+                let emitted_t as String = (deref self).expr_types[operand to usize]
+                if emitted_t.len > 0 to usize:
+                    source_type = emitted_t
         if operand != None to ptr[Node]:
             if node_kind(operand) == NodeType.StringLiteral:
                 source_type = String.make("ptr" to cstr)
@@ -13994,8 +14370,11 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).main_out, count_ptr to cstr)
         append_cstr(ref (deref self).main_out, " = getelementptr i8, ptr ")
         append_cstr(ref (deref self).main_out, dict_ptr to cstr)
-        append_cstr(ref (deref self).main_out, ", i64 36\n")
-
+        // MDictRaw.count: 36 on 64-bit, 20 on wasm32.
+        if (deref self).target.pointer_size == 4 to usize:
+            append_cstr(ref (deref self).main_out, ", i64 20\n")
+        else:
+            append_cstr(ref (deref self).main_out, ", i64 36\n")
         let count_32 as ptr[u8] = self.fresh_temp()
         append_cstr(ref (deref self).main_out, "  ")
         append_cstr(ref (deref self).main_out, count_32 to cstr)
@@ -16120,7 +16499,9 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr %")
                         append_str(ref (deref self).main_out, var_name)
                         let elem_sz as i64 = if (deref self).target.pointer_size == 4 to usize: 12 to i64 else: 24 to i64
-                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_cstr(ref (deref self).main_out, ", ")
+                        append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                        append_cstr(ref (deref self).main_out, " ")
                         append_i64(ref (deref self).main_out, elem_sz)
                         append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_String)\n")
                     elif strncmp(st_c, "List_", 5 to usize) == 0:
@@ -16130,7 +16511,9 @@ struct LLVMCodegen:
                         let elem_sz as i64 = self.resolve_struct_size(elem_base)
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr %")
                         append_str(ref (deref self).main_out, var_name)
-                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_cstr(ref (deref self).main_out, ", ")
+                        append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                        append_cstr(ref (deref self).main_out, " ")
                         append_i64(ref (deref self).main_out, elem_sz)
                         append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_")
                         append_str(ref (deref self).main_out, elem_base)
@@ -16503,7 +16886,9 @@ struct LLVMCodegen:
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr ")
                         append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
                         let elem_sz as i64 = if (deref self).target.pointer_size == 4 to usize: 12 to i64 else: 24 to i64
-                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_cstr(ref (deref self).main_out, ", ")
+                        append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                        append_cstr(ref (deref self).main_out, " ")
                         append_i64(ref (deref self).main_out, elem_sz)
                         append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_String)\n")
                     elif strncmp(f_st_c, "List_", 5 to usize) == 0:
@@ -16513,7 +16898,9 @@ struct LLVMCodegen:
                         let elem_sz as i64 = self.resolve_struct_size(elem_base)
                         append_cstr(ref (deref self).main_out, "  call void @__nizam_drop_List(ptr ")
                         append_cstr(ref (deref self).main_out, f_gep_reg to cstr)
-                        append_cstr(ref (deref self).main_out, ", i64 ")
+                        append_cstr(ref (deref self).main_out, ", ")
+                        append_str(ref (deref self).main_out, (deref self).target.llvm_size_type())
+                        append_cstr(ref (deref self).main_out, " ")
                         append_i64(ref (deref self).main_out, elem_sz)
                         append_cstr(ref (deref self).main_out, ", ptr @__nizam_drop_")
                         append_str(ref (deref self).main_out, elem_base)
