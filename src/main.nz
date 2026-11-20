@@ -1128,10 +1128,14 @@ fn compile_source(
                 else:
                     _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, out_file, extra_flags_c)
         elif target.is_python_ext():
+            // Slice 28: the python FFI glue (buffer protocol + interpreter
+            // shims) is emitted as program-local IR — runtime.c is no
+            // longer linked into extension modules. Py_* symbols resolve
+            // from the interpreter at import time.
             if lib_dir == None to cstr:
-                _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" ../mantiqz/mantiq-compiler/src/runtime.c -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, out_file, extra_flags_c, py_opt, ll_path, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, out_file, extra_flags_c, py_opt, ll_path, out_file, extra_flags_c)
             else:
-                _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" \"%s/runtime.c\" -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, lib_dir, out_file, extra_flags_c, py_opt, ll_path, lib_dir, out_file, extra_flags_c)
+                _sp = sprintf(cmd_buf, "clang %s -shared -fPIC \"%s\" -o \"%s\" -lm %s 2>&1 || zig cc %s -shared -fPIC \"%s\" -o \"%s\" -lm %s 2>&1" to cstr, py_opt, ll_path, out_file, extra_flags_c, py_opt, ll_path, out_file, extra_flags_c)
         else:
             if lib_dir == None to cstr:
                 _sp = sprintf(cmd_buf, "zig cc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || gcc %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1 || clang %s \"%s\" -L. -ltree-sitter-mantiq tree_sitter_helper.c -Wl,-rpath,'$ORIGIN' -o \"%s\" -lm%s 2>&1" to cstr, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c, opt_flag, ll_path, out_file, extra_flags_c)

@@ -3784,3 +3784,62 @@ pair), `mantiq/src/runtime.c` ↔ `mantiqz/mantiq-compiler/src/runtime.c`
 **Verified.** runtime.c compiles standalone after the cut; no
 reference to the removed symbols survives anywhere in the tree;
 gate 50/50.
+
+## Slice 28 — python FFI glue ported to program-local IR; runtime.c unlinked from python-ext builds
+
+**What landed.** runtime.c's python surface — the buffer-owner trio
+(`mantiq_buffer_owner_create/retain/release`), the PEP 3118 buffer
+protocol (`__mantiq_py_bf_getbuffer`/`__mantiq_py_bf_releasebuffer`/
+`__mantiq_py_tp_dealloc_buffer`/`__mantiq_py_wrap_buffer`/
+`__mantiq_py_extract_buffer`), and the embedded-interpreter shims
+(`mantiq_py_init`/`import`/`getattr`/`call`/`incref`/`decref`/the
+`to_*` conversions/`box_list_f64`/`box_list_i64`) — is now emitted as
+program-local IR by `emit_rt_glue_bodies` (64-bit path only, inserted
+before the wasm32 tier). 21 function bodies + their string constants,
+~390 lines of C ported.
+
+**Emission gate.** The glue is emitted only when
+`rt_body_missing("define void @mantiq_py_init(")` AND the program
+uses it — target is a python extension module OR any of six
+`rt_decl_present("call <ty> @mantiq_py_")` needles fire — AND not
+`no_libc`. The Py_* externs are emitted as `extern_weak` (C
+weak-extern semantics): a standalone binary links and loads without
+libpython, and every body guards its calls via
+`icmp ne ptr @sym, null`. `PyExc_BufferError`/`PyExc_TypeError` are
+`extern_weak global ptr` (globals, not functions). Per-symbol
+`rt_decl_present` guards avoid duplicate-declare collisions with
+`emit_python_extension_module`'s non-weak declares and user externs.
+
+**Layouts (64-bit).** MantiqBufferOwner 64 B (refcount@0 i32,
+data@8, count@16 i64, esz@24 u32, fmt[8]@28, dtor@40, shape@48,
+strides@56); MantiqPyWrapper 32 B (refcnt@0, type@8, owner@16,
+is_owned@24 u8); MantiqPyBuffer 80 B (CPython Py_buffer mirror:
+buf@0, obj@8, len@16, itemsize@24, readonly@32, ndim@36, format@40,
+shape@48, strides@56, suboff@64, internal@72). The IR allocates via
+`@mantiq_malloc`/`@mantiq_free` (the TU-local surface), not static
+`mantiq_malloc_c`.
+
+**Link-line fix.** runtime.c is dropped from both python-ext link
+lines in main.nz. This fixes the pre-existing duplicate-symbol
+breakage: `nizam_set_target_ptr_size`, `nizam_get_target_ptr_size`,
+`format_llvm_float`, `nizam_get_terminal_width` are strong in
+runtime.c and also TU-local in generated code, so extension builds
+failed at `ld.lld: duplicate symbol` when lib_dir resolved the
+runtime copy. Py_* symbols now resolve from the interpreter at
+import time.
+
+**Verified.** Standalone IR harness (llvm-as + clang link against
+libpython3.14): init, import math/getattr sqrt/call sqrt(4.0)=2.0,
+to_i64/i32/bool/cstr, box_list_f64, buffer owner + bf_getbuffer
+field checks + double release — all pass. End-to-end with NumPy
+(`test_buffer_protocol.nz --target python-ext`, module built WITHOUT
+runtime.c): the full Phase 3 suite passes 6/6 — zero-copy 1M-f64
+ingestion (sum 50000000.000), in-place zero-copy mutation, PEP 3118
+native-buffer export (memoryview format 'd', itemsize 8, len 1000),
+shared-ownership lifetime escape, List[f64] ingestion, and 64-bit
+integer buffers (format 'q'). Negative check: p26a built with the
+new compiler emits 0 `mantiq_py` symbols (glue not emitted when
+unused). Regressions with the new compiler: async 3/3, channels 5/5,
+p24c, p26b green; p24a fails identically on the pre-change promoted
+driver (pre-existing strict-mode import error, not a Slice 28
+regression). Compiler builds clean; fmt idempotent.
