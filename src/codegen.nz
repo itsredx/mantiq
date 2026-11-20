@@ -1327,6 +1327,12 @@ struct LLVMCodegen:
     // Phase 5 (spec 0031): --no-libc freestanding builds — emit _start +
     // syscall glue (nz_sys_write/nz_sys_getpid) instead of linking crt/libc.
     public var no_libc as bool
+    // Phase 5 slice 26: quantum glue is use-gated. DCE sets quantum_used
+    // (qbit/qreg types, H/measure/CNOT/X/Y/Z/qbit/qreg call sites);
+    // main bridges it here after codegen init. When False, no quantum
+    // declares, no @__nizam_qubits global, no mantiq_quantum_* bodies —
+    // 0 bytes quantum overhead in the emitted module.
+    public var quantum_used as bool
     public var pyobject_vars as Dict[String, bool]
     public var py_module_aliases as Dict[String, String]
     public var string_intern_ids as Dict[String, i32]
@@ -1377,6 +1383,7 @@ struct LLVMCodegen:
         (deref self).python_exported_structs = List[ptr[Node]]()
         (deref self).has_python_embed = False
         (deref self).no_libc = False
+        (deref self).quantum_used = False
         (deref self).pyobject_vars = Dict[String, bool]()
         (deref self).py_module_aliases = Dict[String, String]()
         (deref self).string_intern_ids = Dict[String, i32]()
@@ -2781,22 +2788,29 @@ struct LLVMCodegen:
             append_cstr(out, "define i64 @__mantiq_channel_cap(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  ret i64 %cap\n}\n\n")
         if h_mantiq_channel_free == 1 to i32 and not (deref self).no_libc:
             append_cstr(out, "define void @__mantiq_channel_free(ptr %chan) {\nentry:\n  %cn = icmp eq ptr %chan, null\n  br i1 %cn, label %out, label %go\ngo:\n  call void @__mantiq_channel_close(ptr %chan)\n  %mp = getelementptr i8, ptr %chan, i64 48\n  call void @__mantiq_chan_lock(ptr %mp)\n  %cnt32 = getelementptr i8, ptr %chan, i64 32\n  %cnt = load i64, ptr %cnt32\n  %buf0 = getelementptr i8, ptr %chan, i64 0\n  %buf = load ptr, ptr %buf0\n  %hp16 = getelementptr i8, ptr %chan, i64 16\n  %head = load i64, ptr %hp16\n  %cap8 = getelementptr i8, ptr %chan, i64 8\n  %cap = load i64, ptr %cap8\n  br label %iloop\niloop:\n  %ivp = alloca i64\n  store i64 0, ptr %ivp\n  br label %ichk\nichk:\n  %iv = load i64, ptr %ivp\n  %more = icmp slt i64 %iv, %cnt\n  br i1 %more, label %ibody, label %idone\nibody:\n  %idx0 = add i64 %head, %iv\n  %idx = srem i64 %idx0, %cap\n  %sp = getelementptr ptr, ptr %buf, i64 %idx\n  %slot = load ptr, ptr %sp\n  %sn = icmp eq ptr %slot, null\n  br i1 %sn, label %inext, label %ifree\nifree:\n  call void @mantiq_free(ptr %slot)\n  br label %inext\ninext:\n  %iv2 = load i64, ptr %ivp\n  %iv3 = add i64 %iv2, 1\n  store i64 %iv3, ptr %ivp\n  br label %ichk\nidone:\n  call void @mantiq_free(ptr %buf)\n  call void @__mantiq_chan_unlock(ptr %mp)\n  call void @mantiq_free(ptr %chan)\n  br label %out\nout:\n  ret void\n}\n\n")
-        append_cstr(out, "\n; ---- quantum simulator (s_mantiq_qubits[64]) ----\n\n")
-        if h_mantiq_quantum_qbit == 1 to i32:
-            append_cstr(out, "@__nizam_qubits = internal global [64 x i32] zeroinitializer\n")
-            append_cstr(out, "define i32 @mantiq_quantum_qbit(i32 %id) {\nentry:\n  %idx = and i32 %id, 63\n  %nz = icmp ne i32 %id, 0\n  %v = zext i1 %nz to i32\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  store i32 %v, ptr %p\n  ret i32 %idx\n}\n\n")
-        if h_mantiq_quantum_h == 1 to i32:
-            append_cstr(out, "define i32 @mantiq_quantum_h(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n")
-        if h_mantiq_quantum_measure == 1 to i32:
-            append_cstr(out, "define i32 @mantiq_quantum_measure(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  ret i32 %v\n}\n\n")
-        if h_mantiq_quantum_cnot == 1 to i32:
-            append_cstr(out, "define void @mantiq_quantum_cnot(i32 %c, i32 %t) {\nentry:\n  %ci = and i32 %c, 63\n  %cp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ci\n  %cv = load i32, ptr %cp\n  %set = icmp ne i32 %cv, 0\n  br i1 %set, label %flip, label %out\nflip:\n  %ti = and i32 %t, 63\n  %tp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ti\n  %tv = load i32, ptr %tp\n  %nv = xor i32 %tv, 1\n  store i32 %nv, ptr %tp\n  br label %out\nout:\n  ret void\n}\n\n")
-        if h_mantiq_quantum_x == 1 to i32:
-            append_cstr(out, "define i32 @mantiq_quantum_x(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
-        if h_mantiq_quantum_y == 1 to i32:
-            append_cstr(out, "define i32 @mantiq_quantum_y(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
-        if h_mantiq_quantum_z == 1 to i32:
-            append_cstr(out, "define i32 @mantiq_quantum_z(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n; ---- RTTI isa (TypeDescriptor: type_id=0 i32, name=8, parent=16 i32, n=20 i32, ids=24) ----\n\n")
+        // Phase 5 slice 26: the quantum glue is use-gated. DCE sets
+        // quantum_used (qbit/qreg types; H/measure/CNOT/X/Y/Z/qbit/qreg
+        // call sites); main bridges it into codegen. Without it, the
+        // module gets NO quantum declares, NO 256-byte @__nizam_qubits
+        // global, and NO simulator bodies.
+        if (deref self).quantum_used:
+            append_cstr(out, "\n; ---- quantum simulator (s_mantiq_qubits[64]) ----\n\n")
+            if h_mantiq_quantum_qbit == 1 to i32:
+                append_cstr(out, "@__nizam_qubits = internal global [64 x i32] zeroinitializer\n")
+                append_cstr(out, "define i32 @mantiq_quantum_qbit(i32 %id) {\nentry:\n  %idx = and i32 %id, 63\n  %nz = icmp ne i32 %id, 0\n  %v = zext i1 %nz to i32\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  store i32 %v, ptr %p\n  ret i32 %idx\n}\n\n")
+            if h_mantiq_quantum_h == 1 to i32:
+                append_cstr(out, "define i32 @mantiq_quantum_h(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n")
+            if h_mantiq_quantum_measure == 1 to i32:
+                append_cstr(out, "define i32 @mantiq_quantum_measure(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  ret i32 %v\n}\n\n")
+            if h_mantiq_quantum_cnot == 1 to i32:
+                append_cstr(out, "define void @mantiq_quantum_cnot(i32 %c, i32 %t) {\nentry:\n  %ci = and i32 %c, 63\n  %cp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ci\n  %cv = load i32, ptr %cp\n  %set = icmp ne i32 %cv, 0\n  br i1 %set, label %flip, label %out\nflip:\n  %ti = and i32 %t, 63\n  %tp = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %ti\n  %tv = load i32, ptr %tp\n  %nv = xor i32 %tv, 1\n  store i32 %nv, ptr %tp\n  br label %out\nout:\n  ret void\n}\n\n")
+            if h_mantiq_quantum_x == 1 to i32:
+                append_cstr(out, "define i32 @mantiq_quantum_x(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
+            if h_mantiq_quantum_y == 1 to i32:
+                append_cstr(out, "define i32 @mantiq_quantum_y(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  %p = getelementptr [64 x i32], ptr @__nizam_qubits, i64 0, i32 %idx\n  %v = load i32, ptr %p\n  %nv = xor i32 %v, 1\n  store i32 %nv, ptr %p\n  ret i32 %idx\n}\n\n")
+            if h_mantiq_quantum_z == 1 to i32:
+                append_cstr(out, "define i32 @mantiq_quantum_z(i32 %q) {\nentry:\n  %idx = and i32 %q, 63\n  ret i32 %idx\n}\n\n\n\n")
+        append_cstr(out, "; ---- RTTI isa (TypeDescriptor: type_id=0 i32, name=8, parent=16 i32, n=20 i32, ids=24) ----\n\n")
         if h_mantiq_isa == 1 to i32:
             append_cstr(out, "define i32 @mantiq_isa(ptr %rtti, i32 %target) {\nentry:\n  %rn = icmp eq ptr %rtti, null\n  br i1 %rn, label %no, label %chk\nchk:\n  %tid = load i32, ptr %rtti\n  %eq1 = icmp eq i32 %tid, %target\n  br i1 %eq1, label %yes, label %chk2\nchk2:\n  %pidp = getelementptr i8, ptr %rtti, i64 16\n  %pid = load i32, ptr %pidp\n  %eq2 = icmp eq i32 %pid, %target\n  %tnz = icmp ne i32 %target, 0\n  %hit2 = and i1 %eq2, %tnz\n  br i1 %hit2, label %yes, label %chk3\nchk3:\n  %nip = getelementptr i8, ptr %rtti, i64 20\n  %ni = load i32, ptr %nip\n  %idsp = getelementptr i8, ptr %rtti, i64 24\n  %ids = load ptr, ptr %idsp\n  %ivp = alloca i32\n  store i32 0, ptr %ivp\n  br label %iloop\niloop:\n  %iv = load i32, ptr %ivp\n  %more = icmp slt i32 %iv, %ni\n  br i1 %more, label %ibody, label %no\nibody:\n  %idsn = icmp eq ptr %ids, null\n  br i1 %idsn, label %inext, label %icmp2\nicmp2:\n  %ep = getelementptr i32, ptr %ids, i32 %iv\n  %ev = load i32, ptr %ep\n  %hit = icmp eq i32 %ev, %target\n  br i1 %hit, label %yes, label %inext\ninext:\n  %iv2 = load i32, ptr %ivp\n  %iv3 = add i32 %iv2, 1\n  store i32 %iv3, ptr %ivp\n  br label %iloop\nyes:\n  ret i32 1\nno:\n  ret i32 0\n}\n\n")
         // Diagnostics terminal width (error.nz extern; was runtime.c):
@@ -3073,13 +3087,16 @@ struct LLVMCodegen:
         append_cstr(ref (deref self).type_out, "declare i8 @__mantiq_dict_pop(ptr, ptr, i32, ptr, i32)\n")
         append_cstr(ref (deref self).type_out, "declare i8 @__mantiq_dict_popitem(ptr, ptr, ptr, i32, i32)\n")
         append_cstr(ref (deref self).type_out, "declare void @__mantiq_dict_fromkeys(ptr, ptr, ptr, ptr, i32, i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_qbit(i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_h(i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_measure(i32)\n")
-        append_cstr(ref (deref self).type_out, "declare void @mantiq_quantum_cnot(i32, i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_x(i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_y(i32)\n")
-        append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_z(i32)\n")
+        // Phase 5 slice 26: declare the quantum surface only when the
+        // program uses it (DCE quantum_used).
+        if (deref self).quantum_used:
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_qbit(i32)\n")
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_h(i32)\n")
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_measure(i32)\n")
+            append_cstr(ref (deref self).type_out, "declare void @mantiq_quantum_cnot(i32, i32)\n")
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_x(i32)\n")
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_y(i32)\n")
+            append_cstr(ref (deref self).type_out, "declare i32 @mantiq_quantum_z(i32)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_concat_str(ptr, i64, ptr, i64)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_i32_to_str(i32, ptr)\n")
         append_cstr(ref (deref self).type_out, "declare ptr @mantiq_i64_to_str(i64, ptr)\n")

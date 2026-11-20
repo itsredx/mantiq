@@ -992,6 +992,8 @@ fn compile_source(
     (deref cg).needs_drop_registry_active = True
     (deref cg).target = target
     (deref cg).no_libc = no_libc
+    // Phase 5 slice 26: quantum glue is use-gated on the DCE verdict.
+    (deref cg).quantum_used = (deref dce_opt).quantum_used
     if target.is_python_ext():
         (deref cg).python_ext_module_name = get_module_name_from_path(out_file)
     (deref cg).populate_auto_drops_from_borrowck((deref bc).auto_drops)

@@ -3723,3 +3723,39 @@ actor producer/consumer over the Slice 24 futex channels), `p24a.nz`
 stress), plus the standalone IR harness (100 concurrent tasks awaited
 in order, sum 9900; a 200 ms task parked and woken, result 7). Emitted
 async module: 0 pthread_mutex/cond references. Gate 50/50.
+## Slice 26 — quantum glue is use-gated (0 bytes when unused) LANDED
+
+**What landed.** The quantum simulator glue that codegen emitted in
+EVERY module — 7 unconditional declares, the 256-byte
+`@__nizam_qubits` global, and the 7 `mantiq_quantum_*` bodies — is
+now gated on actual use:
+
+- DCE already computed a `quantum_used` flag (qbit/qreg type
+  annotations; H/measure/CNOT/X/Y/Z/qbit/qreg call sites and
+  identifiers) and pruned unused `import std.quantum` at the AST
+  level, but the verdict never reached codegen — the tree-shaking
+  stopped at the import statement.
+- `main` now bridges `(deref dce_opt).quantum_used` into the
+  `LLVMCodegen` struct (new field, init False). When False, the
+  emitted module gets NO quantum declares, NO `@__nizam_qubits`, and
+  NO simulator bodies — the plan's "projects not importing
+  std.quantum incur 0 bytes" invariant holds structurally.
+- The RTTI-isa section header, previously buried at the tail of the
+  `mantiq_quantum_z` body string, moved to its own unconditional
+  append (a comment; emitted as before).
+
+**Scope.** The 32-bit tier (`emit_rt_glue_bodies_32`) never emitted
+quantum bodies, so it is untouched; the declares gate applies to all
+targets, trimming wasm modules too. The gate is conservative: a
+user-defined `fn H` sets the flag spuriously and just adds the
+(similarly named but distinct) `mantiq_quantum_h` body as dead weight —
+correctness is unaffected.
+
+**Verified.** `p26a.nz` (hello world): builds, runs, `nm` reports 0
+`mantiq_quantum`/`nizam_qubits` symbols, binary 520 bytes smaller than
+the ungated build (25080 vs 25600). `p26b.nz`: qbit/H/X/Z/Y/CNOT/measure
+against the 64-slot simulator, results match the test_quantum_dce
+semantics (X(|0>)→1, CNOT(|1>,|0>)→1, measure(H(|0>))=0), 7 symbols +
+storage present. Regressions: async 3/3, channels 5/5, quantum DCE
+compiler test rc=0, p24a (Mutex 400000), p24c (channel stress 4000).
+Gate 50/50.
