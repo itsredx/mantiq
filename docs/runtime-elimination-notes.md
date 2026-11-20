@@ -3686,3 +3686,40 @@ try_send/try_recv, close, and the async producer/consumer), `p24c.nz`
 (4 producers x 1000 sends through a cap-4 ring, total 4000, len 0),
 plus a standalone IR harness: 4 producers x 1000 through a cap-2 ring
 with the same code, correct total, no hangs. Gate 50/50.
+## Slice 25 — futex-parked tasks (spawn/await glue) LANDED
+
+**What landed.** The async glue (`__nizam_task_runner`, `mantiq_spawn`,
+`mantiq_await`) no longer uses `pthread_mutex_t`/`pthread_cond_t`. The
+Task struct stays 128 bytes — thread=0, func=8, env=16, result=24,
+done=32 — but the mutex word at 40 and the cond region at 80 are now
+4-byte futex words (lock @40, done-gen @80):
+
+- runner: call the fn, store the result at 24, then under the lock set
+  `done=1`, bump the done-gen, and `FUTEX_WAKE(INT_MAX)` on it before
+  returning to pthread;
+- await: lock, check `done`; if not done read the done-gen under the
+  lock, unlock, `FUTEX_WAIT(gen)`, relock, recheck (generation makes a
+  set-between-read-and-wait race observable as EAGAIN — no lost
+  wakeups); when done, unlock, `pthread_join` the thread, free the
+  task, return the result.
+
+`pthread_create`/`pthread_join` stay — Phase 4 parks tasks on futexes,
+it does not yet own scheduling. The now-unused
+`pthread_mutex_*`/`pthread_cond_*` declares are dropped from the
+emitted prelude (zero references in a rebuilt async test module).
+
+**Layout contract.** runtime.c's weak `MantiqTask` keeps the same
+128-byte shape and same field offsets, so the weak-vs-IR collision
+safety net stays coherent.
+
+**Scope.** As with Slice 24: the 32-bit (wasm32) tier never emits
+tasks/channels (WASI has no futexes/threads); no-libc builds keep the
+C weak defs. Phase 4 is native-64-bit-first by design.
+
+**Verified.** `test_async_concurrency.mq` 3/3 (spawn/await execution,
+multiple concurrent tasks), `test_channels_actors.mq` 5/5 (channel +
+actor producer/consumer over the Slice 24 futex channels), `p24a.nz`
+(4x100k contended `std.sync.Mutex`), `p24c.nz` (4x1000 channel
+stress), plus the standalone IR harness (100 concurrent tasks awaited
+in order, sum 9900; a 200 ms task parked and woken, result 7). Emitted
+async module: 0 pthread_mutex/cond references. Gate 50/50.
