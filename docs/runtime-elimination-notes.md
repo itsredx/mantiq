@@ -3588,3 +3588,61 @@ closure-typed (those legitimately return structs).
 - module import resolution stays source-directory-relative: probes
   importing std must live in (or import from) the mantiq tree, not
   an arbitrary directory.
+
+## Slice 23 — pure-Nizam futex sync primitives (`std.sync`) LANDED
+
+**What landed.** `std/sync.nz` is the first pure-Nizam OS sync layer:
+
+- raw futex engine: `futex_wait`/`futex_wake` call `SYS_futex` directly
+  (`202` on x86_64, `98` on aarch64 via `arch()`), with
+  `FUTEX_WAIT_PRIVATE`/`FUTEX_WAKE_PRIVATE` (`128`/`129`);
+- word primitives over the compiler-rt outline atomics ABI
+  (`__atomic_load_4`, `__atomic_store_4`, `__atomic_exchange_4`,
+  `__atomic_compare_exchange_4`, `__atomic_fetch_add_4`,
+  `__atomic_fetch_sub_4` — zig cc provides the outline spellings, not
+  `_n`);
+- `Mutex`, the musl 3-state word: `0` unlocked / `1` locked-no-waiters /
+  `2` locked-waiters. Fast path CAS `0->1`; the contended path claims
+  with `xchg 2` and a winner **keeps** state `2`, so its unlock always
+  wakes a parked thread. Unlock is `xchg 0` + `FUTEX_WAKE(1)` when the
+  old state was `2`; `try_lock` is the plain `0->1` CAS.
+
+The first (Drepper-style) contended path re-acquired via `0->1` and
+hung the 4x100k probe: a woken thread that re-locked to `1` later
+released without waking the threads still parked on `2` — a lost
+wakeup. The musl exchange-to-2 scheme above is the fix.
+
+**Consts in imported-module bodies go through typed locals.** When a
+std module is reached via import, a const identifier materializes as a
+global whose inferred type is lost at the call site; a vararg without
+an inferred type defaults to `ptr`, which is invalid for an i64 const
+load. `futex_wait`/`futex_wake` and the atomic wrappers therefore
+assign the constant to a typed local first.
+
+**Codegen fixes required by the probes.**
+
+a. LLVM 23 rejects a forward-referenced named type in a global
+   initializer: `@g = global %Mutex zeroinitializer` before
+   `%Mutex = type { i32 }` fails with "invalid type for null constant"
+   (minimal `llvm-as` repro). The emission walks append `%X = type`
+   wherever the `StructDecl` lands, and imported modules land after
+   main-module globals. `generate()` now hoists every `%X = type` line
+   to the front of `type_out` at final assembly (module-level order is
+   otherwise irrelevant). The line scan keeps the byte deref out of
+   the `while` condition: a deref compared directly in a condition
+   loses its `ptr[u8]` cast type and infers as the Any fallback
+   (invalid IR).
+
+b. A `%`-named struct global with no explicit initializer now emits
+   `zeroinitializer` instead of the integer `0` (an integer constant
+   is not a valid struct initializer).
+
+**Verified.** Probes in `research/freestanding/` (local-only, gitignored):
+
+- `p24a0.nz`: all six outline atomics link; CAS semantics correct;
+- `p24b.nz`: uncontended wake = 0, mismatched wait = `-EAGAIN` (-11),
+  real cross-thread park/wake through `spawn`/`await`;
+- `p24a.nz`: fast path + `try_lock` + 4 threads x 100k increments under
+  the `Mutex` = 400000, rc=0.
+
+Gate: 50/50 with the futex primitives in the compiler source; promoted.

@@ -3174,7 +3174,51 @@ struct LLVMCodegen:
                     append_cstr(ref (deref self).type_out, "\n\n" to cstr)
             st_i = st_i + 1 to i64
         if (deref self).type_out.buffer != None to ptr[u8]:
-            append_cstr(ref out, (deref self).type_out.buffer to cstr)
+            // LLVM 23 rejects a forward-referenced named type in a global
+            // initializer ("invalid type for null constant"): struct type
+            // declarations must PRECEDE the globals that reference them.
+            // The emission walks append `%Name = type ...` wherever the
+            // StructDecl falls (imported modules land after main-module
+            // globals), so hoist every type-declaration line to the front
+            // of type_out here. Module-level entities are otherwise
+            // order-independent.
+            let to_buf as ptr[u8] = (deref self).type_out.buffer
+            let to_len as usize = strlen(to_buf to cstr)
+            var td_hoisted as StringBuilder = StringBuilder.make()
+            var td_rest as StringBuilder = StringBuilder.make()
+            var td_lp as usize = 0 to usize
+            while td_lp < to_len:
+                var td_ep as usize = td_lp
+                while td_ep < to_len:
+                    // byte load outside the loop condition: a deref compared
+                    // directly in a while-condition loses its ptr[u8] cast
+                    // type and infers as the Any fallback (invalid IR).
+                    let td_c as u8 = deref ((to_buf to usize + td_ep to usize) to ptr[u8])
+                    if td_c == 10 to u8:
+                        break
+                    td_ep = td_ep + 1 to usize
+                let td_llen as usize = td_ep - td_lp
+                if td_llen > 0 to usize:
+                    let td_line as ptr[u8] = make[u8](td_llen + 1 to usize)
+                    let _tdm as ptr = memcpy(td_line to ptr, (to_buf to usize + td_lp to usize) to ptr, td_llen)
+                    deref ((td_line to usize + td_llen to usize) to ptr[u8]) = 0 to u8
+                    let td_is_type as bool = (deref td_line) == 37 to u8 and strstr(td_line to cstr, " = type " to cstr) != None to cstr
+                    let td_s as String = String.make(td_line to cstr)
+                    if td_is_type:
+                        append_str(ref td_hoisted, td_s)
+                        append_cstr(ref td_hoisted, "\n" to cstr)
+                    else:
+                        append_str(ref td_rest, td_s)
+                        append_cstr(ref td_rest, "\n" to cstr)
+                    td_s.deinit()
+                    free(td_line to ptr)
+                td_lp = td_ep + 1 to usize
+            if (deref td_hoisted).buffer != None to ptr[u8]:
+                append_cstr(ref out, (deref td_hoisted).buffer to cstr)
+            if (deref td_rest).buffer != None to ptr[u8]:
+                append_cstr(ref out, (deref td_rest).buffer to cstr)
+            td_hoisted.deinit()
+            td_rest.deinit()
         if (deref self).main_out.buffer != None to ptr[u8]:
             append_cstr(ref out, (deref self).main_out.buffer to cstr)
         if (deref self).outlined_out.buffer != None to ptr[u8]:
@@ -3350,7 +3394,11 @@ struct LLVMCodegen:
                         v_type = String.make("i32" to cstr)
                     let init_node as ptr[Node] = node_left(decl)
                     var init_val as ptr[u8] = "0" to ptr[u8]
-                    if (deref (v_type.data)) == 123 to u8 or strcmp(v_type.data to cstr, "ptr" to cstr) == 0:
+                    // Aggregate globals (anonymous { ... } structs AND
+                    // named %Struct types) must zero-init with
+                    // zeroinitializer — a scalar "0" is an IR type error
+                    // (found by std.sync's global Mutex).
+                    if (deref (v_type.data)) == 123 to u8 or (deref (v_type.data)) == 37 to u8 or strcmp(v_type.data to cstr, "ptr" to cstr) == 0:
                         init_val = "zeroinitializer" to ptr[u8]
                     if init_node != None to ptr[Node] and node_kind(init_node) == NodeType.NumberLiteral:
                         let s_raw as String = node_str_val(init_node)

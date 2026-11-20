@@ -1,0 +1,177 @@
+// ═════════════════════════════════════════════════════════════════════════════
+// std.sync — Phase 4 Slice 23: pure-Nizam synchronization primitives.
+//
+// Zero-C-runtime surface: the Mutex below parks on Linux futexes (direct
+// syscall(2) through glibc's variadic shim) and mutates its state word via
+// the outline-atomic ABI (`__atomic_*_4` — provided by zig cc's compiler-rt,
+// no libatomic dependency).  No pthread, no runtime.c.
+//
+// Mutex is Drepper's 3-state design ("Futexes Are Tricky", mutex #2):
+//   0 = unlocked
+//   1 = locked, no waiters        (fast uncontended path)
+//   2 = locked, waiters parked    (unlock must futex-wake)
+//
+// Word-width note: all futex args are passed as i64 — glibc's syscall()
+// reads varargs as unsigned long, and an i32 vararg would leave the upper
+// register bits unspecified (kernel truncates, but do not rely on it).
+// ═════════════════════════════════════════════════════════════════════════════
+
+
+from std.sys import arch
+
+
+extern fn strcmp(s1 as cstr, s2 as cstr) as i32
+
+
+// ── externs ──────────────────────────────────────────────────────────────────
+// glibc syscall shim: syscall(number, karg1..karg6).  The number is the
+// FIRST C argument; the varargs map positionally onto kernel args 1-6.
+extern fn syscall(num as i64, ...) as i64
+
+
+// Outline-atomic ABI (zig compiler-rt / libatomic): size-suffixed forms.
+// Memory-order models: 0 relaxed, 2 acquire, 3 release, 4 acq_rel, 5 seq_cst.
+extern fn __atomic_load_4(src as ptr, model as i32) as i32
+extern fn __atomic_store_4(dest as ptr, val as i32, model as i32)
+extern fn __atomic_exchange_4(p as ptr, val as i32, model as i32) as i32
+extern fn __atomic_compare_exchange_4(
+    p as ptr,
+    expected as ptr,
+    desired as i32,
+    weak as i8,
+    succ as i32,
+    fail as i32,
+) as i8
+extern fn __atomic_fetch_add_4(p as ptr, val as i32, model as i32) as i32
+extern fn __atomic_fetch_sub_4(p as ptr, val as i32, model as i32) as i32
+
+
+// ── constants ────────────────────────────────────────────────────────────────
+// Linux futex(2) ops, private forms preferred (no shared-mapping overhead).
+const FUTEX_WAIT_PRIVATE as i64 = 128
+const FUTEX_WAKE_PRIVATE as i64 = 129
+
+
+// Atomic memory-order models (C++ spelling, used by the outline ABI).
+const MO_SEQCST as i32 = 5
+const MO_ACQUIRE as i32 = 2
+const MO_RELEASE as i32 = 3
+
+
+// Mutex state word.
+const MUTEX_UNLOCKED as i32 = 0
+const MUTEX_LOCKED as i32 = 1
+const MUTEX_CONTENDED as i32 = 2
+
+
+// ── futex engine ─────────────────────────────────────────────────────────────
+// SYS_futex numbers: x86_64 = 202, aarch64 = 98 (generic asm-generic
+// unistd, shared by aarch64/riscv64/loongarch64).
+fn futex_syscall_nr() as i64:
+    if strcmp(arch().data, "x86_64" to cstr) == 0:
+        return 202 to i64
+    return 98 to i64
+
+
+// Park the calling thread until the word at `addr` differs from
+// `expected` (or a spurious wake — callers must re-check the value).
+// Returns 0 on wake, -1 on error (EAGAIN when the word had changed).
+// The op constant goes through a typed local: when this module is
+// reached via import, const identifiers materialize as globals whose
+// inferred type is lost at the call site, and a vararg without an
+// inferred type defaults to ptr (invalid for an i64 const load).
+fn futex_wait(addr as ptr, expected as i32) as i64:
+    var op as i64 = FUTEX_WAIT_PRIVATE
+    return syscall(futex_syscall_nr(), addr, op, (expected to i64), None to ptr, None to ptr, 0 to i64)
+
+
+// Wake up to `n` threads parked on `addr`.  Returns the number woken.
+fn futex_wake(addr as ptr, n as i32) as i64:
+    var op as i64 = FUTEX_WAKE_PRIVATE
+    return syscall(futex_syscall_nr(), addr, op, (n to i64), None to ptr, None to ptr, 0 to i64)
+
+
+// ── raw word primitives (published for lock-free std code) ───────────────────
+// (consts route through typed locals — see the futex note above)
+fn atomic_load_word(addr as ptr) as i32:
+    var mo as i32 = MO_SEQCST
+    return __atomic_load_4(addr, mo)
+
+
+fn atomic_store_word(addr as ptr, val as i32):
+    var mo as i32 = MO_SEQCST
+    __atomic_store_4(addr, val, mo)
+
+
+// Compare-and-swap: if the word equals `expected`, stores `desired` and
+// returns True (on failure, `expected` receives the observed value).
+fn atomic_cas_word(addr as ptr, expected as ptr, desired as i32) as bool:
+    var mo as i32 = MO_SEQCST
+    var weak as i8 = 0
+    let ok as i8 = __atomic_compare_exchange_4(addr, expected, desired, weak, mo, mo)
+    return ok != 0 to i8
+
+
+fn atomic_exchange_word(addr as ptr, val as i32) as i32:
+    var mo as i32 = MO_SEQCST
+    return __atomic_exchange_4(addr, val, mo)
+
+
+fn atomic_fetch_add_word(addr as ptr, val as i32) as i32:
+    var mo as i32 = MO_SEQCST
+    return __atomic_fetch_add_4(addr, val, mo)
+
+
+fn atomic_fetch_sub_word(addr as ptr, val as i32) as i32:
+    var mo as i32 = MO_SEQCST
+    return __atomic_fetch_sub_4(addr, val, mo)
+
+
+// ── futex mutex ──────────────────────────────────────────────────────────────
+struct Mutex:
+    // 0 unlocked / 1 locked-no-waiters / 2 locked-waiters-parked.
+    public var state as i32 = 0
+
+
+fn mutex_init(m as ptr[Mutex]):
+    var unlocked as i32 = MUTEX_UNLOCKED
+    var mo as i32 = MO_SEQCST
+    __atomic_store_4(m to ptr, unlocked, mo)
+
+
+fn mutex_lock(m as ptr[Mutex]):
+    let wp as ptr = m to ptr
+    var locked as i32 = MUTEX_LOCKED
+    var contended as i32 = MUTEX_CONTENDED
+    // Fast path: 0 -> 1 (no waiters known).
+    var expected as i32 = MUTEX_UNLOCKED
+    let won as bool = atomic_cas_word(wp, (ref expected) to ptr, locked)
+    if won:
+        return
+    // Contended path: claim with an exchange to 2. A winner keeps the
+    // state at 2, so its unlock always wakes a parked thread. (A woken
+    // thread that re-acquired via 0 -> 1 would later release without
+    // waking the threads still parked on 2 — a lost wakeup that hangs
+    // the stragglers.)
+    while True:
+        let old as i32 = atomic_exchange_word(wp, contended)
+        if old == MUTEX_UNLOCKED:
+            return
+        let _w as i64 = futex_wait(wp, contended)
+        pass
+
+
+fn mutex_unlock(m as ptr[Mutex]):
+    let wp as ptr = m to ptr
+    var mo as i32 = MO_SEQCST
+    // Exchange to 0: old == 2 means waiters are parked — wake one.
+    let old as i32 = __atomic_exchange_4(wp, 0 to i32, mo)
+    if old == MUTEX_CONTENDED:
+        let _w as i64 = futex_wake(wp, 1 to i32)
+        pass
+
+
+fn mutex_try_lock(m as ptr[Mutex]) as bool:
+    var expected as i32 = MUTEX_UNLOCKED
+    var locked as i32 = MUTEX_LOCKED
+    return atomic_cas_word(m to ptr, (ref expected) to ptr, locked)
