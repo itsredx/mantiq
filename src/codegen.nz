@@ -2847,13 +2847,11 @@ struct LLVMCodegen:
         // module's non-weak declares or user externs.
         let h_py_init as i32 = self.rt_body_missing("define void @mantiq_py_init(" to cstr)
         let h_py_ext as bool = (deref self).target.is_python_ext()
-        let h_py_cs1 as i32 = self.rt_decl_present("call ptr @mantiq_py_" to cstr)
-        let h_py_cs2 as i32 = self.rt_decl_present("call void @mantiq_py_" to cstr)
-        let h_py_cs3 as i32 = self.rt_decl_present("call double @mantiq_py_" to cstr)
-        let h_py_cs4 as i32 = self.rt_decl_present("call i64 @mantiq_py_" to cstr)
-        let h_py_cs5 as i32 = self.rt_decl_present("call i32 @mantiq_py_" to cstr)
-        let h_py_cs6 as i32 = self.rt_decl_present("call i1 @mantiq_py_" to cstr)
-        let h_py_used as bool = h_py_ext or (h_py_cs1 == 1 to i32) or (h_py_cs2 == 1 to i32) or (h_py_cs3 == 1 to i32) or (h_py_cs4 == 1 to i32) or (h_py_cs5 == 1 to i32) or (h_py_cs6 == 1 to i32)
+        // has_python_embed is set during emission when an `import[python]`
+        // site is seen — more accurate than scanning for call/declare
+        // text (rt_decl_present is line-anchored and the builtin declares
+        // land in type_out for every program).
+        let h_py_used as bool = h_py_ext or (deref self).has_python_embed
         if h_py_init == 1 to i32 and h_py_used and not (deref self).no_libc:
             let pyd_Py_Initialize as i32 = self.rt_decl_present("@Py_Initialize(" to cstr)
             if pyd_Py_Initialize != 1 to i32:

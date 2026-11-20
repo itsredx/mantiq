@@ -3800,8 +3800,8 @@ before the wasm32 tier). 21 function bodies + their string constants,
 
 **Emission gate.** The glue is emitted only when
 `rt_body_missing("define void @mantiq_py_init(")` AND the program
-uses it — target is a python extension module OR any of six
-`rt_decl_present("call <ty> @mantiq_py_")` needles fire — AND not
+uses it — target is a python extension module OR `has_python_embed`
+(set during emission on any `import[python]` site) — AND not
 `no_libc`. The Py_* externs are emitted as `extern_weak` (C
 weak-extern semantics): a standalone binary links and loads without
 libpython, and every body guards its calls via
@@ -3837,9 +3837,13 @@ runtime.c): the full Phase 3 suite passes 6/6 — zero-copy 1M-f64
 ingestion (sum 50000000.000), in-place zero-copy mutation, PEP 3118
 native-buffer export (memoryview format 'd', itemsize 8, len 1000),
 shared-ownership lifetime escape, List[f64] ingestion, and 64-bit
-integer buffers (format 'q'). Negative check: p26a built with the
-new compiler emits 0 `mantiq_py` symbols (glue not emitted when
-unused). Regressions with the new compiler: async 3/3, channels 5/5,
-p24c, p26b green; p24a fails identically on the pre-change promoted
+integer buffers (format 'q'). Native embedded Python
+(`test_embedded_python.nz`, `import[python]`): 3/3 — math.sqrt(144)=12,
+np.mean=2.5, 1000 scope allocations with auto-drops (module links
+`-lpython3.14` via a libpython3.12 search-path shim; the hardcoded
+3.12 pin is pre-existing). Negative check: p26a built with the new
+compiler emits 0 `mantiq_py` symbols (glue not emitted when unused).
+Regressions with the new compiler: async 3/3, channels 5/5, p24c,
+p26b green; p24a fails identically on the pre-change promoted
 driver (pre-existing strict-mode import error, not a Slice 28
 regression). Compiler builds clean; fmt idempotent.
