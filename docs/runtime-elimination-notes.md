@@ -3646,3 +3646,43 @@ b. A `%`-named struct global with no explicit initializer now emits
   the `Mutex` = 400000, rc=0.
 
 Gate: 50/50 with the futex primitives in the compiler source; promoted.
+## Slice 24 — futex channels (codegen glue) LANDED
+
+**What landed.** The `__mantiq_channel_*` glue bodies that every program
+gets emitted no longer use pthread mutexes/condvars. Each channel keeps
+the 184-byte layout (buf=0, cap=8, head=16, tail=24, count=32,
+closed=40) but the `pthread_mutex_t` at 48 and the two `pthread_cond_t`
+regions at 88/136 are now 4-byte futex words:
+
+- `@48`: the musl 3-state mutex word, using the same
+  `__mantiq_chan_lock`/`__mantiq_chan_unlock` helpers as the Slice 23
+  `Mutex` (fast CAS `0->1`; contended `xchg 2` keeps the contended bit
+  so unlock always wakes; unlock `xchg 0` + wake on old==2);
+- `@88` (`not_empty`) and `@136` (`not_full`): generation counters.
+  A sender that finds the ring full reads the not_full generation under
+  the lock, unlocks, then `FUTEX_WAIT`s on that value; a receiver
+  increments the generation and wakes one waiter after dequeuing (and
+  vice versa for empty/not_empty). Because the generation is read under
+  the lock and incremented under the lock, a dequeue between the read
+  and the wait is observed as EAGAIN — no lost wakeups.
+
+**Raw syscalls, not libc `syscall()`.** The helpers call `SYS_futex`
+(`202` x86_64 / `98` aarch64) through inline asm (`mov $nr, %rax;
+syscall` with rdi/rsi/rdx/r10/r8/r9 set; the aarch64 form is the tied
+x0..x5 `svc` pattern used by the freestanding tier). This keeps the
+glue independent of libc's variadic `syscall()` shim: codegen declares
+variadic externs with the call-site arity, so a `declare i64
+@syscall(i64, ...)` from the glue would collide with std.sync's
+fixed-arity declaration. It also works unchanged on both 64-bit
+targets.
+
+**Scope.** The 32-bit (wasm32) tier never emitted this section and
+still doesn't; no-libc builds keep the C weak defs (channels were not
+linkable there before either). The C runtime weak definitions remain
+as the safety net, with the same 184-byte allocation.
+
+**Verified.** `test_channels_actors.mq` 5/5 (basic send/recv,
+try_send/try_recv, close, and the async producer/consumer), `p24c.nz`
+(4 producers x 1000 sends through a cap-4 ring, total 4000, len 0),
+plus a standalone IR harness: 4 producers x 1000 through a cap-2 ring
+with the same code, correct total, no hangs. Gate 50/50.
