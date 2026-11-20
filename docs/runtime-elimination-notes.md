@@ -3759,3 +3759,28 @@ semantics (X(|0>)→1, CNOT(|1>,|0>)→1, measure(H(|0>))=0), 7 symbols +
 storage present. Regressions: async 3/3, channels 5/5, quantum DCE
 compiler test rc=0, p24a (Mutex 400000), p24c (channel stress 4000).
 Gate 50/50.
+## Slice 27 — dead 16-qubit state-vector simulator removed from runtime.c
+
+**What landed.** `quantum_qreg`/`quantum_H`/`quantum_CNOT`/
+`quantum_measure` — the 2^16-complex-double state-vector simulator
+(~1 MB static `global_state`, probability-collapse `measure`, srand
+seeding) — are gone from runtime.c. They had zero callers anywhere:
+generated code calls only the `mantiq_quantum_*` 64-slot glue, which
+since Slice 26 is emitted use-gated by codegen itself, and runtime.o
+is never pulled at link time (Milestone D single-stage unlink). The
+weak `mantiq_quantum_*` safety-net definitions further down stay.
+
+Also dropped: the simulator-only `#include <math.h>` /
+`#include <limits.h>` (`string.h` stays — strlen/memcpy/memset serve
+the interning engine), the `Complex`/`QReg` typedefs,
+`MAX_QUBITS`/`NUM_STATES`, and the header-comment bullet describing
+the simulator (updated to note the removal).
+
+**Mirrors synced.** All four tracked copies updated in lockstep:
+`mantiq/runtime.c` ↔ `compiler-service/mantiq/runtime.c` (canonical
+pair), `mantiq/src/runtime.c` ↔ `mantiqz/mantiq-compiler/src/runtime.c`
+(src pair); md5-verified identical within each pair after the edit.
+
+**Verified.** runtime.c compiles standalone after the cut; no
+reference to the removed symbols survives anywhere in the tree;
+gate 50/50.

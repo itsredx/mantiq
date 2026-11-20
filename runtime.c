@@ -13,8 +13,9 @@
 //   - Memory management: mantiq_malloc / mantiq_free / mantiq_realloc
 //     (backed by mimalloc or libc malloc)
 //   - Parallel execution: __mantiq_parallel_for (trampoline dispatch)
-//   - Quantum simulation: 16-qubit state-vector simulator (Complex[NUM_STATES],
-//     H/CNOT/measure operators, mantiq_quantum_init / mantiq_run_qasm)
+//   - Quantum: the weak mantiq_quantum_* 64-slot glue only; the old
+//     16-qubit state-vector simulator was dead weight and is gone
+//     (slice 27 — generated code uses the codegen glue)
 //   - String operations: mantiq_string_compare, mantiq_string_concat
 //   - IO: mantiq_print_{i32,f64,cstr,string}, mantiq_read_input,
 //     mantiq_process_args (/proc/self/cmdline parsing)
@@ -87,104 +88,7 @@ __attribute__((weak)) void __mantiq_parallel_for(int start, int end, void (*clos
     printf("[Runtime] Parallel loop completed.\n");
 }
 
-#include <math.h>
 #include <string.h>
-#include <limits.h>
-
-#define MAX_QUBITS 16
-#define NUM_STATES (1 << MAX_QUBITS)
-
-typedef struct {
-    double real;
-    double imag;
-} Complex;
-
-static Complex global_state[NUM_STATES];
-static int active_qubits = 0;
-
-typedef struct {
-    void* ptr;
-    int num_qubits;
-} QReg;
-
-QReg quantum_qreg(int num) {
-    if (active_qubits + num > MAX_QUBITS) {
-        printf("[Runtime] Quantum Error: Maximum of 16 qubits exceeded.\n");
-        exit(1);
-    }
-    // Initialize to |0...0>
-    if (active_qubits == 0) {
-        memset(global_state, 0, sizeof(global_state));
-        global_state[0].real = 1.0;
-        global_state[0].imag = 0.0;
-    }
-    QReg reg;
-    reg.ptr = NULL; // Dummy ptr
-    reg.num_qubits = num;
-    active_qubits += num;
-    printf("[Runtime] Allocated quantum register with %d qubits (total %d/16).\n", num, active_qubits);
-    return reg;
-}
-
-int quantum_H(int target) {
-    if (target >= active_qubits) return target;
-    double inv_sqrt2 = 1.0 / sqrt(2.0);
-    for (int i = 0; i < NUM_STATES; i++) {
-        if ((i & (1 << target)) == 0) {
-            int j = i | (1 << target);
-            Complex a = global_state[i];
-            Complex b = global_state[j];
-            global_state[i].real = (a.real + b.real) * inv_sqrt2;
-            global_state[i].imag = (a.imag + b.imag) * inv_sqrt2;
-            global_state[j].real = (a.real - b.real) * inv_sqrt2;
-            global_state[j].imag = (a.imag - b.imag) * inv_sqrt2;
-        }
-    }
-    printf("[Runtime] Applied Hadamard gate on qubit %d.\n", target);
-    return target;
-}
-
-void quantum_CNOT(int control, int target) {
-    if (control >= active_qubits || target >= active_qubits) return;
-    for (int i = 0; i < NUM_STATES; i++) {
-        if ((i & (1 << control)) != 0 && (i & (1 << target)) == 0) {
-            int j = i | (1 << target);
-            Complex temp = global_state[i];
-            global_state[i] = global_state[j];
-            global_state[j] = temp;
-        }
-    }
-    printf("[Runtime] Applied CNOT gate (control: %d, target: %d).\n", control, target);
-}
-
-void quantum_measure(int target) {
-    if (target >= active_qubits) return;
-    double prob_1 = 0.0;
-    for (int i = 0; i < NUM_STATES; i++) {
-        if (i & (1 << target)) {
-            prob_1 += global_state[i].real * global_state[i].real + global_state[i].imag * global_state[i].imag;
-        }
-    }
-    // Simplistic collapse simulation based on probability
-    static int seeded = 0;
-    if (!seeded) { srand((unsigned)time(NULL)); seeded = 1; }
-    double r = (double)rand() / (double)RAND_MAX;
-    int result = (r < prob_1) ? 1 : 0;
-    printf("[Runtime] Quantum state measured on qubit %d: Result = %d (Prob |1> = %.2f).\n", target, result, prob_1);
-    
-    // Normalize state
-    double norm = 1.0 / sqrt(result == 1 ? prob_1 : (1.0 - prob_1));
-    for (int i = 0; i < NUM_STATES; i++) {
-        int bit = (i & (1 << target)) ? 1 : 0;
-        if (bit == result) {
-            global_state[i].real *= norm;
-            global_state[i].imag *= norm;
-        } else {
-            global_state[i].real = 0.0;
-            global_state[i].imag = 0.0;
-        }
-    }
-}
 
 // Allocation tracking counters
 static long long _alloc_count = 0;
@@ -345,7 +249,6 @@ static uint32_t mantiq_hash_string_c(const char* s, int64_t len) {
 }
 
 
-
 __attribute__((weak)) int64_t mantiq_strlen(const char* s) {
     if (!s) return 0;
     return (int64_t)strlen(s);
@@ -499,7 +402,6 @@ typedef struct {
 // and scope lookup here are still C-side; they are weak so the identical
 // Nizam definitions in std/collections.nz win whenever std is imported.
 __attribute__((weak)) extern void* __mantiq_dict_get(void* d, void* key, uint32_t hash);
-
 
 
 __attribute__((weak)) const char* mantiq_intern_string(const char* s, size_t len) {
@@ -898,16 +800,6 @@ __attribute__((weak)) int __mantiq_streq(const char* s1, int64_t l1, const char*
 }
 
 
-
-
-
-
-
-
-
-
-
-
 // ── Scope Lookup ─────────────────────────────────────────────────────────────
 typedef struct {
     void* parent;
@@ -955,47 +847,6 @@ __attribute__((weak)) void* __mantiq_scope_lookup(void* current_scope, void* glo
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static int64_t __mantiq_sort_elem_size = 0;
 static bool __mantiq_sort_is_str = false;
 
@@ -1026,9 +877,6 @@ static int __mantiq_sort_cmp(const void* pa, const void* pb) {
 }
 
 
-
-
-
 // ── List Dunder Operators (__add__ / __mul__ / __contains__ / __eq__ / __ne__ / __str__) ─
 
 static void __mantiq_clone_strings_block(uint8_t* dest, const uint8_t* src, size_t n) {
@@ -1052,17 +900,6 @@ static void __mantiq_clone_strings_block(uint8_t* dest, const uint8_t* src, size
         od[i].cap = elen;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 struct MantiqStrBuf {
@@ -1100,12 +937,7 @@ static void __mantiq_strbuf_append_i64(struct MantiqStrBuf* b, int64_t v) {
 }
 
 
-
 // ── Bytes and List[u8] Helpers ──────────────────────────────────────────
-
-
-
-
 
 
 // ── Recursive Drop Glue Primitives ───────────────────────────────────────────
