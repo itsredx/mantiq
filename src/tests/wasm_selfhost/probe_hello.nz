@@ -1,0 +1,6 @@
+// Gate 6 wasm self-host probe: hello — stage4-wasm builds and runs it.
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    printf("hello from stage4 wasm\n" to cstr)
+    return 0 to i32

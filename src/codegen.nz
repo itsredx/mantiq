@@ -3031,6 +3031,9 @@ struct LLVMCodegen:
         if h_page_free == 1 to i32:
             append_cstr(out, "declare i32 @munmap(ptr, i32)\n")
             append_cstr(out, "define void @mantiq_page_free(ptr %p, i32 %size) {\nentry:\n  %nul = icmp eq ptr %p, null\n  %neg = icmp sle i32 %size, 0\n  %skip = or i1 %nul, %neg\n  br i1 %skip, label %out, label %go\ngo:\n  %al = add i32 %size, 4095\n  %a2 = and i32 %al, -4096\n  %r = call i32 @munmap(ptr %p, i32 %a2)\n  br label %out\nout:\n  ret void\n}\n\n")
+        let h_arena_chk32 as i32 = self.rt_body_missing("define i32 @mantiq_is_arena_ptr(ptr" to cstr)
+        if h_arena_chk32 == 1 to i32:
+            append_cstr(out, "define i32 @mantiq_is_arena_ptr(ptr %p) {\n  ret i32 0\n}\n\n")
         if (deref self).target.is_wasm():
             let h_main_void as i32 = self.rt_body_missing("define i32 @__main_void(" to cstr)
             if h_main_void == 1 to i32:

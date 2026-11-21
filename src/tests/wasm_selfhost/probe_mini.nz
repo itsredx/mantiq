@@ -1,0 +1,15 @@
+// Gate 6 wasm self-host probe: minimal — no std, no libc surface beyond
+// printf; exercises the freestanding core of the stage4-wasm compiler.
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    var acc as i32 = 0
+    var i as i32 = 0
+    while i < 10:
+        acc = acc + i
+        i = i + 1
+    if acc != 45:
+        printf("mini FAIL\n" to cstr)
+        return 1 to i32
+    printf("mini OK\n" to cstr)
+    return 0 to i32

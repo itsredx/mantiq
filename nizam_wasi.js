@@ -24,17 +24,43 @@ if (rawArgs.length > 0 && rawArgs[0].endsWith(".wasm")) {
 }
 const args = [path.basename(wasmPath), ...rawArgs];
 
+// Node >= 22 WASI: the "." preopen no longer resolves relative paths
+// (fopen("src/main.nz") returns NULL even with "." preopened; absolute
+// paths work). Rewrite path-like arguments to absolute host paths —
+// the "/" preopen maps the whole filesystem. An arg is path-like when
+// it exists relative to the launcher cwd, or directly follows -o
+// (output paths usually don't exist yet).
+const absArgs = [];
+let lastWasO = false;
+for (const a of args) {
+  if (lastWasO) {
+    absArgs.push(path.resolve(a));
+    lastWasO = false;
+    continue;
+  }
+  if (a === "-o") {
+    absArgs.push(a);
+    lastWasO = true;
+    continue;
+  }
+  if (!a.startsWith("-") && fs.existsSync(a)) {
+    absArgs.push(path.resolve(a));
+  } else {
+    absArgs.push(a);
+  }
+}
+
 const tmpDir = os.tmpdir();
 const preopens = {
   [tmpDir]: tmpDir,
   "/tmp": "/tmp",
-  ".": ".",
+  ".": path.resolve("."),
   "/": "/"
 };
 
 const wasi = new WASI({
   version: "preview1",
-  args,
+  args: absArgs,
   env: process.env,
   preopens
 });

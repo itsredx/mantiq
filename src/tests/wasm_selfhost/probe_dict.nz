@@ -1,0 +1,14 @@
+// Gate 6 wasm self-host probe: dict — std import + Dict[K, V] through
+// the stage4-wasm compiler (module resolution is source-directory-
+// relative; this probe lives inside the mantiq tree on purpose).
+from std.mem import make
+
+fn main() as i32:
+    var ages as Dict[String, i32] = { }
+    ages["ada"] = 36
+    ages["grace"] = 45
+    if ages["ada"] != 36:
+        return 1 to i32
+    if ages["grace"] != 45:
+        return 2 to i32
+    return 0 to i32

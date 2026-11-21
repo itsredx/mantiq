@@ -3884,3 +3884,43 @@ Regressions with the new compiler: p24c, p26b (libc mode), async
 3/3, channels 5/5 green; p24c/p26b no-libc failures are pre-existing
 (identical on the pre-Slice-30 promoted driver — those probes use
 channel/quantum surfaces whose glue is no_libc-gated).
+
+## Slice 31 — Gate 6: wasm32 self-hosting chain in CI; node-22 WASI runner fix
+
+**What landed.** `src/tests/wasm_selfhost_check.sh` — the plan's
+Gate 6, previously verified manually only (notes F11), now a
+checked-in 4-step CI chain:
+
+1. native compiler builds stage3 wasm (`src/main.nz --target wasm32`);
+2. node + `nizam_wasi.js` runs stage3: stage3 compiles the compiler
+   in-wasm → stage4 wasm (3,095,525 bytes, deterministic);
+3. stage4 prints the version banner;
+4. stage4 compiles each checked-in probe
+   (`src/tests/wasm_selfhost/probe_hello.nz` / `probe_mini.nz` /
+   `probe_dict.nz`) to wasm32 and the built probes run rc=0.
+
+**Node-22 WASI runner fix.** The F11 chain broke in the interim:
+node went v20.19.6 → v22.23.2, and node 22's WASI no longer resolves
+relative paths through the `.` preopen (`fopen("src/main.nz")`
+returns NULL even with `.` preopened — verified with a minimal
+zig-cc probe; absolute paths work). `nizam_wasi.js` now rewrites
+path-like arguments to absolute host paths before starting the
+instance (an arg is path-like when it exists relative to the
+launcher cwd, or directly follows `-o`; the `/` preopen maps the
+whole filesystem, and lib_dir is passed absolute so import
+resolution stays absolute end-to-end). Mirror synced:
+`mantiq/nizam_wasi.js` ↔ `compiler-service/nizam_wasi.js`
+(md5-verified identical).
+
+**Wasm32 glue gap fixed by the dict probe.** stage3/stage4 compiles
+of `src/main.nz` linked clean, but `probe_dict.nz` failed:
+`mantiq_is_arena_ptr` is emitted by the 64-bit tier (trivial
+`ret i32 0`) but was missing from
+`emit_rt_glue_bodies_32` — dict operations call it. Added to the
+32-bit tier with the same rt_body_missing guard.
+
+**Verified.** Full chain green end-to-end (stage3 → stage4 →
+version → 3/3 probes). Wasm suite baseline unchanged (6/8;
+closures/fstrings pre-existing). Zero-runtime gates A/B/C green
+with the new compiler (native 25080 B / wasm 2836 B, 0 runtime
+symbols; no-libc exit 0). p26a negative check: 0 mantiq_py symbols.
