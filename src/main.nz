@@ -1080,38 +1080,45 @@ fn compile_source(
             let rt_o_str as String = rt_o_sb.to_string()
             has_rt_obj = access(rt_o_str.data to cstr, 0 to i32) == 0 to i32
             rt_o_sb.deinit()
-        var has_wasm_rt_obj as bool = False
-        var wasm_rt_obj_path as String = String.make("" to cstr)
-        if lib_dir != None to cstr:
-            let w_sb as StringBuilder = StringBuilder.make()
-            w_sb.append(lib_dir)
-            w_sb.append("/runtime_wasm.o" to cstr)
-            wasm_rt_obj_path = w_sb.to_string()
-            has_wasm_rt_obj = access(wasm_rt_obj_path.data to cstr, 0 to i32) == 0 to i32
-            w_sb.deinit()
-        if not has_wasm_rt_obj:
-            if access("stage3/runtime_wasm.o" to cstr, 0 to i32) == 0 to i32:
-                wasm_rt_obj_path = String.make("stage3/runtime_wasm.o" to cstr)
-                has_wasm_rt_obj = True
-            elif access("runtime_wasm.o" to cstr, 0 to i32) == 0 to i32:
-                wasm_rt_obj_path = String.make("runtime_wasm.o" to cstr)
-                has_wasm_rt_obj = True
         var _sp as i32 = 0
         if target.is_wasm():
-            var wasm_rt_src as String = String.make("" to cstr)
-            if not has_wasm_rt_obj:
+            // Slice 29: runtime.c / runtime_wasm.o are off the wasm32 link
+            // line — the 32-bit tier of the runtime glue
+            // (emit_rt_glue_bodies_32) covers the whole wasm surface, and
+            // wasm binaries carry zero mantiq_*/__nizam runtime refs. The
+            // ONE exception is the async/channel surface (spawn/await/
+            // __mantiq_channel_*), which needs runtime.c's wasi-threads
+            // machinery — programs that call it keep the C runtime on the
+            // link line. Call-site scan over the generated IR (substring,
+            // so indented calls match; declares are unconditional and
+            // don't count).
+            let wasm_async_used as bool = strstr(ir_str.data to cstr, "call ptr @mantiq_spawn") != None to cstr or strstr(ir_str.data to cstr, "call ptr @mantiq_await") != None to cstr or strstr(ir_str.data to cstr, "call ptr @__mantiq_channel_") != None to cstr or strstr(ir_str.data to cstr, "call void @__mantiq_channel_") != None to cstr or strstr(ir_str.data to cstr, "call i32 @__mantiq_channel_") != None to cstr or strstr(ir_str.data to cstr, "call i64 @__mantiq_channel_") != None to cstr
+            var wasm_rt_arg as cstr = None to cstr
+            var wasm_rt_keep as String = String.make("" to cstr)
+            if wasm_async_used:
+                // prefer a prebuilt wasm32 runtime object; else runtime.c
+                // (compiled by zig cc during the link, as before)
+                var rt_wasm_path as String = String.make("" to cstr)
                 if lib_dir != None to cstr:
+                    let wp_sb as StringBuilder = StringBuilder.make()
+                    wp_sb.append(lib_dir)
+                    wp_sb.append("/runtime_wasm.o" to cstr)
+                    rt_wasm_path = wp_sb.to_string()
+                if access(rt_wasm_path.data to cstr, 0 to i32) == 0 to i32:
+                    wasm_rt_keep = rt_wasm_path
+                elif lib_dir != None to cstr:
                     let wrt_sb as StringBuilder = StringBuilder.make()
                     wrt_sb.append(lib_dir)
                     wrt_sb.append("/runtime.c" to cstr)
-                    wasm_rt_src = wrt_sb.to_string()
-                    wrt_sb.deinit()
+                    wasm_rt_keep = wrt_sb.to_string()
                 else:
-                    wasm_rt_src = String.make("../mantiqz/mantiq-compiler/src/runtime.c" to cstr)
-            let wasm_rt_arg as cstr = if has_wasm_rt_obj: wasm_rt_obj_path.data to cstr else: wasm_rt_src.data to cstr
-
+                    wasm_rt_keep = String.make("../mantiqz/mantiq-compiler/src/runtime.c" to cstr)
+                wasm_rt_arg = wasm_rt_keep.data to cstr
             if lib_dir == None to cstr:
-                _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, wasm_rt_arg, out_file, extra_flags_c)
+                if wasm_rt_arg != None to cstr:
+                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" \"%s\" -L. -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, wasm_rt_arg, out_file, extra_flags_c)
+                else:
+                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, out_file, extra_flags_c)
             else:
                 let ts_a_path as StringBuilder = StringBuilder.make()
                 ts_a_path.append(lib_dir)
@@ -1124,9 +1131,15 @@ fn compile_source(
                     // all compiled -target wasm32-wasi). Preferred over the
                     // native libtree-sitter-mantiq.a, whose members wasm-ld
                     // can only skip with warnings.
-                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" \"%s/libtree-sitter-mantiq.wasm32.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, lib_dir, out_file, extra_flags_c)
+                    if wasm_rt_arg != None to cstr:
+                                            _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" \"%s/libtree-sitter-mantiq.wasm32.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, lib_dir, out_file, extra_flags_c)
+                    else:
+                        _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s/libtree-sitter-mantiq.wasm32.a\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, lib_dir, out_file, extra_flags_c)
                 else:
-                    _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, out_file, extra_flags_c)
+                    if wasm_rt_arg != None to cstr:
+                                            _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" \"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, wasm_rt_arg, out_file, extra_flags_c)
+                    else:
+                        _sp = sprintf(cmd_buf, "zig cc %s -target wasm32-wasi -Wl,-z,stack-size=16777216 \"%s\" -L. -L\"%s\" -o \"%s\" %s 2>&1" to cstr, wasm_opt, ll_path, lib_dir, out_file, extra_flags_c)
         elif target.is_python_ext():
             // Slice 28: the python FFI glue (buffer protocol + interpreter
             // shims) is emitted as program-local IR — runtime.c is no
