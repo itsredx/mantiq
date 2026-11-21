@@ -3847,3 +3847,40 @@ Regressions with the new compiler: async 3/3, channels 5/5, p24c,
 p26b green; p24a fails identically on the pre-change promoted
 driver (pre-existing strict-mode import error, not a Slice 28
 regression). Compiler builds clean; fmt idempotent.
+
+## Slice 30 — Phase 6 CI: zero-runtime regression verification; no-libc async-glue fix
+
+**What landed.** `src/tests/zero_runtime_check.sh` (plus checked-in
+probes `zero_runtime_hello.nz` / `zero_runtime_nostdlib.nz`) — the
+plan's item 7.3, executable in CI against any driver:
+
+- **Gate A (native)**: hello builds without runtime.c, prints
+  `hello`, binary < 30 KB (plan Gate 5: 25080 B), and has **0
+  undefined mantiq/__nizam symbols** — anything undefined would have
+  to be resolved from a runtime. The defined mantiq_* T-symbols are
+  program-local IR (emit_rt_glue_bodies), not runtime.c code.
+- **Gate B (wasm32)**: hello .wasm < 30 KB (2836 B) with **0
+  `mantiq_*`/`__nizam`/`__mantiq*` byte-pattern references** — no
+  runtime imports, nothing pulled into the module.
+- **Gate C (no-libc freestanding)**: `-nostdlib -static` binary with
+  the codegen-emitted `_start` runs and exits 0.
+
+**Compiler fix.** Gate C exposed a latent no-libc bug: the
+`__nizam_task_runner`/`mantiq_spawn`/`mantiq_await` bodies were
+emitted on `rt_body_missing` alone, unlike the futex/channel bodies
+(`not no_libc`-gated since Slice 24) — so a no-libc build of any
+program pulled in `mantiq_await`, whose callees
+(`__mantiq_chan_lock`) are no_libc-gated →
+`use of undefined value '@__mantiq_chan_lock'`. The three bodies are
+now `not no_libc`-gated like the rest of the section (no-libc
+programs cannot use async anyway).
+
+**Also verified this slice.** wasm32 runtime unlink (Slice 29)
+holds: hello/collections wasm binaries carry 0 runtime refs with
+runtime.c off the link line; `test_wasm_concurrency` still passes
+via the async use-gate (runtime.c kept only for spawn/await/channel
+programs). Freestanding p15t3 (no-libc, x86_64) builds and exits 0.
+Regressions with the new compiler: p24c, p26b (libc mode), async
+3/3, channels 5/5 green; p24c/p26b no-libc failures are pre-existing
+(identical on the pre-Slice-30 promoted driver — those probes use
+channel/quantum surfaces whose glue is no_libc-gated).

@@ -1,0 +1,14 @@
+// Slice 30 — zero-runtime CI probe: no-libc freestanding (Gate C).
+// Built with --no-libc: -nostdlib -static, entry `_start` emitted by
+// codegen (nz_sys_write/nz_sys_getpid glue). No libc, no runtime.c —
+// main returns an exit code (0 = ok, 1 = check failed). Mirrors the
+// p15t3 freestanding probe shape.
+fn main() as i32:
+    var acc as i32 = 0
+    var i as i32 = 0
+    while i < 10:
+        acc = acc + i
+        i = i + 1
+    if acc != 45:
+        return 1 to i32
+    return 0 to i32

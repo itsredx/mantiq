@@ -1,0 +1,23 @@
+// Slice 30 — zero-runtime CI probe: minimal hello world.
+// The binary must contain nothing resolved from runtime.c: the
+// program-local IR glue covers the whole surface, so every mantiq_*
+// definition in the binary comes from emit_rt_glue_bodies and no
+// mantiq/__nizam symbol may be left undefined at link time.
+//
+// The same source serves the no-libc freestanding gate (Gate C):
+// with --no-libc there is no libc printf, so main returns an exit
+// code (0 = ok, 1 = arithmetic check failed) instead of printing.
+extern fn printf(fmt as cstr, ...) as i32
+
+
+fn main() as i32:
+    // sanity arithmetic so the probe isn't a bare empty main
+    var acc as i32 = 0
+    var i as i32 = 0
+    while i < 10:
+        acc = acc + i
+        i = i + 1
+    if acc != 45:
+        return 1 to i32
+    printf("hello\n" to cstr)
+    return 0 to i32
