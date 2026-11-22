@@ -1288,6 +1288,21 @@ struct LLVMCodegen:
     public var label_counter as i32
     public var string_counter as i32
     public var closure_counter as i32
+    // Slice 32: var name -> comma-joined LLVM param types of the closure
+    // value it holds ("i32,i64"), recorded at VarDecl emission from the
+    // closure's param nodes (the same source emit_closure_expr uses for
+    // the body signature). Call sites read this to pin literal arg types:
+    // wasm32 indirect calls trap on signature mismatches that native x86
+    // tolerates, and Type.param_types' List[Type] element storage was
+    // observed corrupted for element idx > 0.
+    public var closure_sig_by_var as Dict[String, String]
+    // Slice 32: fn name -> ';'-joined LLVM param types, recorded at
+    // FunDecl emission from the same param-node derivation the define
+    // uses. Direct call sites read this to pin NumberLiteral arg types
+    // (sema's param_types annotation relies on List[Type] element
+    // storage, which was observed corrupted for idx > 0 — the wasm32
+    // indirect/direct ABI traps on the resulting i64/i32 mismatch).
+    public var fn_sig_by_name as Dict[String, String]
     public var defined_types as Dict[String, bool]
     public var external_decls as Dict[String, bool]
     public var auto_drops as Dict[usize, List[String]]
@@ -1389,6 +1404,8 @@ struct LLVMCodegen:
         (deref self).string_intern_ids = Dict[String, i32]()
         (deref self).string_intern_lens = Dict[String, i64]()
         (deref self).needs_drop_types = Dict[String, bool]()
+        (deref self).closure_sig_by_var = Dict[String, String]()
+        (deref self).fn_sig_by_name = Dict[String, String]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
@@ -3034,6 +3051,87 @@ struct LLVMCodegen:
         let h_arena_chk32 as i32 = self.rt_body_missing("define i32 @mantiq_is_arena_ptr(ptr" to cstr)
         if h_arena_chk32 == 1 to i32:
             append_cstr(out, "define i32 @mantiq_is_arena_ptr(ptr %p) {\n  ret i32 0\n}\n\n")
+        // ── Milestone D (products), 32-bit tier: print + string-conversion ───────────
+        // surface for wasm32 programs (closures/fstring tests). Same
+        // mantiq-level signatures as the 64-bit tier (call sites emit i64
+        // lengths and an alloca-i64 out-slot on every target); only the
+        // embedded libc calls adapt to wasm32's 32-bit size_t: snprintf's
+        // size is i32, memcpy/fwrite sizes are i32, libc strlen returns
+        // i32 (sext'd to the i64 mantiq-level contract). Async/channel/
+        // quantum stay 64-bit-only (threading has no wasm32 story).
+        let h32_prt_i32 as i32 = self.rt_body_missing("define void @mantiq_print_i32(" to cstr)
+        let h32_prt_bool as i32 = self.rt_body_missing("define void @mantiq_print_bool(" to cstr)
+        let h32_prt_float as i32 = self.rt_body_missing("define void @mantiq_print_float(" to cstr)
+        let h32_prt_ptr as i32 = self.rt_body_missing("define void @mantiq_print_ptr(" to cstr)
+        let h32_prt_space as i32 = self.rt_body_missing("define void @mantiq_print_space(" to cstr)
+        let h32_prt_nl as i32 = self.rt_body_missing("define void @mantiq_print_newline(" to cstr)
+        let h32_prt_str as i32 = self.rt_body_missing("define void @mantiq_print_str(" to cstr)
+        let h32_prt_cstr as i32 = self.rt_body_missing("define void @mantiq_print_cstr(" to cstr)
+        let h32_cnv_i32 as i32 = self.rt_body_missing("define ptr @mantiq_i32_to_str(" to cstr)
+        let h32_cnv_i64 as i32 = self.rt_body_missing("define ptr @mantiq_i64_to_str(" to cstr)
+        let h32_cnv_u64 as i32 = self.rt_body_missing("define ptr @mantiq_u64_to_str(" to cstr)
+        let h32_cnv_f32 as i32 = self.rt_body_missing("define ptr @mantiq_float_to_str(" to cstr)
+        let h32_cnv_f64 as i32 = self.rt_body_missing("define ptr @mantiq_f64_to_str(" to cstr)
+        let h32_cnv_ch as i32 = self.rt_body_missing("define ptr @mantiq_char_to_str(" to cstr)
+        let h32_cnv_bl as i32 = self.rt_body_missing("define ptr @mantiq_bool_to_str(" to cstr)
+        let h32_strlen as i32 = self.rt_body_missing("define i64 @mantiq_strlen(" to cstr)
+        let h32_concat as i32 = self.rt_body_missing("define ptr @mantiq_concat_str(" to cstr)
+        let prd32_need as i32 = h32_prt_i32 + h32_prt_bool + h32_prt_float + h32_prt_ptr + h32_prt_space + h32_prt_nl + h32_prt_str + h32_prt_cstr + h32_cnv_i32 + h32_cnv_i64 + h32_cnv_u64 + h32_cnv_f32 + h32_cnv_f64 + h32_cnv_ch + h32_cnv_bl + h32_strlen + h32_concat
+        if prd32_need > 0 to i32:
+            append_cstr(out, "@__nz_prt_d = private unnamed_addr constant [3 x i8] c\"%d\\00\"\n")
+            append_cstr(out, "@__nz_prt_s = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n")
+            append_cstr(out, "@__nz_prt_p = private unnamed_addr constant [3 x i8] c\"%p\\00\"\n")
+            append_cstr(out, "@__nz_prt_f = private unnamed_addr constant [3 x i8] c\"%f\\00\"\n")
+            append_cstr(out, "@__nz_prt_sp = private unnamed_addr constant [2 x i8] c\" \\00\"\n")
+            append_cstr(out, "@__nz_prt_nl = private unnamed_addr constant [2 x i8] c\"\\0A\\00\"\n")
+            append_cstr(out, "@__nz_prt_true = private unnamed_addr constant [5 x i8] c\"True\\00\"\n")
+            append_cstr(out, "@__nz_prt_false = private unnamed_addr constant [6 x i8] c\"False\\00\"\n")
+            append_cstr(out, "@__nz_cnv_d = private unnamed_addr constant [3 x i8] c\"%d\\00\"\n")
+            append_cstr(out, "@__nz_cnv_ld = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n")
+            append_cstr(out, "@__nz_cnv_lu = private unnamed_addr constant [5 x i8] c\"%llu\\00\"\n")
+            append_cstr(out, "@__nz_cnv_f = private unnamed_addr constant [3 x i8] c\"%f\\00\"\n")
+            append_cstr(out, "@__nz_cnv_true = private unnamed_addr constant [5 x i8] c\"True\\00\"\n")
+            append_cstr(out, "@__nz_cnv_false = private unnamed_addr constant [6 x i8] c\"False\\00\"\n")
+            append_cstr(out, "declare i32 @printf(ptr, ...)\n")
+            append_cstr(out, "declare i32 @snprintf(ptr, i32, ptr, ...)\n")
+            append_cstr(out, "declare i32 @fwrite(ptr, i32, i32, ptr)\n")
+            append_cstr(out, "declare ptr @memcpy(ptr, ptr, i32)\n")
+            append_cstr(out, "declare i32 @strlen(ptr)\n")
+            append_cstr(out, "@stdout = external global ptr\n\n")
+        if h32_prt_i32 == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_i32(i32 %v) {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_d, i32 %v)\n  ret void\n}\n\n")
+        if h32_prt_bool == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_bool(i32 %v) {\nentry:\n  %t = icmp ne i32 %v, 0\n  br i1 %t, label %tt, label %ff\ntt:\n  %r1 = call i32 (ptr, ...) @printf(ptr @__nz_prt_true)\n  br label %outb\nff:\n  %r2 = call i32 (ptr, ...) @printf(ptr @__nz_prt_false)\n  br label %outb\noutb:\n  ret void\n}\n\n")
+        if h32_prt_float == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_float(float %v) {\n  %d = fpext float %v to double\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_f, double %d)\n  ret void\n}\n\n")
+        if h32_prt_ptr == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_ptr(ptr %v) {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_p, ptr %v)\n  ret void\n}\n\n")
+        if h32_prt_space == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_space() {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_sp)\n  ret void\n}\n\n")
+        if h32_prt_nl == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_newline() {\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_nl)\n  ret void\n}\n\n")
+        if h32_prt_str == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_str(ptr %p, i64 %len) {\nentry:\n  %pn = icmp eq ptr %p, null\n  %ln = icmp sle i64 %len, 0\n  %skip = or i1 %pn, %ln\n  br i1 %skip, label %outb, label %go\ngo:\n  %so = load ptr, ptr @stdout\n  %l32 = trunc i64 %len to i32\n  %r = call i32 @fwrite(ptr %p, i32 1, i32 %l32, ptr %so)\n  br label %outb\noutb:\n  ret void\n}\n\n")
+        if h32_prt_cstr == 1 to i32:
+            append_cstr(out, "define void @mantiq_print_cstr(ptr %p) {\nentry:\n  %pn = icmp eq ptr %p, null\n  br i1 %pn, label %outb, label %go\ngo:\n  %r = call i32 (ptr, ...) @printf(ptr @__nz_prt_s, ptr %p)\n  br label %outb\noutb:\n  ret void\n}\n\n")
+        if h32_cnv_i32 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_i32_to_str(i32 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i32, ptr, ...) @snprintf(ptr %buf, i32 32, ptr @__nz_cnv_d, i32 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_i64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_i64_to_str(i64 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i32, ptr, ...) @snprintf(ptr %buf, i32 32, ptr @__nz_cnv_ld, i64 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_u64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_u64_to_str(i64 %v, ptr %out) {\nentry:\n  %buf = alloca [32 x i8], align 16\n  %l = call i32 (ptr, i32, ptr, ...) @snprintf(ptr %buf, i32 32, ptr @__nz_cnv_lu, i64 %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_f32 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_float_to_str(float %v, ptr %out) {\nentry:\n  %buf = alloca [64 x i8], align 16\n  %d = fpext float %v to double\n  %l = call i32 (ptr, i32, ptr, ...) @snprintf(ptr %buf, i32 64, ptr @__nz_cnv_f, double %d)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_f64 == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_f64_to_str(double %v, ptr %out) {\nentry:\n  %buf = alloca [64 x i8], align 16\n  %l = call i32 (ptr, i32, ptr, ...) @snprintf(ptr %buf, i32 64, ptr @__nz_cnv_f, double %v)\n  %l64 = sext i32 %l to i64\n  %l1 = add i64 %l64, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %buf, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %l64, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_ch == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_char_to_str(i8 %v, ptr %out) {\nentry:\n  %p = call ptr @mantiq_malloc_raw(i64 2)\n  store i8 %v, ptr %p\n  %ep = getelementptr i8, ptr %p, i64 1\n  store i8 0, ptr %ep\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 1, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_cnv_bl == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_bool_to_str(i32 %v, ptr %out) {\nentry:\n  %t = icmp ne i32 %v, 0\n  %src = select i1 %t, ptr @__nz_cnv_true, ptr @__nz_cnv_false\n  %len = select i1 %t, i64 4, i64 5\n  %l1 = add i64 %len, 1\n  %p = call ptr @mantiq_malloc_raw(i64 %l1)\n  %l132 = trunc i64 %l1 to i32\n  %m = call ptr @memcpy(ptr %p, ptr %src, i32 %l132)\n  %on = icmp eq ptr %out, null\n  br i1 %on, label %fin, label %setl\nsetl:\n  store i64 %len, ptr %out\n  br label %fin\nfin:\n  ret ptr %p\n}\n\n")
+        if h32_strlen == 1 to i32:
+            append_cstr(out, "define i64 @mantiq_strlen(ptr %s) {\nentry:\n  %n = icmp eq ptr %s, null\n  br i1 %n, label %zero, label %go\nzero:\n  ret i64 0\ngo:\n  %l32 = call i32 @strlen(ptr %s)\n  %l = sext i32 %l32 to i64\n  ret i64 %l\n}\n\n")
+        if h32_concat == 1 to i32:
+            append_cstr(out, "define ptr @mantiq_concat_str(ptr %a, i64 %alen, ptr %b, i64 %blen) {\nentry:\n  %abad = icmp sle i64 %alen, 0\n  %anull = icmp eq ptr %a, null\n  %aempty = or i1 %abad, %anull\n  br i1 %aempty, label %aempty_bchk, label %bfull_chk\naempty_bchk:\n  %bbad = icmp sle i64 %blen, 0\n  %bnull = icmp eq ptr %b, null\n  %bempty = or i1 %bbad, %bnull\n  br i1 %bempty, label %retempty, label %retcopyb\nretempty:\n  %e = call ptr @mantiq_malloc_raw(i64 1)\n  store i8 0, ptr %e\n  ret ptr %e\nretcopyb:\n  %bl1 = add i64 %blen, 1\n  %nb = call ptr @mantiq_malloc_raw(i64 %bl1)\n  %bl32 = trunc i64 %blen to i32\n  %mb = call ptr @memcpy(ptr %nb, ptr %b, i32 %bl32)\n  %bep = getelementptr i8, ptr %nb, i64 %blen\n  store i8 0, ptr %bep\n  ret ptr %nb\nbfull_chk:\n  %bbad2 = icmp sle i64 %blen, 0\n  %bnull2 = icmp eq ptr %b, null\n  %bempty2 = or i1 %bbad2, %bnull2\n  br i1 %bempty2, label %retcopya, label %retboth\nretcopya:\n  %al1 = add i64 %alen, 1\n  %na = call ptr @mantiq_malloc_raw(i64 %al1)\n  %al32 = trunc i64 %alen to i32\n  %ma = call ptr @memcpy(ptr %na, ptr %a, i32 %al32)\n  %aep = getelementptr i8, ptr %na, i64 %alen\n  store i8 0, ptr %aep\n  ret ptr %na\nretboth:\n  %total = add i64 %alen, %blen\n  %tot1 = add i64 %total, 1\n  %nb2 = call ptr @mantiq_malloc_raw(i64 %tot1)\n  %al322 = trunc i64 %alen to i32\n  %ma2 = call ptr @memcpy(ptr %nb2, ptr %a, i32 %al322)\n  %bdest = getelementptr i8, ptr %nb2, i64 %alen\n  %bl322 = trunc i64 %blen to i32\n  %mb2 = call ptr @memcpy(ptr %bdest, ptr %b, i32 %bl322)\n  %tep = getelementptr i8, ptr %nb2, i64 %total\n  store i8 0, ptr %tep\n  ret ptr %nb2\n}\n\n")
         if (deref self).target.is_wasm():
             let h_main_void as i32 = self.rt_body_missing("define i32 @__main_void(" to cstr)
             if h_main_void == 1 to i32:
@@ -3806,6 +3904,7 @@ struct LLVMCodegen:
         let has_return as bool = str_eq(ret_type, String.make("void" to cstr)) == False
 
         let param_buf as StringBuilder = StringBuilder.make()
+        let fn_sig32 as StringBuilder = StringBuilder.make()
         let p_count as i64 = params.length()
         var p_idx as i64 = 0 to i64
         while p_idx < p_count:
@@ -3853,6 +3952,12 @@ struct LLVMCodegen:
                                         param_type = String.make("{ ptr, i64, i64 }" to cstr)
             if param_type.len == 0 to usize:
                 param_type = String.make("i64" to cstr)
+            // Slice 32: record the finalized param LLVM type for the
+            // fn-signature map (direct call sites pin NumberLiteral arg
+            // types from this — see fn_sig_by_name).
+            if p_idx > 0 to i64:
+                append_cstr(ref fn_sig32, ";" to cstr)
+            append_str(ref fn_sig32, param_type)
             let is_bv as bool = is_struct_byval(param_type)
             if is_bv:
                 append_cstr(ref param_buf, "ptr %")
@@ -3864,6 +3969,8 @@ struct LLVMCodegen:
             if p_idx < p_count - 1 to i64:
                 append_cstr(ref param_buf, ", ")
             p_idx = p_idx + 1 to i64
+        set_dict_str(ref (deref self).fn_sig_by_name, name, fn_sig32.to_string())
+        fn_sig32.deinit()
         append_cstr(ref (deref self).main_out, "define ")
         append_str(ref (deref self).main_out, ret_type)
         append_cstr(ref (deref self).main_out, " @")
@@ -4084,6 +4191,39 @@ struct LLVMCodegen:
         let _c as ptr = memcpy(alloc to ptr, type_name.data to ptr, type_name.len)
         alloc[type_name.len] = 0 to u8
         return String(data = alloc, len = type_name.len, capacity = type_name.len + 1 to usize)
+    // Slice 32: extract the idx-th ';'-separated LLVM type from a
+    // recorded signature ("i32;{ ptr, i32, i32 }"). Empty string when
+    // out of range. ';' never appears inside LLVM type strings (commas
+    // do — struct/literal aggregates), so a linear scan is sufficient.
+    public fn sig_param_at(self as ptr[LLVMCodegen], sig as String, idx as i64) as String:
+        extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+        var seg_start as usize = 0
+        var seg_idx as i64 = 0 to i64
+        var i as usize = 0 to usize
+        while i <= sig.len:
+            if i == sig.len:
+                if seg_idx == idx:
+                    let seg_len2 as usize = i - seg_start
+                    if seg_len2 == 0 to usize:
+                        return String.make("" to cstr)
+                    let buf2 as ptr[u8] = make[u8](seg_len2 + 1 to usize) to ptr[u8]
+                    let _m2 as ptr = memcpy(buf2 to ptr, (sig.data to usize + seg_start) to ptr, seg_len2)
+                    buf2[seg_len2] = 0 to u8
+                    return String.make(buf2 to cstr)
+                break
+            if (deref ((sig.data to usize + i) to ptr[u8])) == 59 to u8:
+                if seg_idx == idx:
+                    let seg_len as usize = i - seg_start
+                    if seg_len == 0 to usize:
+                        return String.make("" to cstr)
+                    let buf as ptr[u8] = make[u8](seg_len + 1 to usize) to ptr[u8]
+                    let _m as ptr = memcpy(buf to ptr, (sig.data to usize + seg_start) to ptr, seg_len)
+                    buf[seg_len] = 0 to u8
+                    return String.make(buf to cstr)
+                seg_idx = seg_idx + 1 to i64
+                seg_start = i + 1 to usize
+            i = i + 1 to usize
+        return String.make("" to cstr)
 
     public fn emit_var_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name_ptr as ptr[String] = node_name_ptr(node)
@@ -4254,6 +4394,25 @@ struct LLVMCodegen:
             if (node_inferred_type(init_node) == None to ptr[Type] or (deref (node_inferred_type(init_node))).kind == TypeKind.Any) and node_inferred_type(node) != None to ptr[Type]:
                 set_node_inferred_type(init_node, node_inferred_type(node))
             let val_reg as ptr[u8] = self.emit_expr(init_node)
+            if node_kind(init_node) == NodeType.ClosureExpr and (name_ptr to ptr[u8]) != (None to ptr[u8]) and (deref name_ptr).data != None:
+                // Slice 32: record the closure's LLVM param types for this
+                // var so call sites can pin literal arg types (wasm32
+                // indirect calls trap on signature mismatches that native
+                // x86 masks). Read from the closure's param NODES — the
+                // same source emit_closure_expr uses for the body
+                // signature — not Type.param_types (its List[Type]
+                // element storage was observed corrupted for idx > 0).
+                let cl_params as List[ptr[Node]] = node_params(init_node)
+                let cl_sig as StringBuilder = StringBuilder.make()
+                var cl_i as i64 = 0 to i64
+                while cl_i < cl_params.length():
+                    if cl_i > 0 to i64:
+                        append_cstr(ref cl_sig, ";" to cstr)
+                    let cl_p as ptr[Node] = get_node_decl(ref cl_params, cl_i)
+                    append_str(ref cl_sig, type_to_llvm(node_inferred_type(cl_p)))
+                    cl_i = cl_i + 1 to i64
+                set_dict_str(ref (deref self).closure_sig_by_var, deref name_ptr, cl_sig.to_string())
+                cl_sig.deinit()
             if node_kind(init_node) == NodeType.Identifier:
                 let rhs_nm as String = node_name(init_node)
                 let div_k2 as StringBuilder = StringBuilder.make()
@@ -8533,6 +8692,25 @@ struct LLVMCodegen:
                         arg_type = String.make("i8" to cstr)
             if node_kind(arg_node) != NodeType.CastExpr and (deref (arg_val to ptr[u8])) >= 48 to u8 and (deref (arg_val to ptr[u8])) <= 57 to u8 and strncmp(arg_val to cstr, "0x" to cstr, 2 to usize) != 0 and strcmp(arg_type.data to cstr, "double" to cstr) != 0 and strcmp(arg_type.data to cstr, "float" to cstr) != 0 and strcmp(arg_type.data to cstr, "i8" to cstr) != 0 and strcmp(arg_type.data to cstr, "i16" to cstr) != 0 and strcmp(arg_type.data to cstr, "i64" to cstr) != 0 and strcmp(arg_type.data to cstr, "u64" to cstr) != 0 and node_kind(arg_node) != NodeType.BooleanLiteral:
                 arg_type = String.make("i32" to cstr)
+            // Closure/direct calls: wasm32 traps on ANY call-signature
+            // mismatch (native x86 passes ints in registers and tolerates
+            // i64-at-call-site vs i32-at-body). A NumberLiteral arg can
+            // reach codegen unannotated (sema's List[Type]-based param
+            // annotation reads corrupted storage for idx > 0) and falls
+            // back to i64 above. Pin literal arg types from the recorded
+            // signatures (closure_sig_by_var / fn_sig_by_name) — the same
+            // param-node derivation the define/body uses.
+            if callee != None to ptr[Node] and node_kind(callee) == NodeType.Identifier and node_kind(arg_node) == NodeType.NumberLiteral:
+                let cc_name as String = node_name(callee)
+                var cc_sig as String = String.make("" to cstr)
+                if (deref self).closure_sig_by_var.has(cc_name):
+                    cc_sig = (deref self).closure_sig_by_var[cc_name]
+                elif (deref self).fn_sig_by_name.has(cc_name):
+                    cc_sig = (deref self).fn_sig_by_name[cc_name]
+                if cc_sig.len > 0 to usize:
+                    let cc_pt as String = self.sig_param_at(cc_sig, a_idx)
+                    if cc_pt.len > 0 to usize:
+                        arg_type = cc_pt
             if strcmp(arg_type.data to cstr, "i8" to cstr) == 0:
                 var arg_need_zext as bool = False
                 if node_kind(arg_node) == NodeType.BinaryExpr:

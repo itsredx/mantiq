@@ -3924,3 +3924,64 @@ version → 3/3 probes). Wasm suite baseline unchanged (6/8;
 closures/fstrings pre-existing). Zero-runtime gates A/B/C green
 with the new compiler (native 25080 B / wasm 2836 B, 0 runtime
 symbols; no-libc exit 0). p26a negative check: 0 mantiq_py symbols.
+
+## Slice 32 — wasm32 suite failures fixed (closures trap, fstrings link errors)
+
+**Fstrings link errors (32-bit Milestone D).** The wasm32 suites
+importing `string` failed to link: the print + conversion surface
+(`mantiq_print_cstr`, `mantiq_print_newline`, `mantiq_print_i32`,
+`mantiq_print_bool`, `mantiq_print_float`, `mantiq_print_ptr`,
+`mantiq_print_space`, `mantiq_print_str`, `mantiq_i32_to_str`,
+`mantiq_i64_to_str`, `mantiq_u64_to_str`, `mantiq_float_to_str`,
+`mantiq_f64_to_str`, `mantiq_char_to_str`, `mantiq_bool_to_str`,
+`mantiq_strlen`, `mantiq_concat_str`) was 64-bit "Milestone D
+(products)" only. Ported the full surface to `emit_rt_glue_bodies_32`
+with per-body `rt_body_missing` guards; shared constants/declares are
+emitted once under a `prd32_need` gate (sum of the missing flags).
+wasm32 ABI adaptations: `snprintf(ptr, i32, ptr, ...)`,
+`memcpy(ptr, ptr, i32)`, `fwrite(ptr, i32, i32, ptr)`, libc `strlen`
+returns i32 (sext'd to the i64 mantiq-level contract);
+`mantiq_malloc_raw` stays i64 (sizes trunc'd at libc calls).
+Mantiq-level signatures keep i64 lengths + alloca-i64 out-slots on
+every target. The constants block must include `@__nz_prt_true` /
+`@__nz_prt_false` (print_bool uses them). Async/channel/quantum stay
+64-bit-only (threading has no wasm32 story).
+
+**Closures trap (literal-arg ABI mismatch).** Once linking succeeded,
+the closures suite trapped at runtime: wasm32 indirect AND direct
+calls trap on any call-signature mismatch that native x86 masks by
+passing ints in registers. IR evidence:
+`call i32 %t.9(ptr, i32 17, i64 25)` vs body `(ptr, i32, i32)`, and
+`call i32 @apply_op(ptr, i64 14)` vs define `(ptr, i32)`. Root cause:
+sema's NumberLiteral param annotation reads `Type.param_types`
+through `List[Type]` element storage that is CORRUPTED for idx > 0
+(instrumented: `expected_kind=570028336` — pointer garbage). Fix in
+codegen, avoiding `List[Type]` entirely: new dicts
+`closure_sig_by_var` (recorded at VarDecl emission when the init is a
+ClosureExpr, from the param NODES' inferred types — the same source
+emit_closure_expr uses for the body signature) and `fn_sig_by_name`
+(recorded at emit_fun_decl's define-path param loop from the
+finalized `param_type`). The arg-loop override (after the digit
+heuristic, before the trunc/zext machinery) pins NumberLiteral arg
+types via `sig_param_at(sig, a_idx)`; signatures are ';'-joined
+(commas appear inside LLVM struct types). Identifier callees only;
+externs/generics/member-calls keep the old behavior.
+
+**Wasm test runner fix.** `run_wasm_tests.sh` was hardcoded to
+`${ROOT_DIR}/mantiq/nizam` (a bare binary — segfaults) and ran from
+the repo root without `--lib-dir` (import resolution is
+cwd-relative; the node-22 WASI runner drops relative `.` lookups).
+Now: `NIZAM` env override (default nizam-new-wrap), `cd mantiq`,
+`--target wasm32 --lib-dir "$PWD"`.
+
+**Verified.** Wasm suite 8/8 (closures 5/5, fstrings 6/6; previously
+6/8). Zero-runtime gates A/B/C green with the final candidate
+(native 25080 B / wasm 2836 B, 0 runtime symbols; no-libc exit 0).
+Chain gate 50/50 + promotion; promoted binary re-verified 8/8 wasm.
+p26a negative check: 0 mantiq_py symbols. fmt idempotent on both
+touched sources.
+
+**Known pre-existing, not regressions.** p24a strict-mode import
+error; `-lpython3.12` pin vs installed python3.14. Follow-ups out of
+scope: root-cause the `List[Type]` element corruption in sema;
+python3.12 pin sites; wasm32 async (wasi-threads).
