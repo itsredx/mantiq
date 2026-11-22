@@ -4042,3 +4042,47 @@ workaround stays (correct on its own terms; wasm32 traps on any ABI
 mismatch, and the native fn-typed `apply_op(double, 21)` indirect
 call returns 0 on the promoted binary too — pre-existing, not a
 regression).
+
+## Slice 34 — plain fn references corrupted by the closure call convention LANDED
+
+**Symptom.** Passing a named function to an `fn(...)`-typed parameter
+returned garbage: `apply_op(double, 21)` (with
+`fn apply_op(f as fn(i32) as i32, val as i32) as i32`) gave `r=0` —
+`double` received its `x` from the register holding the closure
+environment (null). Pre-existing on the promoted Slice 33 binary; the
+wasm suites never caught it because they only pass CLOSURES through
+fn-typed params (`triple_with_cap` — the env-arg call is correct for
+those).
+
+**Root cause.** Callable values are `{ fnptr, env }`. The uniform
+indirect-call convention in every fn-typed call body is
+`call ret %fnp(ptr env, args...)` — correct for closures (fnptr is a
+trampoline taking `(env, args...)`) but wrong for plain functions
+(fnptr is `@fn` itself, body takes `(args...)` only; the env slot is
+null and unused). Meanwhile the identifier→callable-value conversion
+site (emit_expr Identifier, `program_functions`/`defined_functions`
+with a `{ ptr, ptr }` target) inserted the RAW `@fn` pointer with
+env=null.
+
+**Fix (two parts).**
+1. `fn_ref_thunk`: at the conversion site, plain fn references are
+   wrapped in a lazily emitted trampoline
+   `define <ret> @__nz_thunk_<fn>(ptr %env, <params...>) { call @fn(...) }`
+   — making the plain-fn representation call-compatible with the
+   closure convention. Signatures come from `fn_sig_by_name` (Slice
+   32, finalized target-aware param LLVM types, byval params kept as
+   `ptr` via `is_struct_byval`); a new `fn_ret_by_name` dict records
+   the return type alongside. Thunk defines land in `type_out` (the
+   module assembly hoists `%Name = type` lines ahead of everything
+   else and `type_out` precedes `main_out`, so defines there are
+   valid). Fallback: when the signature isn't recorded yet (use before
+   define), the raw `@fn` pointer is inserted as before.
+2. fn-typed LOCAL VarDecls emitted invalid IR: the annotation
+   refinement's %-prefix fallback rendered `let f as fn(i32) as i32`
+   as `alloca %fn(i32) as i32` ("invalid type for alloca"). Added a
+   `fn(`-annotation branch mapping to `{ ptr, ptr }`.
+
+**Verified.** p34a `apply_op(double, 21)` = 42 (was 0); p34b fn-typed
+local + nested pass-through (`twice(triple, 3)` = 27, was invalid-IR);
+p34c closure through fn-typed param = 42. p33a/p33b/p33c unchanged.
+Wasm suite 8/8, zero-runtime 3/3, chain gate 50/50 + promotion.

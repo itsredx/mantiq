@@ -1303,6 +1303,12 @@ struct LLVMCodegen:
     // storage, which was observed corrupted for idx > 0 — the wasm32
     // indirect/direct ABI traps on the resulting i64/i32 mismatch).
     public var fn_sig_by_name as Dict[String, String]
+    // Slice 34: finalized return LLVM type per program function (recorded
+    // alongside fn_sig_by_name) — the fn-reference thunk generator needs
+    // it to emit `@__nz_thunk_<fn>` wrappers with the right signature.
+    public var fn_ret_by_name as Dict[String, String]
+    // Slice 34: fn-reference thunks already emitted (dedupe).
+    public var fn_thunks_emitted as Dict[String, bool]
     public var defined_types as Dict[String, bool]
     public var external_decls as Dict[String, bool]
     public var auto_drops as Dict[usize, List[String]]
@@ -1406,6 +1412,8 @@ struct LLVMCodegen:
         (deref self).needs_drop_types = Dict[String, bool]()
         (deref self).closure_sig_by_var = Dict[String, String]()
         (deref self).fn_sig_by_name = Dict[String, String]()
+        (deref self).fn_ret_by_name = Dict[String, String]()
+        (deref self).fn_thunks_emitted = Dict[String, bool]()
 
     public fn fresh_temp(self as ptr[LLVMCodegen]) as ptr[u8]:
         let buf as ptr[u8] = make[u8](32 to usize) to ptr[u8]
@@ -3970,6 +3978,7 @@ struct LLVMCodegen:
                 append_cstr(ref param_buf, ", ")
             p_idx = p_idx + 1 to i64
         set_dict_str(ref (deref self).fn_sig_by_name, name, fn_sig32.to_string())
+        set_dict_str(ref (deref self).fn_ret_by_name, name, ret_type)
         fn_sig32.deinit()
         append_cstr(ref (deref self).main_out, "define ")
         append_str(ref (deref self).main_out, ret_type)
@@ -4224,6 +4233,95 @@ struct LLVMCodegen:
                 seg_start = i + 1 to usize
             i = i + 1 to usize
         return String.make("" to cstr)
+    // Slice 34: wrap a plain function reference in a trampoline thunk when
+    // it becomes a `{ ptr, ptr }` callable value. The uniform indirect-call
+    // convention passes the closure environment as the first argument
+    // (`call ret %fnp(ptr env, args...)`), which matches closure
+    // trampolines (body takes (env, args...)) but corrupts plain
+    // functions (body takes (args...) only — the null env landed in the
+    // first real param: apply_op(double, 21) called double with x = the
+    // env pointer and returned 0). The thunk takes (env, args...) and
+    // forwards, making the plain-fn representation call-compatible with
+    // closures. Returns the thunk symbol, or "" when no finalized
+    // signature is recorded yet (caller falls back to the raw @fn
+    // pointer — emission order can put the use before the define).
+    public fn fn_ref_thunk(self as ptr[LLVMCodegen], fn_name as String) as String:
+        if fn_name.data == None to ptr[u8] or fn_name.len == 0 to usize:
+            return String.make("" to cstr)
+        if not (deref self).fn_sig_by_name.has(fn_name):
+            return String.make("" to cstr)
+        let thunk_sym_sb as StringBuilder = StringBuilder.make()
+        append_cstr(ref thunk_sym_sb, "@__nz_thunk_" to cstr)
+        append_str(ref thunk_sym_sb, fn_name)
+        let thunk_sym as String = thunk_sym_sb.to_string()
+        thunk_sym_sb.deinit()
+        if (deref self).fn_thunks_emitted.has(fn_name):
+            return thunk_sym
+        let sig as String = (deref self).fn_sig_by_name[fn_name]
+        var ret_t as String = String.make("i64" to cstr)
+        if (deref self).fn_ret_by_name.has(fn_name):
+            ret_t = (deref self).fn_ret_by_name[fn_name]
+        // Count the signature's param segments (''-joined by ';'); an empty
+        // recorded sig means zero params.
+        var p_count as i64 = 0 to i64
+        if sig.len > 0 to usize:
+            p_count = 1 to i64
+            var sc as usize = 0 to usize
+            while sc < sig.len:
+                if deref ((sig.data to usize + sc) to ptr[u8]) == 59 to u8:
+                    p_count = p_count + 1 to i64
+                sc = sc + 1 to usize
+        var has_ret as bool = ret_t.len > 0 to usize and strcmp(ret_t.data to cstr, "void" to cstr) != 0
+        let def_sb as StringBuilder = StringBuilder.make()
+        append_cstr(ref def_sb, "define " to cstr)
+        append_str(ref def_sb, ret_t)
+        append_cstr(ref def_sb, " @__nz_thunk_" to cstr)
+        append_str(ref def_sb, fn_name)
+        append_cstr(ref def_sb, "(ptr %env" to cstr)
+        var p_idx as i64 = 0 to i64
+        while p_idx < p_count:
+            let pt as String = self.sig_param_at(sig, p_idx)
+            append_cstr(ref def_sb, ", " to cstr)
+            if is_struct_byval(pt):
+                append_cstr(ref def_sb, "ptr %p" to cstr)
+            else:
+                append_str(ref def_sb, pt)
+                append_cstr(ref def_sb, " %p" to cstr)
+            append_i64(ref def_sb, p_idx)
+            p_idx = p_idx + 1 to i64
+        append_cstr(ref def_sb, ") {\nentry:\n" to cstr)
+        if has_ret:
+            append_cstr(ref def_sb, "  %r = call " to cstr)
+            append_str(ref def_sb, ret_t)
+            append_cstr(ref def_sb, " @" to cstr)
+        else:
+            append_cstr(ref def_sb, "  call void @" to cstr)
+        append_str(ref def_sb, fn_name)
+        append_cstr(ref def_sb, "(" to cstr)
+        var a_idx as i64 = 0 to i64
+        while a_idx < p_count:
+            if a_idx > 0 to i64:
+                append_cstr(ref def_sb, ", " to cstr)
+            let pt2 as String = self.sig_param_at(sig, a_idx)
+            if is_struct_byval(pt2):
+                append_cstr(ref def_sb, "ptr %p" to cstr)
+            else:
+                append_str(ref def_sb, pt2)
+                append_cstr(ref def_sb, " %p" to cstr)
+            append_i64(ref def_sb, a_idx)
+            a_idx = a_idx + 1 to i64
+        append_cstr(ref def_sb, ")\n" to cstr)
+        if has_ret:
+            append_cstr(ref def_sb, "  ret " to cstr)
+            append_str(ref def_sb, ret_t)
+            append_cstr(ref def_sb, " %r\n" to cstr)
+        else:
+            append_cstr(ref def_sb, "  ret void\n" to cstr)
+        append_cstr(ref def_sb, "}\n\n" to cstr)
+        append_str(ref (deref self).type_out, def_sb.to_string())
+        def_sb.deinit()
+        set_dict_bool(ref (deref self).fn_thunks_emitted, fn_name, True)
+        return thunk_sym
 
     public fn emit_var_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name_ptr as ptr[String] = node_name_ptr(node)
@@ -4275,6 +4373,13 @@ struct LLVMCodegen:
                                         var_type = String.make("{ ptr, i64, i64 }" to cstr)
                                 elif strncmp(pa_name, "Channel" to cstr, 7 to usize) == 0 or strncmp(pa_name, "Task" to cstr, 4 to usize) == 0 or strcmp(pa_name, "PyObject" to cstr) == 0:
                                     var_type = String.make("ptr" to cstr)
+                                elif strncmp(pa_name, "fn(" to cstr, 3 to usize) == 0 or strcmp(pa_name, "fn" to cstr) == 0:
+                                    // Slice 34: fn-typed locals take the
+                                    // callable-value repr — the annotation
+                                    // text ("fn(i32) as i32") is NOT an LLVM
+                                    // type and the %-prefix fallback produced
+                                    // invalid IR (`alloca %fn(i32) as i32`).
+                                    var_type = String.make("{ ptr, ptr }" to cstr)
                                 else:
                                     var_type = String.make(pa_name)
                                     if (deref var_type.data) != 37 to u8 and strcmp(pa_name, "ptr" to cstr) != 0 and (deref var_type.data) != 105 to u8:
@@ -4767,11 +4872,22 @@ struct LLVMCodegen:
                 .has(id_nm_str) and not (deref self).global_vars
                 .has(id_nm_str) and ((deref self).program_functions.has(id_nm_str) or (deref self).defined_functions.has(id_nm_str) or (deref self).external_decls.has(id_nm_str)):
                 if strcmp(var_type.data to cstr, "{ ptr, ptr }" to cstr) == 0:
+                    // Slice 34: wrap plain fn references in a trampoline
+                    // thunk so the uniform (env, args...) indirect-call
+                    // convention works for closures AND plain functions
+                    // (raw @fn pointers got the null env in their first
+                    // param). Falls back to the raw pointer when the
+                    // finalized signature isn't recorded yet.
+                    let th_sym as String = self.fn_ref_thunk(id_nm_str)
                     let fat1 as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
                     append_cstr(ref (deref self).main_out, fat1 to cstr)
-                    append_cstr(ref (deref self).main_out, " = insertvalue { ptr, ptr } undef, ptr @")
-                    append_str(ref (deref self).main_out, id_nm_str)
+                    append_cstr(ref (deref self).main_out, " = insertvalue { ptr, ptr } undef, ptr ")
+                    if th_sym.len > 0 to usize:
+                        append_str(ref (deref self).main_out, th_sym)
+                    else:
+                        append_cstr(ref (deref self).main_out, "@" to cstr)
+                        append_str(ref (deref self).main_out, id_nm_str)
                     append_cstr(ref (deref self).main_out, ", 0\n")
                     let fat2 as ptr[u8] = self.fresh_temp()
                     append_cstr(ref (deref self).main_out, "  ")
