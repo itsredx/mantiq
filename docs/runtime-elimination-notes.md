@@ -3985,3 +3985,60 @@ touched sources.
 error; `-lpython3.12` pin vs installed python3.14. Follow-ups out of
 scope: root-cause the `List[Type]` element corruption in sema;
 python3.12 pin sites; wasm32 async (wasi-threads).
+
+## Slice 33 — `List[Type]` element corruption root-caused: enum types unregistered in `struct_sizes` LANDED
+
+**Root cause (proved by instrumentation + IR + arithmetic).** Slice 32
+masked the corruption with sig-pinning; this slice fixed it. The bug
+was a **stride mismatch on `List[Type]` element storage**:
+
+- Read side: `emit_index_addr` GEPs `getelementptr inbounds %Type,
+  ptr %buf, i64 %idx` — stride = true `sizeof(%Type)` = 112.
+- Write side: sema `.append` calls emit `call void
+  @__mantiq_list_append(ptr, ptr, i64 1128)` — stride 1128 as an
+  immediate constant. Element 0 lands correctly; every element at
+  idx >= 1 is written at byte 1128 while reads fetch byte 112 (e.g.
+  `elem[1].kind` read as `254005488` — an arena pointer).
+
+**Where 1128 came from.** The emitted `%Type = type { %TypeKind, ptr,
+{ ptr, i64, i64 }×3, ptr, i64, i8 }` includes the `%TypeKind` enum
+field. `emit_struct_fields` computes the struct's byte size via
+`llvm_type_byte_size(body)`, which resolves named types through
+`resolve_struct_size` → `struct_sizes`. Enums were never registered:
+`emit_enum_decl` emitted `%Name = type i32` (or `{ i32, [32 x i8] }`
+with payloads) but recorded no size, so `%TypeKind` hit the 1024
+fallback → 1024+8+72+8+8+1 = 1128. The registration order also
+mattered: `register_builtin_struct("Type", ...)` recorded 96 first
+(64-bit layout `{ i32, ptr, {ptr,i64,i64}×3, ptr }`), then
+`emit_struct_fields` overwrote it with 1128 (user-layout-wins
+overwrite).
+
+**Fix.** `emit_enum_decl` now registers the enum's LLVM byte size in
+`struct_sizes` right after emitting the type line: 4 for the plain
+`i32` form, 36 for the payload form `{ i32, [32 x i8] }` (verified
+against LLVM's own layout with a getelementptr probe: 36). Enums have
+a fixed representation, so the registered size can never collide with
+a user's differing layout. `emit_enum_decl` runs before the struct's
+size computation (`%TypeKind = type i32` precedes `%Type = type ...`
+in the emitted type stream), so the lookup succeeds.
+
+**Debug technique.** The wrap swallows compiler stdout during
+`build`, so self-compile instrumentation must go to stderr:
+`extern fn write(fd as i32, buf as ptr, n as usize) as i64` +
+`sprintf` into a buffer, `write(2, buf, len)`. And the
+instrumentation comparisons must use explicit
+`strcmp(name.data to cstr, ...)` — a bare `strcmp(name, "Type")` on a
+`String` compiles but never matches. Running an instrumented bare
+binary needs the wrap's environment: `ulimit -s 1048576; CPATH=
+"$HOME/.local/lib/mantiq/include" LD_LIBRARY_PATH="$PWD"`.
+
+**Verified.** The compiler's own IR: all 4 `List[Type]` appends
+(`TypeChecker_typecheck_node` ×3, `TypeChecker_resolve_base_type_
+annotation` ×1) now emit stride 112, matching the read GEP stride.
+p33c reproducer: `elem[1].kind = 2` (I32) where it was pointer
+garbage. p33a/p33b `List[Struct]` probes still pass. Wasm suite 8/8,
+zero-runtime 3/3, chain gate 50/50 + promotion. Slice 32's sig-pinning
+workaround stays (correct on its own terms; wasm32 traps on any ABI
+mismatch, and the native fn-typed `apply_op(double, 21)` indirect
+call returns 0 on the promoted binary too — pre-existing, not a
+regression).

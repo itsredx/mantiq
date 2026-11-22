@@ -17878,6 +17878,20 @@ struct LLVMCodegen:
             append_cstr(ref (deref self).type_out, " = type { i32, [32 x i8] }\n\n" to cstr)
         else:
             append_cstr(ref (deref self).type_out, " = type i32\n\n" to cstr)
+        // Register the enum's LLVM byte size: the emitted `%Name` type is
+        // referenced from struct bodies (`%TypeKind` fields etc.), and
+        // size(T)/alignof(T) as well as List element strides resolve
+        // through struct_sizes. Without this, resolve_struct_size fell
+        // back to its 1024 default for the named enum — e.g. sizeof(%Type)
+        // computed as 1128 instead of 112, so `List[Type]` appends used a
+        // 1128-byte element stride while index reads GEP'd at the true
+        // 112-byte %Type stride (element 0 fine, every later element
+        // garbage). Enums have a fixed representation, so the registered
+        // size never collides with a user's differing layout.
+        if has_payloads:
+            set_dict_i64(ref (deref self).struct_sizes, name, 36 to i64)
+        else:
+            set_dict_i64(ref (deref self).struct_sizes, name, 4 to i64)
         var variant_tag as i32 = 0 to i32
         i = 0 to i64
         while i < count:
