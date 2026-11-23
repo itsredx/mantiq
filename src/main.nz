@@ -128,12 +128,17 @@ fn mantiq_run_command_direct(argv as ptr[cstr]) as i32:
 // Runs `python3 --version`, parses "Python 3.<minor>.<patch>", and
 // returns "python3.<minor>". Falls back to the historical "python3.12"
 // when detection fails (no python3, unexpected output).
-fn detect_python_link_name() as String:
+fn detect_python_link_name(is_wasm as bool) as String:
+    extern fn free(p as ptr)
+    let fallback as cstr = "python3.12" to cstr
+    // wasm32 links no host CPython (python FFI is 64-bit-only, like the
+    // threading surface); popen/pclose don't exist in WASI either. Keep
+    // the historical marker text so the emitted link line is unchanged.
+    if is_wasm:
+        return String.make(fallback)
     extern fn popen(cmd as cstr, mode as cstr) as ptr
     extern fn fgets(buf as ptr, n as i32, stream as ptr) as ptr
     extern fn pclose(stream as ptr) as i32
-    extern fn free(p as ptr)
-    let fallback as cstr = "python3.12" to cstr
     let stream as ptr = popen("python3 --version 2>/dev/null" to cstr, "r" to cstr)
     if stream == None to ptr:
         return String.make(fallback)
@@ -1123,7 +1128,7 @@ fn compile_source(
                 if strcmp(lt_name.data to cstr, "python3.12" to cstr) == 0:
                     has_py_flag = True
                     if not py_link_done:
-                        py_link = detect_python_link_name()
+                        py_link = detect_python_link_name(target.is_wasm())
                         py_link_done = True
                     extra_flags.append(" -l" to cstr)
                     extra_flags.append(py_link.data to cstr)
@@ -1133,7 +1138,7 @@ fn compile_source(
             lti = lti + 1 to i64
         if (deref cg).has_python_embed and not has_py_flag:
             if not py_link_done:
-                py_link = detect_python_link_name()
+                py_link = detect_python_link_name(target.is_wasm())
                 py_link_done = True
             extra_flags.append(" -l" to cstr)
             extra_flags.append(py_link.data to cstr)

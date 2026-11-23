@@ -3876,6 +3876,22 @@ struct LLVMCodegen:
                 self.emit_python_extern_fun(node, ret_type, ref params)
                 (deref self).current_struct_name = saved_struct_name
                 return
+            if (deref self).target.is_wasm() and (strcmp(name.data to cstr, "popen" to cstr) == 0 or strcmp(name.data to cstr, "pclose" to cstr) == 0):
+                // Slice 35: wasi-libc has no popen/pclose (no fork()).
+                // The compiler's own CPython-version detector references
+                // them but gates at runtime (is_wasm → fallback before
+                // any call); emit a stub body so the wasm32 link of
+                // compiler-source programs succeeds. Emit only the stub
+                // matching THIS extern node — the sibling's own FunDecl
+                // pass emits the other, and emitting both here twice
+                // would redefine them (llc: invalid redefinition).
+                if strcmp(name.data to cstr, "popen" to cstr) == 0:
+                    append_cstr(ref (deref self).type_out, "define ptr @popen(ptr %cmd, ptr %mode) {\n  ret ptr null\n}\n\n" to cstr)
+                else:
+                    append_cstr(ref (deref self).type_out, "define i32 @pclose(ptr %stream) {\n  ret i32 1\n}\n\n" to cstr)
+                set_dict_bool(ref (deref self).external_decls, name, True)
+                (deref self).current_struct_name = saved_struct_name
+                return
             if (deref self).external_decls.has(name):
                 (deref self).current_struct_name = saved_struct_name
                 return

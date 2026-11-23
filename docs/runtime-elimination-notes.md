@@ -4115,3 +4115,35 @@ unset), runs `r=12.0`. Fallback: a fake `python3` emitting "Python
 without the shim — old behavior preserved exactly. Probes
 p34a/p34b/p34c/p33c unchanged; wasm 8/8; zero-runtime 3/3; chain gate
 50/50 + promotion.
+
+### Slice 35 follow-up — wasm32 stubs for popen/pclose LANDED
+
+**Symptom.** The self-host chain caught it post-core-landing: the
+wasm32 link of compiler source failed with `wasm-ld: undefined symbol:
+popen/pclose`. zig cc's wasi-libc resolves fork/execvp/waitpid (stub
+implementations) but has no popen/pclose, and the `is_wasm` gate in
+`detect_python_link_name` is runtime-only — the extern refs persist in
+the emitted IR.
+
+**Fix.** In codegen's extern-declare branch (`emit_fun_decl`), a
+wasm32 target now emits stub BODIES instead of declares for exactly
+these two names, one per extern node:
+
+    define ptr @popen(ptr %cmd, ptr %mode) { ret ptr null }
+    define i32 @pclose(ptr %stream) { ret i32 1 }
+
+Both are unreachable at runtime on wasm (the detector returns the
+fallback before any call). Two details that bit: the first attempt
+emitted BOTH stubs per extern node and llc rejected the duplicate
+definition (`invalid redefinition of function 'popen'`) — the sibling
+extern node's own pass emits the other; and the branch now registers
+the name in `external_decls` so a duplicate extern dedupes like the
+declare path does.
+
+**Verified.** wasm self-host chain (stage3 wasm32 link -> stage4
+banner "Mantiq Self-Hosting Compiler v0.1.0" -> probe_hello/mini/dict
+build+run) with `NATIVE=<candidate>`; wasm 8/8; zero-runtime 3/3;
+chain gate 50/50 + promotion. Probe note: a hand-recreated
+match-on-payload-enum probe fails identically on the pre-fix promoted
+binary (`%t.6` typed `{ ptr, ptr }` vs expected `%Kind`) — probe
+syntax issue, not a regression.
