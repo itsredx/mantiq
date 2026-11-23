@@ -4086,3 +4086,32 @@ env=null.
 local + nested pass-through (`twice(triple, 3)` = 27, was invalid-IR);
 p34c closure through fn-typed param = 42. p33a/p33b/p33c unchanged.
 Wasm suite 8/8, zero-runtime 3/3, chain gate 50/50 + promotion.
+
+## Slice 35 — CPython link pin detects the installed interpreter LANDED
+
+**Symptom.** Python-FFI builds pinned `-lpython3.12` at three sites
+(sema's python-import link_targets auto-append, main's extra_flags
+fallback, main's baked d_argv link line). On this host (python
+3.14.10) the pin only linked through a hand-maintained
+`~/.local/lib/mantiq/lib/libpython3.12.so -> libpython3.14.so.1.0`
+symlink shim + LIBRARY_PATH; a bare link failed with "cannot find
+-lpython3.12".
+
+**Fix.** New `detect_python_link_name()` in main.nz: popen
+`python3 --version`, parse "Python 3.<minor>.<patch>", return
+"python3.<minor>" (validates the "Python " prefix, major `3`, a dot,
+then 1-3 minor digits). Falls back to the historical "python3.12"
+when detection fails. main's two link-line builders map the sema
+"python3.12" marker (the sema python-import path's auto-append — the
+marker semantics are unchanged; users' `@link` annotations of other
+libs pass through verbatim) and the fallback pin to the detected
+name. The generated glue error message dropped its version claim
+("-lpython3.X missing").
+
+**Verified.** p35a (`import[python] math`, `math.sqrt(144.0)`):
+links against `libpython3.14.so.1.0` DIRECTLY (no shim, LIBRARY_PATH
+unset), runs `r=12.0`. Fallback: a fake `python3` emitting "Python
+9.9.9" (major != 3) makes the build attempt `-lpython3.12` and fail
+without the shim — old behavior preserved exactly. Probes
+p34a/p34b/p34c/p33c unchanged; wasm 8/8; zero-runtime 3/3; chain gate
+50/50 + promotion.

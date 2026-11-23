@@ -122,6 +122,63 @@ fn mantiq_run_command_direct(argv as ptr[cstr]) as i32:
     return sig
 
 
+// Slice 35: link against the INSTALLED CPython instead of a hard
+// python3.12 pin (this host ships 3.14; the old pin only linked through
+// a hand-maintained libpython3.12.so symlink shim + LIBRARY_PATH).
+// Runs `python3 --version`, parses "Python 3.<minor>.<patch>", and
+// returns "python3.<minor>". Falls back to the historical "python3.12"
+// when detection fails (no python3, unexpected output).
+fn detect_python_link_name() as String:
+    extern fn popen(cmd as cstr, mode as cstr) as ptr
+    extern fn fgets(buf as ptr, n as i32, stream as ptr) as ptr
+    extern fn pclose(stream as ptr) as i32
+    extern fn free(p as ptr)
+    let fallback as cstr = "python3.12" to cstr
+    let stream as ptr = popen("python3 --version 2>/dev/null" to cstr, "r" to cstr)
+    if stream == None to ptr:
+        return String.make(fallback)
+    let buf as ptr[u8] = make[u8](64 to usize) to ptr[u8]
+    let got as ptr = fgets(buf, 64 to i32, stream)
+    let _pc as i32 = pclose(stream)
+    if got == None to ptr:
+        return String.make(fallback)
+    // Parse "Python 3.<minor>.<patch>": require the "Python " prefix,
+    // major "3", a dot, then the minor digits.
+    var i as usize = 0 to usize
+    let py_prefix as cstr = "Python " to cstr
+    var pre_ok as bool = True
+    while i < 7 to usize:
+        if deref ((buf to usize + i) to ptr[u8]) != deref ((py_prefix to usize + i) to ptr[u8]):
+            pre_ok = False
+        i = i + 1 to usize
+    if not pre_ok:
+        return String.make(fallback)
+    if deref ((buf to usize + 7) to ptr[u8]) != 51 to u8: // '3'
+        return String.make(fallback)
+    if deref ((buf to usize + 8) to ptr[u8]) != 46 to u8: // '.'
+        return String.make(fallback)
+    var mi as usize = 9 to usize
+    var minor_digits as usize = 0 to usize
+    while mi < 64 to usize and deref ((buf to usize + mi) to ptr[u8]) >= 48 to u8 and deref ((buf to usize + mi) to ptr[u8]) <= 57 to u8:
+        mi = mi + 1 to usize
+        minor_digits = minor_digits + 1 to usize
+    if minor_digits == 0 to usize or minor_digits > 3 to usize:
+        return String.make(fallback)
+    let out_sb as StringBuilder = StringBuilder.make()
+    out_sb.append("python3." to cstr)
+    var d_idx as usize = 0 to usize
+    while d_idx < minor_digits:
+        let d_buf as ptr[u8] = make[u8](2 to usize) to ptr[u8]
+        deref d_buf = deref ((buf to usize + 9 to usize + d_idx) to ptr[u8])
+        deref ((d_buf to usize + 1) to ptr[u8]) = 0 to u8
+        out_sb.append(d_buf to cstr)
+        free(d_buf to ptr)
+        d_idx = d_idx + 1 to usize
+    let out_s as String = out_sb.to_string()
+    out_sb.deinit()
+    return out_s
+
+
 // Guard: reject filesystem paths containing control bytes. Such paths can
 // only originate from uninitialized or freed memory passed as a cstr (see
 // docs/runtime-elimination-notes.md, aliasing-drop instances #1-#5);
@@ -1048,6 +1105,11 @@ fn compile_source(
         let lt_count as i64 = (deref sema).link_targets.length()
         var lti as i64 = 0 to i64
         var has_py_flag as bool = False
+        // Slice 35: the sema python-import path appends "python3.12" as the
+        // CPython marker; map it to the installed interpreter's lib name
+        // (detected once, lazily).
+        var py_link as String = String.make("" to cstr)
+        var py_link_done as bool = False
         while lti < lt_count:
             // Fresh copy, never the byval list element: the frozen-era
             // borrowck auto-drops this local at scope exit, which would free
@@ -1058,13 +1120,24 @@ fn compile_source(
             // is passed explicitly in the wasm link line below.
             let is_ts_wasm as bool = target.is_wasm() and strcmp(lt_name.data to cstr, "tree-sitter-mantiq" to cstr) == 0 to i32
             if strcmp(lt_name.data to cstr, "m" to cstr) != 0 and not is_ts_wasm:
-                extra_flags.append(" -l" to cstr)
-                extra_flags.append(lt_name.data to cstr)
                 if strcmp(lt_name.data to cstr, "python3.12" to cstr) == 0:
                     has_py_flag = True
+                    if not py_link_done:
+                        py_link = detect_python_link_name()
+                        py_link_done = True
+                    extra_flags.append(" -l" to cstr)
+                    extra_flags.append(py_link.data to cstr)
+                else:
+                    extra_flags.append(" -l" to cstr)
+                    extra_flags.append(lt_name.data to cstr)
             lti = lti + 1 to i64
         if (deref cg).has_python_embed and not has_py_flag:
-            extra_flags.append(" -lpython3.12 -ldl" to cstr)
+            if not py_link_done:
+                py_link = detect_python_link_name()
+                py_link_done = True
+            extra_flags.append(" -l" to cstr)
+            extra_flags.append(py_link.data to cstr)
+            extra_flags.append(" -ldl" to cstr)
         let extra_flags_str as String = extra_flags.to_string()
         let extra_flags_c as cstr = extra_flags_str.data to cstr
 
@@ -1300,13 +1373,20 @@ fn compile_source(
                 if strcmp(lt_name2.data to cstr, "m" to cstr) != 0:
                     let l_sb2 as StringBuilder = StringBuilder.make()
                     l_sb2.append("-l" to cstr)
-                    l_sb2.append(lt_name2.data to cstr)
+                    if strcmp(lt_name2.data to cstr, "python3.12" to cstr) == 0:
+                        // Slice 35: map the CPython marker to the installed
+                        // interpreter's lib name.
+                        l_sb2.append((deref py_link).data to cstr)
+                    else:
+                        l_sb2.append(lt_name2.data to cstr)
                     let l_str2 as String = l_sb2.to_string()
                     d_argv[di] = l_str2.data to cstr
                     di = di + 1 to usize
                 lti2 = lti2 + 1 to i64
             if (deref cg).has_python_embed and not has_py_flag:
-                d_argv[di] = "-lpython3.12" to cstr
+                d_argv[di] = "-l" to cstr
+                di = di + 1 to usize
+                d_argv[di] = (deref py_link).data to cstr
                 di = di + 1 to usize
                 d_argv[di] = "-ldl" to cstr
                 di = di + 1 to usize
