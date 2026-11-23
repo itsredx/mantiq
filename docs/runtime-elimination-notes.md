@@ -4147,3 +4147,30 @@ chain gate 50/50 + promotion. Probe note: a hand-recreated
 match-on-payload-enum probe fails identically on the pre-fix promoted
 binary (`%t.6` typed `{ ptr, ptr }` vs expected `%Kind`) — probe
 syntax issue, not a regression.
+
+## Slice 35 follow-ups — mantiq_async wasm suite wired; p24a resolved LANDED
+
+**wasm32 async (wasi-threads):** the orphan
+`src/tests/wasm/test_wasm_mantiq_async.mq` (spawn/await 4-way +
+Channel[i32] send/recv, the Slice 24 futex-channel surface on wasm) is
+now the 9th suite in `src/tests/wasm/run_wasm_tests.sh`. The wasm link
+line already keeps runtime.c's wasi-threads machinery when the IR
+calls mantiq_spawn (Slice 29 call-site scan). Verified: the suite
+builds to wasm32 and runs r1=42, r2=55, m1=101, m2=202; full run 9/9.
+
+**p24a "strict-mode import error" root-caused, probe recreated:** the
+original probe (4 threads x 100k increments under std.sync.Mutex)
+predated strict-mode import enforcement and used unqualified names
+with a plain `import std.sync` — that now correctly reports E0316
+("Mutex requires explicit import in Nizam strict mode", by design,
+matching Python's `import module` vs `from module import name`
+semantics). Two more findings while recreating: the documented
+strict-mode false-positive class ("let l = List[i64](); l.append(1)
+without import hits E0316", Slice 19 KNOWN LIMIT) is ALREADY FIXED —
+the probe now runs (n=1); and struct literals (`Mutex{state: 0}`) are
+not a language construct at all (no StructLiteral AST node — the
+broken IR is fallback on an unsupported parse, not a codegen bug).
+The recreated probe (`probes/p24a.nz`, local-only) uses the explicit
+`from std.sync import Mutex, mutex_lock, mutex_unlock, mutex_init`
+style with a by-pointer Mutex (`make[Mutex]`) and passes:
+counter=400000 exact, no lost increments.

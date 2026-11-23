@@ -30,6 +30,7 @@ TEST_FILES=(
     "src/tests/wasm/test_wasm_classes.mq"
     "src/tests/wasm/test_wasm_closures.mq"
     "src/tests/wasm/test_wasm_fstrings.mq"
+    "src/tests/wasm/test_wasm_mantiq_async.mq"
 )
 
 PASSED=0
