@@ -1,9 +1,7 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import List
 from std.string import String
 
-import symbols
 from symbols import Node, NodeType, Span, TypeAnnotation, make_node, node_body, node_cond, node_declarations, node_else_branch, node_inferred_type, node_kind, node_left, node_name, node_params, node_right, node_target, node_then_branch, node_type_annots, node_val, set_node_body, set_node_declarations, set_node_else_branch, set_node_then_branch
 
 

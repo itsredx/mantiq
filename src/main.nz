@@ -1,5 +1,4 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import Dict, List
 from std.string import String, StringBuilder
 // Phase 3 adoption (spec 0031): raw libc system()/getpid()/clock_gettime()
@@ -11,27 +10,17 @@ from std.sys import now_monotonic_ns, pid, pointer_size, system_ref
 
 import borrowck
 from borrowck import BorrowChecker
-import cfg
 from cfg import CFGAnalyzer
 import codegen
 from codegen import LLVMCodegen
-import dce
 from dce import DeadCodeEliminator
-import error
 from error import DiagnosticEngine
-import fmt
 from fmt import fmt_transform
-import layout
 from layout import Target
-import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr, monomorphize_program, monomorphize_with_sources
-import sema
 from sema import Sema
-import symbols
 from symbols import ImportDeclData, ImportKind, LanguageMode, Node, NodeType, OptionLayout, Scope, Span, Symbol, TypeAnnotation, make_node, node_body, node_cond, node_declarations, node_else_branch, node_imported_symbols, node_kind, node_left, node_name, node_params, node_return_type_annot, node_right, node_span, node_target, node_then_branch, node_type_annots, set_node_declarations
-import typecheck
 from typecheck import TypeChecker
-import types
 from types import Type, TypeKind, make_type
 
 

@@ -1,13 +1,4 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
-import std.mem
-import std.option
-import std.string
-
-import error
-import sema
-import symbols
-import types
 
 from std.collections import Dict, List
 from std.mem import drop, make

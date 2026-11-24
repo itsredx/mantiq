@@ -1,17 +1,12 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import Dict, List
 from std.mem import make
 from std.option import Empty, Option, Some
 from std.string import String, StringBuilder
 
-import error
 from error import Diagnostic
-import sema
 from sema import Sema, make_scope, make_symbol
-import symbols
 from symbols import LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, make_node, node_access_modifier, node_auto_drops, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_final, node_is_float, node_is_mut, node_is_override, node_is_variadic, node_kind, node_left, node_module_name, node_name, node_name_ptr, node_op, node_params, node_return_names, node_return_type_annot, node_return_type_annots, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_access_modifier, set_node_body, set_node_cond, set_node_declarations, set_node_else_branch, set_node_inferred_type, set_node_is_async, set_node_is_extern, set_node_is_final, set_node_is_float, set_node_is_mut, set_node_is_override, set_node_is_variadic, set_node_left, set_node_module_name, set_node_name, set_node_op, set_node_params, set_node_return_type_annot, set_node_right, set_node_str_val, set_node_target, set_node_then_branch, set_node_type_annots, set_node_val
-import types
 from types import Type, TypeKind, make_channel_type, make_class_type, make_color_type, make_enum_type, make_interface_type, make_list_type, make_ptr_type, make_struct_type, make_type, make_union_type
 
 

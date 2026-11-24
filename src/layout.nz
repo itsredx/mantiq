@@ -1,5 +1,4 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.string
 from std.string import String
 
 from types import Type, TypeKind

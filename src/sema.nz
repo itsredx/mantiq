@@ -1,17 +1,12 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import List
 from std.collections import Dict
 from std.option import Empty, Option
 from std.string import String, StringBuilder
 
-import error
 from error import Diagnostic, DiagnosticEngine, Severity
-import lower
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
-import symbols
 from symbols import ImportKind, LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, add_captured_var, node_access_modifier, node_alias, node_auto_drops, node_body, node_captured_vars, node_cond, node_declarations, node_declarations_ptr, node_else_branch, node_file_path, node_import_kind, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_gil_independent, node_is_mut, node_is_nogil, node_is_python_extern, node_is_variadic, node_kind, node_left, node_name, node_op, node_params, node_params_ptr, node_python_module, node_return_names, node_return_type_annot, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_auto_drops, set_node_body, set_node_declarations, set_node_inferred_type, set_node_is_gil_independent, set_node_is_nogil, set_node_left, set_node_module_name, set_node_name
-import types
 from types import Type, TypeKind, make_type
 
 

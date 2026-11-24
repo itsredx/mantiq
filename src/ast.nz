@@ -1,5 +1,4 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import List
 from std.option import Option
 from std.string import String

@@ -1,11 +1,9 @@
 // ── Imports ──────────────────────────────────────────────────────────────────
-import std.collections
 from std.collections import Dict, List
 from std.mem import make
 from std.option import Empty, Option, Some
 from std.string import String
 
-import symbols
 from symbols import Span
 
 
