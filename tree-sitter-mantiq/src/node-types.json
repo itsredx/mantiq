@@ -1291,6 +1291,10 @@
       "required": false,
       "types": [
         {
+          "type": "access_modifier",
+          "named": true
+        },
+        {
           "type": "kw_unsafe",
           "named": true
         }

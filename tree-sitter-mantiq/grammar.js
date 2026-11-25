@@ -42,6 +42,7 @@ module.exports = grammar({
     [$.type_list],
     [$.tuple_type_list],
     [$.return_annotation, $._base_type],
+    [$.fun_modifier, $.var_decl],
   ],
 
   rules: {
@@ -175,7 +176,7 @@ module.exports = grammar({
 
     var_modifier: $ => choice('volatile', 'atomic', 'static'),
 
-    fun_modifier: $ => choice('async', 'inline', 'const', $.kw_unsafe, 'abstract', 'static', 'extern', 'final'),
+    fun_modifier: $ => choice('async', 'inline', 'const', $.kw_unsafe, 'abstract', 'static', 'extern', 'final', $.access_modifier),
 
     typed_var: $ => seq($.identifier, $.type_annotation),
 

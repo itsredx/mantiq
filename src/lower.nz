@@ -2070,6 +2070,10 @@ struct Lowerer:
                         is_extern_fn = True
                     elif strcmp((deref m_str).data to cstr, "async" to cstr) == 0:
                         is_async_fn = True
+                    elif strcmp((deref m_str).data to cstr, "private" to cstr) == 0 or strcmp((deref m_str).data to cstr, "protected" to cstr) == 0 or strcmp((deref m_str).data to cstr, "public" to cstr) == 0:
+                        // Slice 37: access modifiers ride inside fun_modifier
+                        // (`public fn` / `private fn` at top level).
+                        access_mod = deref m_str
                     drop(m_str to ptr)
                 elif strcmp(c_type, "access_modifier" to cstr) == 0:
                     let a_str as ptr[String] = self.slice_string_from_node(ref child)

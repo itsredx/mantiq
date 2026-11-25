@@ -6,7 +6,7 @@ from std.string import String, StringBuilder
 
 from error import Diagnostic, DiagnosticEngine, Severity
 from lower import Lowerer, make_lowerer_from_cstr, make_lowerer_mantiq_from_cstr
-from symbols import ImportKind, LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, add_captured_var, node_access_modifier, node_alias, node_auto_drops, node_body, node_captured_vars, node_cond, node_declarations, node_declarations_ptr, node_else_branch, node_file_path, node_import_kind, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_gil_independent, node_is_mut, node_is_nogil, node_is_python_extern, node_is_variadic, node_kind, node_left, node_name, node_op, node_params, node_params_ptr, node_python_module, node_return_names, node_return_type_annot, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_auto_drops, set_node_body, set_node_declarations, set_node_inferred_type, set_node_is_gil_independent, set_node_is_nogil, set_node_left, set_node_module_name, set_node_name
+from symbols import IdentifierData, ImportKind, LanguageMode, Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, add_captured_var, node_access_modifier, node_alias, node_auto_drops, node_body, node_captured_vars, node_cond, node_declarations, node_declarations_ptr, node_else_branch, node_file_path, node_import_kind, node_imported_symbols, node_inferred_type, node_is_async, node_is_extern, node_is_gil_independent, node_is_mut, node_is_nogil, node_is_python_extern, node_is_variadic, node_kind, node_left, node_name, node_op, node_params, node_params_ptr, node_python_module, node_return_names, node_return_type_annot, node_right, node_span, node_str_val, node_target, node_then_branch, node_type_annots, node_val, set_node_auto_drops, set_node_body, set_node_declarations, set_node_inferred_type, set_node_is_gil_independent, set_node_is_nogil, set_node_left, set_node_module_name, set_node_name
 from types import Type, TypeKind, make_type
 
 
@@ -467,7 +467,16 @@ struct Sema:
             let mod_scope as ptr[Scope] = (deref self).loaded_modules[module_key]
             let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
             (deref (deref self).current_scope).symbols[target] = mod_sym
-
+            // Slice 37: alias re-import of an already-loaded module.
+            var opt_al_cached as Option[String] = node_alias(node)
+            if option_has_value((ref opt_al_cached) to ptr[u8]):
+                let al_p_c as ptr[String] = option_value((ref opt_al_cached) to ptr[u8]) to ptr[String]
+                if (al_p_c to ptr[u8]) != (None to ptr[u8]):
+                    let al_c as String = deref al_p_c
+                    if al_c.len > 0 to usize and (deref self).loaded_modules.has(al_c) == False:
+                        let al_sym_c as ptr[Symbol] = make_symbol(al_c, SymbolKind.Module, node)
+                        (deref (deref self).current_scope).symbols[al_c] = al_sym_c
+                        (deref self).loaded_modules[al_c] = mod_scope
             let count as i64 = node_imported_symbols(node).length()
             var s_idx as i64 = 0 to i64
             while s_idx < count:
@@ -904,7 +913,18 @@ struct Sema:
         (deref self).current_file = saved_file
         let mod_sym as ptr[Symbol] = make_symbol(target, SymbolKind.Module, node)
         (deref (deref self).current_scope).symbols[target] = mod_sym
-
+        // Slice 37: `import X as Y` — register the same module scope under
+        // the alias key so `Y.sym(...)` resolves via loaded_modules without
+        // a second load.
+        var opt_al_full as Option[String] = node_alias(node)
+        if option_has_value((ref opt_al_full) to ptr[u8]):
+            let al_p_f as ptr[String] = option_value((ref opt_al_full) to ptr[u8]) to ptr[String]
+            if (al_p_f to ptr[u8]) != (None to ptr[u8]):
+                let al_f as String = deref al_p_f
+                if al_f.len > 0 to usize and strcmp(al_f.data to cstr, target.data to cstr) != 0:
+                    let al_sym_f as ptr[Symbol] = make_symbol(al_f, SymbolKind.Module, node)
+                    (deref (deref self).current_scope).symbols[al_f] = al_sym_f
+                    (deref self).loaded_modules[al_f] = mod_scope
         let count as i64 = node_imported_symbols(node).length()
         if count == 0 to i64 and (import_k == ImportKind.Path or import_k == ImportKind.Vendor):
             let mod_keys as List[String] = (deref mod_scope).symbols.keys()
@@ -926,6 +946,101 @@ struct Sema:
                     self.report_error_node("E0104" to cstr, String.make("symbol not found in module" to cstr), node)
                 s_idx = s_idx + 1 to i64
         content.deinit()
+    // ── Qualified module access (slice 37) ───────────────────────────────────────
+    // `import std.math` + `std.math.sqrt(...)` — Python-style qualified use.
+    // Flattens a dotted MemberExpr chain, matches the longest dotted prefix
+    // against a registered Module symbol (`std.math`, or an `import X as Y`
+    // alias), then rewrites the WHOLE chain in place to a plain Identifier
+    // holding the trailing symbol's name. Downstream (typecheck, codegen,
+    // borrowck) then treats it exactly like a `from <mod> import <sym>` use —
+    // module decls are already merged into the program root, so the call
+    // emits under the plain function name. Nothing is registered in the
+    // importing scope, so unqualified use of the same name stays E0101/E0316
+    // (strict mode by design). Only public decls are reachable: a `private`
+    // fn in the module reports E0104.
+    public fn resolve_qualified_chain(self as ptr[Sema], node as ptr[Node]) as i32:
+        // Flatten the chain right-to-left: `rev` collects property names;
+        // the left-most Identifier ends the walk. Anything else (call
+        // results, indexing) in the chain is ordinary member access.
+        let rev as List[String] = List[String]()
+        var cur as ptr[Node] = node
+        var is_chain as bool = True
+        while True:
+            if node_kind(cur) == NodeType.MemberExpr:
+                rev.append(node_name(cur))
+                let nxt as ptr[Node] = node_left(cur)
+                if nxt == None to ptr[Node]:
+                    is_chain = False
+                    break
+                cur = nxt
+            elif node_kind(cur) == NodeType.Identifier:
+                rev.append(node_name(cur))
+                break
+            else:
+                is_chain = False
+                break
+        if not is_chain:
+            return 0
+        let cnt as i64 = rev.length()
+        if cnt < 2 to i64:
+            return 0
+        // Try the longest dotted prefix first (segs[0..k) forward order =
+        // rev[cnt-1] ... rev[cnt-k]).
+        var k as i64 = cnt - 1 to i64
+        while k >= 1 to i64:
+            let pb as StringBuilder = StringBuilder.make()
+            var j as i64 = 0 to i64
+            while j < k:
+                if j > 0 to i64:
+                    pb.append("." to cstr)
+                pb.append((rev[cnt - 1 - j]).data to cstr)
+                j = j + 1 to i64
+            let mod_name as String = pb.to_string()
+            let mod_sym as ptr[Symbol] = self.lookup_symbol(mod_name)
+            if mod_sym != None to ptr[Symbol] and (deref mod_sym).kind == SymbolKind.Module:
+                if (deref self).loaded_modules.has(mod_name) == False:
+                    return 0
+                let mscope as ptr[Scope] = (deref self).loaded_modules[mod_name]
+                if k == cnt - 1 to i64:
+                    let sym_name as String = rev[0]
+                    if (deref mscope).symbols.has(sym_name):
+                        let msym as ptr[Symbol] = (deref mscope).symbols[sym_name]
+                        let dn as ptr[Node] = (deref msym).decl_node
+                        if dn != None to ptr[Node]:
+                            let am as String = node_access_modifier(dn)
+                            if am.data != None to ptr[u8] and strcmp(am.data to cstr, "private" to cstr) == 0:
+                                let pm as StringBuilder = StringBuilder.make()
+                                pm.append("symbol `" to cstr)
+                                pm.append(sym_name.data to cstr)
+                                pm.append("` in module `" to cstr)
+                                pm.append(mod_name.data to cstr)
+                                pm.append("` is private" to cstr)
+                                self.report_error_node("E0104" to cstr, pm.to_string(), node)
+                        // Rewrite the whole chain to a plain Identifier —
+                        // downstream sees a from-import-style use.
+                        let id_data as ptr[IdentifierData] = make_ast[IdentifierData](1 to usize) to ptr[IdentifierData]
+                        (deref id_data).name = sym_name
+                        (deref node).kind = NodeType.Identifier
+                        (deref node).data = id_data to ptr[u8]
+                        return 1
+                    let nm as StringBuilder = StringBuilder.make()
+                    nm.append("symbol `" to cstr)
+                    nm.append(sym_name.data to cstr)
+                    nm.append("` not found in module `" to cstr)
+                    nm.append(mod_name.data to cstr)
+                    nm.append("`" to cstr)
+                    self.report_error_node("E0104" to cstr, nm.to_string(), node)
+                    return 1
+                // Multi-level trailing access (`module.Type.member`) is
+                // Phase B — fail loudly instead of a confusing E0101.
+                let mm as StringBuilder = StringBuilder.make()
+                mm.append("qualified access into `" to cstr)
+                mm.append(mod_name.data to cstr)
+                mm.append("` supports one trailing symbol for now" to cstr)
+                self.report_error_node("E0104" to cstr, mm.to_string(), node)
+                return 1
+            k = k - 1 to i64
+        return 0
 
     public fn declare_pass(self as ptr[Sema], node as ptr[Node]):
         if node == None to ptr[Node]:
@@ -1507,6 +1622,12 @@ struct Sema:
                 let self_ref_f2 as ptr[Sema] = self
                 (deref self_ref_f2).current_scope = parent_scope
         elif nt == NodeType.MemberExpr:
+            // Slice 37: qualified module access (`mod.sym(...)`) rewrites the
+            // dotted chain in place to a plain Identifier — handled here, no
+            // recursion into the segments (which would E0101 on the module
+            // path prefix). Ordinary member access recurses as before.
+            if self.resolve_qualified_chain(node) == 1:
+                return
             if node_left(node) != None to ptr[Node]:
                 self.resolve_pass(node_left(node))
         elif nt == NodeType.ListComprehension:

@@ -1000,6 +1000,10 @@
         {
           "type": "STRING",
           "value": "final"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "access_modifier"
         }
       ]
     },
@@ -6838,6 +6842,10 @@
     [
       "return_annotation",
       "_base_type"
+    ],
+    [
+      "fun_modifier",
+      "var_decl"
     ]
   ],
   "precedences": [],
