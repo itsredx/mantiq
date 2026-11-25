@@ -18,7 +18,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NIZAM="${NIZAM:-/home/red-x/.local/share/nizam-tools/nizam-new-wrap}"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WORK="$(mktemp -d /tmp/zero_rt.XXXXXX)"
-SIZE_LIMIT=30720   # 30 KB
+SIZE_LIMIT=32768   # 32 KB (plan Gate 5 measured 25080 B; by Slice 36 the
+                   # identical .ll/binary from old+new compilers measures
+                   # 32104 B — growth is zig-LLD/glibc-crt toolchain drift,
+                   # not compiler output)
 fails=0
 
 say() { echo "[zero-runtime] $*"; }
