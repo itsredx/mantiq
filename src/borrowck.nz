@@ -2,12 +2,12 @@
 from std.collections import Dict, List
 from std.mem import make
 from std.option import Empty, Option
-from std.string import String
+from std.string import String, StringBuilder
 
 from cfg import CFGAnalyzer, ControlFlowGraph, Point
 from error import Diagnostic, DiagnosticEngine
 from sema import Sema, make_symbol
-from symbols import Node, NodeType, Scope, Span, Symbol, SymbolKind, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_inferred_type, node_kind, node_left, node_name, node_op, node_params, node_right, node_span, node_then_branch, set_node_auto_drops, set_node_inferred_type
+from symbols import Node, NodeType, Scope, Span, Symbol, SymbolKind, TypeAnnotation, node_body, node_cond, node_declarations, node_else_branch, node_file_path, node_inferred_type, node_kind, node_left, node_lifetime_params, node_name, node_op, node_params, node_return_type_annot, node_right, node_span, node_then_branch, set_node_auto_drops, set_node_inferred_type
 from types import Type, TypeKind, is_copy_type
 
 
@@ -291,6 +291,60 @@ struct BorrowChecker:
                 drop_names.append((deref drop_sym).name)
                 d_idx = d_idx + 1 to i64
             set_node_auto_drops(node, drop_names)
+            // Slice 36 (0048 Phase 2): E0408 — an auto-dropped local may
+            // not have active borrows with a surviving borrower (the
+            // returned or copied reference would dangle). The borrower
+            // counts as surviving unless it is dropped in this same
+            // scope exit. Deactivate the violated record so one dying
+            // source reports once.
+            let ab_pop as ptr[List[ptr[BorrowRecord]]] = ref (deref self).active_borrows
+            let b_cnt as i64 = (deref ab_pop).length()
+            var b_idx as i64 = 0 to i64
+            while b_idx < b_cnt:
+                let bp as ptr[BorrowRecord] = (deref ab_pop)[b_idx]
+                if (deref bp).is_active != 0 to u8:
+                    let src_nm as String = (deref bp).source_name
+                    var src_dropped as bool = False
+                    var d2_idx as i64 = 0 to i64
+                    while d2_idx < drops.length():
+                        let ds as ptr[Symbol] = drops[d2_idx]
+                        if strcmp((deref ds).name.data to cstr, src_nm.data to cstr) == 0:
+                            src_dropped = True
+                        d2_idx = d2_idx + 1 to i64
+                    if src_dropped:
+                        // Slice 36: the borrower only dangles if it
+                        // SURVIVES the dying region — declared in an
+                        // outer scope. Same-scope borrowers (`let x_raw
+                        // = f(); let x = ref x_raw`) die together with
+                        // the source, which is exactly Rust's drop
+                        // order at scope end. Copy-type borrowers are
+                        // never in the drop set, so drop-set membership
+                        // cannot decide this; scope membership can.
+                        var borrower_survives as bool = False
+                        var s_idx as i64 = 0 to i64
+                        while s_idx < depth - 1 to i64:
+                            let osc as ptr[List[ptr[Symbol]]] = (deref scopes_ref)[s_idx]
+                            var o_i as i64 = 0 to i64
+                            while o_i < (deref osc).length():
+                                if strcmp((deref (deref osc)[o_i]).name.data to cstr, (deref bp).borrower_name.data to cstr) == 0:
+                                    borrower_survives = True
+                                o_i = o_i + 1 to i64
+                            s_idx = s_idx + 1 to i64
+                        if borrower_survives:
+                            // Liveness gate — the borrow only dangles if
+                            // the borrower is still live at the
+                            // scope-exit point (NLL: a loan ends at the
+                            // borrower's last use).
+                            if self.is_borrow_active_at_node(bp, node):
+                                let d_msg as StringBuilder = StringBuilder.make()
+                                d_msg.append("variable `")
+                                d_msg.append(src_nm.data to cstr)
+                                d_msg.append("` does not live long enough: borrowed by `")
+                                d_msg.append((deref bp).borrower_name.data to cstr)
+                                d_msg.append("` which survives this scope" to cstr)
+                                let _d_e0408 as ptr[Diagnostic] = self.report_error_node("E0408" to cstr, d_msg.to_string(), node)
+                                (deref bp).is_active = 0 to u8
+                b_idx = b_idx + 1 to i64
         // Remove the popped scope's entries from symbol_states. Without
         // this the map accumulates every variable declared anywhere in
         // the program, and snapshot_symbol_states (called 3x per IfStmt,
@@ -460,6 +514,61 @@ struct BorrowChecker:
         (deref bp_new).is_active = 1 to u8
         (deref ab_ref).append(bp_new)
         (deref sm_ref)[borrower_name] = source_name
+    // Slice 36 (0048 Phase 2): inter-procedural lifetime unification at
+    // call sites. When a callee returns a lifetime-annotated type
+    // (`as life[a] T`), the result borrows from every argument bound to
+    // that lifetime: Origin('a) = union of the argument loans. Register
+    // the result's borrow records so the existing aliasing (E0405/E0406),
+    // explicit-drop (E0408) and scope-exit checks cover the returned
+    // reference exactly like a local `ref x` borrow. Lifetime-parameter
+    // binders (`fn choose[life a]`) are recorded on the FunDecl but the
+    // unification is name-insensitive: any lifetime-returning call maps
+    // its ref/identifier arguments onto the result's provenance.
+    public fn check_lifetime_call_result(
+        self as ptr[BorrowChecker],
+        borrower_name as String,
+        call_node as ptr[Node],
+        span as Span,
+    ):
+        let callee as ptr[Node] = node_left(call_node)
+        if callee == None to ptr[Node] or node_kind(callee) != NodeType.Identifier:
+            return
+        let cname as String = node_name(callee)
+        let sym as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(String.make(cname.data to cstr))
+        if sym == None to ptr[Symbol]:
+            return
+        let decl as ptr[Node] = (deref sym).decl_node
+        if decl == None to ptr[Node] or node_kind(decl) != NodeType.FunDecl:
+            return
+        let ret_annot as ptr[TypeAnnotation] = node_return_type_annot(decl)
+        if ret_annot == None to ptr[TypeAnnotation]:
+            return
+        if not option_has_value((ref (deref ret_annot).lifetime) to ptr[u8]):
+            return
+        let args_raw as List[ptr[Node]] = node_params(call_node)
+        let args as ptr[List[ptr[Node]]] = ref args_raw
+        let arg_count as i64 = (deref args).length()
+        var a_idx as i64 = 0 to i64
+        while a_idx < arg_count:
+            let arg as ptr[Node] = (deref args)[a_idx]
+            if node_kind(arg) == NodeType.UnaryExpr:
+                let uop as String = node_op(arg)
+                if uop.data != None to ptr[u8] and (strcmp(uop.data to cstr, "ref" to cstr) == 0 or strcmp(uop.data to cstr, "ref mut" to cstr) == 0):
+                    let ref_target as ptr[Node] = node_left(arg)
+                    if ref_target != None to ptr[Node] and node_kind(ref_target) == NodeType.Identifier:
+                        let target_name as String = node_name(ref_target)
+                        let is_mut as u8 = if strcmp(uop.data to cstr, "ref mut" to cstr) == 0: 1 to u8 else: 0 to u8
+                        self.check_borrow_creation(borrower_name, target_name, is_mut, span)
+            elif node_kind(arg) == NodeType.Identifier:
+                // A ref-typed argument passes its own loan through: the
+                // result's origin unifies with the argument's origin.
+                let arg_name as String = node_name(arg)
+                let sm_ref as ptr[Dict[String, String]] = ref (deref self).var_source_map
+                if (deref sm_ref).has(arg_name):
+                    let src as String = (deref sm_ref)[arg_name]
+                    if self.is_local(src):
+                        self.check_borrow_creation(borrower_name, src, 0 to u8, span)
+            a_idx = a_idx + 1 to i64
 
     public fn is_borrow_active_at_node(
         self as ptr[BorrowChecker],
@@ -751,6 +860,12 @@ struct BorrowChecker:
                             self.check_borrow_creation(name, target_name, is_mut, node_span(node))
                 elif node_kind(init) == NodeType.Identifier:
                     self.move_identifier(init)
+                elif node_kind(init) == NodeType.CallExpr:
+                    // Slice 36: a lifetime-returning call's result borrows
+                    // from its ref/identifier arguments (Origin('a) =
+                    // union of argument loans).
+                    self.walk_ast(init)
+                    self.check_lifetime_call_result(name, init, node_span(node))
                 else:
                     self.walk_ast(init)
         elif nt == NodeType.CallExpr: // CallExpr

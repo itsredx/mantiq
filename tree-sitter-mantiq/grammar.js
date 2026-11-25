@@ -652,9 +652,21 @@ module.exports = grammar({
     ),
 
     generic_params: $ => seq('[', optional($._nl), optional(seq($.type_list, optional($._nl))), ']'),
+    // Decision 0048 Phase 2: fn/struct lifetime binders. `fn choose[life a](...)`
+    // declares lifetime parameter `a` (bare form per the language guide); the
+    // bracketed alias form `life[a]` is accepted for symmetry with the
+    // type-position annotation. prec over $._type_desc so `life <ident>` binds
+    // as a binder, not as a type named `life` with a missing generic list.
+    lifetime_binder: $ => prec(1, seq(
+        'life',
+        choice(
+            field('lifetime_name', $.identifier),
+            seq('[', field('lifetime_name', $.identifier), ']')
+        )
+    )),
     type_list: $ => seq(
-      choice($._type_desc, $.const_generic),
-      repeat(seq(optional($._nl), ',', optional($._nl), choice($._type_desc, $.const_generic))),
+      choice($.lifetime_binder, $._type_desc, $.const_generic),
+      repeat(seq(optional($._nl), ',', optional($._nl), choice($.lifetime_binder, $._type_desc, $.const_generic))),
       optional(seq(optional($._nl), ','))
     ),
     const_generic: $ => choice($.number, $.string, $.boolean_literal),

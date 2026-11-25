@@ -1951,30 +1951,41 @@ struct Lowerer:
                                     k = k + 1 to u32
                         j = j + 1 to u32
                 elif strcmp(c_kind, "return_annotation" to cstr) == 0:
-                    let ra_count as u32 = ts_node_child_count_ptr(ref child)
-                    var ra_idx as u32 = 0 to u32
-                    var ra_name_start as usize = 0 to usize
-                    var ra_name_end as usize = 0 to usize
-                    while ra_idx < ra_count:
-                        var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-                        ts_node_child_ptr(ref child, ra_idx, ref ra_child)
-                        if ts_node_is_named_ptr(ref ra_child):
-                            if ra_name_start == 0 to usize:
-                                ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
-                            ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
-                        ra_idx = ra_idx + 1 to u32
-                    if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
-                        let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
-                        ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-                        (deref self).all_annotations.append(ret_type_annot)
-                        (deref ret_type_annot).name = deref ra_slice
-                        drop(ra_slice to ptr)
-                        (deref ret_type_annot).lifetime = Empty
-                        (deref ret_type_annot).generics = Empty
-                        (deref ret_type_annot).params = Empty
-                        (deref ret_type_annot).return_type = None to ptr[TypeAnnotation]
-                        (deref ret_type_annot).is_ref = False
-                        (deref ret_type_annot).is_mut = False
+                    // Slice 36: lower the annotation structurally so
+                    // `as life[a] T` yields name=T, lifetime=a, is_ref
+                    // (the old first-named-child raw slice started at the
+                    // lifetime arg — "a] i32" — because `life[`/`]` are
+                    // anonymous tokens). Fallback to the raw slice when
+                    // the structural pass yields no name (tuple returns
+                    // like `as (bool, bool)` — no identifier child).
+                    let lt_annot as ptr[TypeAnnotation] = self.lower_type_annotation(ref child)
+                    if (deref lt_annot).name.len > 0 to usize:
+                        ret_type_annot = lt_annot
+                    else:
+                        let ra_count as u32 = ts_node_child_count_ptr(ref child)
+                        var ra_idx as u32 = 0 to u32
+                        var ra_name_start as usize = 0 to usize
+                        var ra_name_end as usize = 0 to usize
+                        while ra_idx < ra_count:
+                            var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                            ts_node_child_ptr(ref child, ra_idx, ref ra_child)
+                            if ts_node_is_named_ptr(ref ra_child):
+                                if ra_name_start == 0 to usize:
+                                    ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
+                                ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
+                            ra_idx = ra_idx + 1 to u32
+                        if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
+                            let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
+                            ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                            (deref self).all_annotations.append(ret_type_annot)
+                            (deref ret_type_annot).name = deref ra_slice
+                            drop(ra_slice to ptr)
+                            (deref ret_type_annot).lifetime = Empty
+                            (deref ret_type_annot).generics = Empty
+                            (deref ret_type_annot).params = Empty
+                            (deref ret_type_annot).return_type = None to ptr[TypeAnnotation]
+                            (deref ret_type_annot).is_ref = False
+                            (deref ret_type_annot).is_mut = False
                 elif strcmp(c_kind, "block_body" to cstr) == 0 or strcmp(c_kind, "block" to cstr) == 0:
                     body_ast = self.lower_node(ref child)
                 elif strcmp(c_kind, "expression" to cstr) == 0:
@@ -1998,6 +2009,7 @@ struct Lowerer:
         let params as List[ptr[Node]] = List[ptr[Node]]()
         var body_ast as ptr[Node] = None to ptr[Node]
         let type_params as List[String] = List[String]()
+        let lifetime_params as List[String] = List[String]()
         var is_extern_fn as bool = False
         var is_variadic_fn as bool = False
         var ret_type_annot as ptr[TypeAnnotation] = None to ptr[TypeAnnotation]
@@ -2097,6 +2109,21 @@ struct Lowerer:
                                     ts_node_child_ptr(ref gp_child, tl_i, ref tl_child)
                                     if ts_node_is_named_ptr(ref tl_child):
                                         let tl_kind as cstr = ts_node_type_ptr(ref tl_child)
+                                        // Slice 36 (0048 Phase 2): `life a` /
+                                        // `life[a]` binders declare lifetime
+                                        // parameters — record them on the
+                                        // FunDecl for signature checking.
+                                        if strcmp(tl_kind, "lifetime_binder" to cstr) == 0:
+                                            let lb_cnt as u32 = ts_node_child_count_ptr(ref tl_child)
+                                            var lb_i as u32 = 0 to u32
+                                            while lb_i < lb_cnt:
+                                                var lb_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                                                ts_node_child_ptr(ref tl_child, lb_i, ref lb_child)
+                                                if ts_node_is_named_ptr(ref lb_child) and strcmp(ts_node_type_ptr(ref lb_child), "identifier" to cstr) == 0:
+                                                    let lb_slice as ptr[String] = self.slice_string_from_node(ref lb_child)
+                                                    lifetime_params.append(deref lb_slice)
+                                                    drop(lb_slice to ptr)
+                                                lb_i = lb_i + 1 to u32
                                         if strcmp(tl_kind, "identifier" to cstr) == 0 or strcmp(tl_kind, "type_identifier" to cstr) == 0:
                                             let p_slice as ptr[String] = self.slice_string_from_node(ref tl_child)
                                             type_params.append(deref p_slice)
@@ -2229,30 +2256,41 @@ struct Lowerer:
                         (deref ret_stmt).data = ret_data to ptr[u8]
                         body_ast = ret_stmt
                 elif strcmp(c_kind, "return_annotation" to cstr) == 0:
-                    let ra_count as u32 = ts_node_child_count_ptr(ref child)
-                    var ra_idx as u32 = 0 to u32
-                    var ra_name_start as usize = 0 to usize
-                    var ra_name_end as usize = 0 to usize
-                    while ra_idx < ra_count:
-                        var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
-                        ts_node_child_ptr(ref child, ra_idx, ref ra_child)
-                        if ts_node_is_named_ptr(ref ra_child):
-                            if ra_name_start == 0 to usize:
-                                ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
-                            ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
-                        ra_idx = ra_idx + 1 to u32
-                    if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
-                        let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
-                        ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
-                        (deref self).all_annotations.append(ret_type_annot)
-                        (deref ret_type_annot).name = deref ra_slice
-                        drop(ra_slice to ptr)
-                        (deref ret_type_annot).lifetime = Empty
-                        (deref ret_type_annot).generics = Empty
-                        (deref ret_type_annot).params = Empty
-                        (deref ret_type_annot).return_type = None to ptr[TypeAnnotation]
-                        (deref ret_type_annot).is_ref = False
-                        (deref ret_type_annot).is_mut = False
+                    // Slice 36: lower the annotation structurally so
+                    // `as life[a] T` yields name=T, lifetime=a, is_ref
+                    // (the old first-named-child raw slice started at the
+                    // lifetime arg — "a] i32" — because `life[`/`]` are
+                    // anonymous tokens). Fallback to the raw slice when
+                    // the structural pass yields no name (tuple returns
+                    // like `as (bool, bool)` — no identifier child).
+                    let lt_annot as ptr[TypeAnnotation] = self.lower_type_annotation(ref child)
+                    if (deref lt_annot).name.len > 0 to usize:
+                        ret_type_annot = lt_annot
+                    else:
+                        let ra_count as u32 = ts_node_child_count_ptr(ref child)
+                        var ra_idx as u32 = 0 to u32
+                        var ra_name_start as usize = 0 to usize
+                        var ra_name_end as usize = 0 to usize
+                        while ra_idx < ra_count:
+                            var ra_child as TSNode = TSNode(c0 = 0 to u32, c1 = 0 to u32, c2 = 0 to u32, c3 = 0 to u32, id = None to ptr, tree = None to ptr)
+                            ts_node_child_ptr(ref child, ra_idx, ref ra_child)
+                            if ts_node_is_named_ptr(ref ra_child):
+                                if ra_name_start == 0 to usize:
+                                    ra_name_start = ts_node_start_byte_ptr(ref ra_child) to usize
+                                ra_name_end = ts_node_end_byte_ptr(ref ra_child) to usize
+                            ra_idx = ra_idx + 1 to u32
+                        if ra_name_start > 0 to usize and ra_name_end > ra_name_start:
+                            let ra_slice as ptr[String] = slice_string((deref self).source_code.data, (deref self).source_code.len, ra_name_start, ra_name_end) to ptr[String]
+                            ret_type_annot = make_ast[TypeAnnotation](1 to usize) to ptr[TypeAnnotation]
+                            (deref self).all_annotations.append(ret_type_annot)
+                            (deref ret_type_annot).name = deref ra_slice
+                            drop(ra_slice to ptr)
+                            (deref ret_type_annot).lifetime = Empty
+                            (deref ret_type_annot).generics = Empty
+                            (deref ret_type_annot).params = Empty
+                            (deref ret_type_annot).return_type = None to ptr[TypeAnnotation]
+                            (deref ret_type_annot).is_ref = False
+                            (deref ret_type_annot).is_mut = False
             i = i + 1 to u32
         // Second pass: if this was a fun_decl, look for block_body in the original node
         if body_ast == None to ptr[Node] and strcmp(kind, "fun_decl" to cstr) == 0:
@@ -2287,6 +2325,7 @@ struct Lowerer:
         (deref data).is_gil_independent = False
         (deref data).is_python_extern = False
         (deref data).python_module = String.make("" to cstr)
+        (deref data).lifetime_params = lifetime_params
         (deref n).data = data to ptr[u8]
         return n
 

@@ -120,6 +120,10 @@ struct FunDeclData:
     public var is_gil_independent as bool
     public var is_python_extern as bool
     public var python_module as String
+    // Slice 36 (0048 Phase 2): fn lifetime binders, e.g. `fn choose[life a]`.
+    // Zeroed (empty) for fns without binders; make_ast allocations are
+    // arena-memset so the trailing append is default-safe.
+    public var lifetime_params as List[String]
 
 
 struct VarDeclData:
@@ -1408,6 +1412,18 @@ fn node_return_type_annot(n as ptr[Node]) as ptr[TypeAnnotation]:
     if (deref n).kind == NodeType.FunDecl:
         let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
         r = (deref d).return_type_annot
+    return r
+
+
+// Slice 36 (0048 Phase 2): the fn's declared lifetime binders, e.g.
+// `fn choose[life a]` -> ["a"]. Empty for fns without binders.
+fn node_lifetime_params(n as ptr[Node]) as ptr[List[String]]:
+    var r as ptr[List[String]] = None to ptr[List[String]]
+    if n == None to ptr[Node] or (deref n).data == None to ptr[u8]:
+        return r
+    if (deref n).kind == NodeType.FunDecl:
+        let d as ptr[FunDeclData] = (deref n).data to ptr[FunDeclData]
+        r = ref (deref d).lifetime_params
     return r
 
 

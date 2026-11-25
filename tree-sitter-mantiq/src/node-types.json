@@ -1522,6 +1522,22 @@
     }
   },
   {
+    "type": "lifetime_binder",
+    "named": true,
+    "fields": {
+      "lifetime_name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "link_decl",
     "named": true,
     "fields": {
@@ -2512,6 +2528,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "lifetime_binder",
           "named": true
         },
         {

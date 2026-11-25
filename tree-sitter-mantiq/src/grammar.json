@@ -5231,12 +5231,63 @@
         }
       ]
     },
+    "lifetime_binder": {
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "life"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "lifetime_name",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "identifier"
+                }
+              },
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "["
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "lifetime_name",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "identifier"
+                    }
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "]"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
     "type_list": {
       "type": "SEQ",
       "members": [
         {
           "type": "CHOICE",
           "members": [
+            {
+              "type": "SYMBOL",
+              "name": "lifetime_binder"
+            },
             {
               "type": "SYMBOL",
               "name": "_type_desc"
@@ -5283,6 +5334,10 @@
               {
                 "type": "CHOICE",
                 "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "lifetime_binder"
+                  },
                   {
                     "type": "SYMBOL",
                     "name": "_type_desc"

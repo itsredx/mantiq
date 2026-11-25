@@ -68,8 +68,42 @@ All borrow and lifetime violations report structured diagnostics with primary an
    - Borrow checker integration in `src/borrowck.nz` and `src/main.nz`.
    - Codegen dictionary value size alignment fixes in `src/codegen.nz`.
    - Verified via `test_cfg_loops_nll.nz` (4/4 passed) and `test_cfg_branch_disjoint.nz` (4/4 passed).
-2. **Phase 2: Inter-Procedural Lifetime Parameterization & Elision (Weeks 3–4)**
-   - AST binders, call-site origin substitution, outlives verification (`E0408`).
+2. **Phase 2: Inter-Procedural Lifetime Parameterization & Elision (Weeks 3–4) — [COMPLETED] (Slice 36)**
+   - Grammar: `lifetime_binder` rule in `tree-sitter-mantiq/grammar.js` —
+     both `fn choose[life a]` and bare `life a` binders parse; `parser.c`
+     regenerated; native `.a`/`.so` and wasm32 archives rebuilt from it.
+   - Lowering (`src/lower.nz`): `life[a] T` return annotations lower
+     structurally via `lower_type_annotation` (the old first-named-child
+     slice started at the lifetime arg — `life[`/`]` are anonymous tokens —
+     producing phantom names like `a] i32`); binder extraction records
+     lifetime parameter names on `FunDeclData.lifetime_params` (trailing
+     field, index 15; `make_ast` arena-memset makes the append default-safe).
+   - Call-site origin unification (`src/borrowck.nz`):
+     `check_lifetime_call_result` — a `let w = f(ref p)` init whose callee
+     returns a lifetime-annotated type registers the result as a borrow of
+     every ref/identifier argument (Origin('a) = union of argument loans,
+     name-insensitive), so existing aliasing (E0405/E0406), explicit-drop
+     (E0408) and scope-exit checks cover the returned reference exactly
+     like a local `ref x`.
+   - Scope-exit dangling enforcement: a borrow dangles (E0408, "does not
+     live long enough") at `pop_scope` only when the SOURCE auto-drops AND
+     the borrower SURVIVES the dying region (declared in an outer scope —
+     scope-membership test, not drop-set membership; copy-type borrowers
+     are never dropped) AND the borrower's loan is still live at the
+     scope-exit point (NLL: `let x_raw = f(); let x = ref x_raw` ends its
+     loan at x's last use — same-scope borrowers die together, matching
+     Rust drop order).
+   - Elision convention: binder-less functions reuse the parameter
+     lifetime implicitly (no E0410 enforcement — matches the codebase's
+     working idiom).
+   - Verified: legal `life[a]` return runs (r=10), explicit `drop(p)` of a
+     borrowed source → E0408, aliasing a borrowed source → E0405, two-binder
+     `choose[life a]` unifies both args (w=20); full suites `test_nll_borrowck`,
+     `test_borrowck`, `test_lifetimes_and_pointers`, `test_origin_subset_facts`,
+     `test_cfg_loops_nll`, `test_cfg_branch_disjoint` all green; wasm 9/9;
+     zero-runtime 3/3 (Gate A size limit re-based to 32768 B — the old/new
+     compilers emit byte-identical hello binaries, 32104 B; growth is
+     zig-LLD/glibc-crt toolchain drift); chain gate 50/50 + promotion.
 3. **Phase 3: Struct-Embedded Lifetimes & Field Projections (Weeks 5–6)**
    - `struct Name[life a]`, field-level disjoint loan tracking (`E0409`).
 4. **Phase 4: Polonius Fact Engine & Drop Elaboration Integration (Weeks 7–8)**
