@@ -1967,6 +1967,23 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         perf_print(ref perf)
         if ok:
             if strstr(target_triple, "wasm" to cstr) != None to cstr:
+                // Slice 39: route the wasm run through the pinned
+                // nizam_wasi.js runner (same launcher as the stage4
+                // bootstrap) instead of a drifted inline node one-liner.
+                // Discovery is cwd-relative; the inline -e fallback keeps
+                // standalone invocations working without the vendored
+                // runner.
+                var wasi_runner as String = String.make("" to cstr)
+                if access("nizam_wasi.js" to cstr, 0 to i32) == 0 to i32:
+                    wasi_runner = String.make("nizam_wasi.js" to cstr)
+                elif access("../mantiq/nizam_wasi.js" to cstr, 0 to i32) == 0 to i32:
+                    wasi_runner = String.make("../mantiq/nizam_wasi.js" to cstr)
+                if wasi_runner.len > 0 to usize:
+                    let wr_cmd as ptr[u8] = malloc(2048 to usize) to ptr[u8]
+                    let _rcw as i32 = sprintf(wr_cmd, "node --no-incremental-marking --stack-size=16384 --max-old-space-size=384 %s %s" to cstr, wasi_runner.data to cstr, out_path)
+                    let wr_cmd_s as String = String.make(wr_cmd to cstr)
+                    let wr_res as i32 = system_ref(ref wr_cmd_s)
+                    return wr_res
                 let run_cmd as ptr[u8] = malloc(1024 to usize) to ptr[u8]
                 let _rc0 as i32 = sprintf(run_cmd, "node --experimental-wasi-unstable-preview1 -e 'const { WASI } = require(\"wasi\"); const fs = require(\"fs\"); const wasi = new WASI({ version: \"preview1\", args: [\"%s\"] }); const wasm = new WebAssembly.Module(fs.readFileSync(\"%s\")); const inst = new WebAssembly.Instance(wasm, wasi.getImportObject()); const code = wasi.start(inst); process.exit(code || 0);'" to cstr, out_path, out_path)
                 let rcmd as String = String.make(run_cmd to cstr)
