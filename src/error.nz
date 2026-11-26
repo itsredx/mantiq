@@ -75,6 +75,10 @@ fn err_field_not_found() as cstr:
     return"E0315" to cstr
 
 
+fn err_missing_struct_field() as cstr:
+    return"E0317" to cstr
+
+
 fn err_explicit_import() as cstr:
     return"E0316" to cstr
 

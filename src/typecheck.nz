@@ -121,6 +121,24 @@ fn nizam_type_name_of(t as ptr[Type]) as String:
     return String.make("" to cstr)
 
 
+// Slice 38: numeric type kinds are cross-width permissive in struct
+// literals (codegen emits the cast); everything else must match.
+fn is_numeric_type_kind(k as TypeKind) as bool:
+    if k == TypeKind.I8 or k == TypeKind.I16 or k == TypeKind.I32 or k == TypeKind.I64:
+        return True
+    if k == TypeKind.I128 or k == TypeKind.I256 or k == TypeKind.I512 or k == TypeKind.I1024:
+        return True
+    if k == TypeKind.ISize or k == TypeKind.U8 or k == TypeKind.U16 or k == TypeKind.U32:
+        return True
+    if k == TypeKind.U64 or k == TypeKind.U128 or k == TypeKind.U256 or k == TypeKind.U512 or k == TypeKind.U1024:
+        return True
+    if k == TypeKind.USize or k == TypeKind.F16 or k == TypeKind.BFloat16 or k == TypeKind.F32:
+        return True
+    if k == TypeKind.F64 or k == TypeKind.F128 or k == TypeKind.Boolean:
+        return True
+    return False
+
+
 fn strip_generic_base(name as String) as String:
     if name.data == None to ptr[u8]:
         return String.make("" to cstr)
@@ -2064,6 +2082,21 @@ struct TypeChecker:
                         let ctor_sym22 as ptr[Symbol] = (deref (deref self).sema).lookup_symbol(ctor_name22)
                         if ctor_sym22 != None to ptr[Symbol] and (deref ctor_sym22).decl_node != None to ptr[Node]:
                             let sd_fields22 as List[ptr[Node]] = node_declarations((deref ctor_sym22).decl_node)
+                            // Slice 38: validate ONLY real struct decls — builtin
+                            // collections (Dict/List/String) are registered with the
+                            // import node as decl_node and have no field decls here.
+                            var sd_validate38 as bool = node_kind((deref ctor_sym22).decl_node) == NodeType.StructDecl
+                            // Slice 38: struct-literal field validation. Only
+                            // field decls count (methods are FunDecl children
+                            // of the body); zero-arg ctors keep zero-init
+                            // semantics, partial coverage is an error.
+                            var sd_f_count22 as i64 = 0 to i64
+                            var sd_fi22 as i64 = 0 to i64
+                            while sd_fi22 < sd_fields22.length():
+                                let fd_c22 as ptr[Node] = sd_fields22[sd_fi22]
+                                if fd_c22 != None to ptr[Node] and (node_kind(fd_c22) == NodeType.FieldDecl or node_kind(fd_c22) == NodeType.VarDecl):
+                                    sd_f_count22 = sd_f_count22 + 1 to i64
+                                sd_fi22 = sd_fi22 + 1 to i64
                             while a_idx < arg_count:
                                 let ca_arg22 as ptr[Node] = args[a_idx]
                                 if ca_arg22 != None to ptr[Node]:
@@ -2077,6 +2110,96 @@ struct TypeChecker:
                                             if ca_l22 != None to ptr[Node] and node_kind(ca_l22) == NodeType.Identifier:
                                                 ca_fld_nm22 = node_name(ca_l22)
                                                 ca_expr22 = node_right(ca_arg22)
+                                    // Slice 38: unknown field / out-of-range
+                                    // positional slot -> E0315 instead of a
+                                    // raw "invalid indices" LLVM error.
+                                    var ca_slot22 as i64 = a_idx
+                                    var ca_fld_node22 as ptr[Node] = None to ptr[Node]
+                                    if ca_fld_nm22.data != None to ptr[u8] and ca_fld_nm22.len > 0 to usize:
+                                        var ca_hit22 as bool = False
+                                        ca_slot22 = 0 to i64
+                                        var ca_sj22 as i64 = 0 to i64
+                                        while ca_sj22 < sd_fields22.length():
+                                            let fd_n22 as ptr[Node] = sd_fields22[ca_sj22]
+                                            if fd_n22 != None to ptr[Node] and (node_kind(fd_n22) == NodeType.FieldDecl or node_kind(fd_n22) == NodeType.VarDecl):
+                                                if node_name(fd_n22).data != None to ptr[u8] and strcmp(node_name(fd_n22).data to cstr, ca_fld_nm22.data to cstr) == 0:
+                                                    ca_hit22 = True
+                                                    ca_fld_node22 = fd_n22
+                                                    break
+                                                ca_slot22 = ca_slot22 + 1 to i64
+                                            ca_sj22 = ca_sj22 + 1 to i64
+                                        if not ca_hit22 and sd_validate38:
+                                            let ub as StringBuilder = StringBuilder.make()
+                                            ub.append("field `" to cstr)
+                                            ub.append(ca_fld_nm22.data to cstr)
+                                            ub.append("` not found in struct `" to cstr)
+                                            ub.append(ctor_name22.data to cstr)
+                                            ub.append("`" to cstr)
+                                            (deref (deref self).sema).report_error_node("E0315" to cstr, ub.to_string(), node)
+                                            a_idx = a_idx + 1 to i64
+                                            continue
+                                    else:
+                                        ca_slot22 = a_idx
+                                    if ca_slot22 >= sd_f_count22 and sd_validate38:
+                                        extern fn sprintf(
+                                            str as ptr[u8],
+                                            format as cstr,
+                                            ...,
+                                        ) as i32
+                                        extern fn free(p as ptr)
+                                        let ob_buf as ptr[u8] = make[u8](200 to usize) to ptr[u8]
+                                        let _ob_i as i32 = sprintf(ob_buf, "struct `%s` has no field at position %lld (it has %lld)", ctor_name22.data to cstr, ca_slot22, sd_f_count22)
+                                        let ob as String = String.make(ob_buf to cstr)
+                                        free(ob_buf to ptr)
+                                        (deref (deref self).sema).report_error_node("E0315" to cstr, ob, node)
+                                        a_idx = a_idx + 1 to i64
+                                        continue
+                                    // Slice 38: field/value compatibility —
+                                    // fire only on CLEAR disagreements (a
+                                    // scalar field given an aggregate value,
+                                    // an aggregate field given a scalar, or
+                                    // two differently-named aggregates).
+                                    // Numeric cross-width stays permissive
+                                    // (codegen casts); Unknown/Any degrade.
+                                    // Generic instantiations (explicit [K, V]
+                                    // annotations on the ctor call) are skipped:
+                                    // the template's field types are type
+                                    // parameters, not concrete types.
+                                    var sd_call_annots22 as ptr[List[Option[ptr[TypeAnnotation]]]] = node_type_annots(node)
+                                    var sd_is_generic22 as bool = False
+                                    if sd_call_annots22 != None to ptr[List[Option[ptr[TypeAnnotation]]]]:
+                                        if (deref sd_call_annots22).length() > 0 to i64:
+                                            sd_is_generic22 = True
+                                    if ca_fld_node22 != None to ptr[Node] and arg_count > 0 to i64 and sd_is_generic22 == False:
+                                        var ca_vt22 as ptr[Type] = node_inferred_type(ca_expr22)
+                                        var ca_ft22 as ptr[Type] = node_inferred_type(ca_fld_node22)
+                                        if ca_vt22 != None to ptr[Type] and ca_ft22 != None to ptr[Type]:
+                                            let ca_fk22 as TypeKind = (deref ca_ft22).kind
+                                            let ca_vk22 as TypeKind = (deref ca_vt22).kind
+                                            if ca_fk22 != TypeKind.Unknown and ca_fk22 != TypeKind.Any and ca_vk22 != TypeKind.Unknown and ca_vk22 != TypeKind.Any:
+                                                var ca_compat22 as bool = False
+                                                if ca_fk22 == ca_vk22:
+                                                    let ca_fnm22 as String = (deref ca_ft22).name
+                                                    let ca_vnm22 as String = (deref ca_vt22).name
+                                                    if ca_fnm22.len == 0 to usize or ca_vnm22.len == 0 to usize or strcmp(ca_fnm22.data to cstr, ca_vnm22.data to cstr) == 0:
+                                                        ca_compat22 = True
+                                                if is_numeric_type_kind(ca_fk22) and is_numeric_type_kind(ca_vk22):
+                                                    ca_compat22 = True
+                                                if not ca_compat22:
+                                                    extern fn sprintf(
+                                                        str as ptr[u8],
+                                                        format as cstr,
+                                                        ...,
+                                                    ) as i32
+                                                    extern fn free(p as ptr)
+                                                    var ca_fd_disp22 as cstr = "<positional>" to cstr
+                                                    if ca_fld_nm22.len > 0 to usize:
+                                                        ca_fd_disp22 = ca_fld_nm22.data to cstr
+                                                    let tb_buf as ptr[u8] = make[u8](240 to usize) to ptr[u8]
+                                                    let _tb_i as i32 = sprintf(tb_buf, "field `%s` of struct `%s` expects %s, got %s", ca_fd_disp22, ctor_name22.data to cstr, nizam_type_name_of(ca_ft22).data to cstr, nizam_type_name_of(ca_vt22).data to cstr)
+                                                    let tb as String = String.make(tb_buf to cstr)
+                                                    free(tb_buf to ptr)
+                                                    (deref (deref self).sema).report_error_node("E0308" to cstr, tb, node)
                                     if node_kind(ca_expr22) == NodeType.ListLiteral and a_idx < sd_fields22.length():
                                         var fi22 as i64 = 0 to i64
                                         var fld_t22 as ptr[Type] = None to ptr[Type]
