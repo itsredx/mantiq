@@ -1627,6 +1627,84 @@ fn __fmt_read_stdin() as cstr:
     return buf to cstr
 
 
+// Slice 41 (JIT J0.0): interactive REPL — reads snippets until a blank
+// line, runs the full in-process pipeline per snippet, executes the
+// result natively. Fresh semantic state per snippet; persistent state
+// (J0.1) and cross-snippet .so linkage (J0.2) follow docs/jit-design.md.
+// Slice 41 (JIT J0.0): interactive REPL — reads snippet lines until a
+// blank line, runs the full in-process pipeline per snippet, executes
+// the result natively. Fresh semantic state per snippet; persistent
+// state (J0.1) and cross-snippet .so linkage (J0.2) follow
+// docs/jit-design.md.
+fn start_repl(default_mode as i32, prof_flag as bool) as i32:
+    extern fn read(fd as i32, buf as ptr, count as usize) as isize
+    extern fn malloc(sz as usize) as ptr
+    extern fn free(p as ptr) as i32
+    extern fn fflush(stream as ptr) as i32
+    extern fn getpid() as i32
+    extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+    let self_name as cstr = compiler_name(default_mode)
+    let _pb as i32 = printf("%s REPL (J0.0): statements per snippet; blank line = run; Ctrl-D exits\n" to cstr, self_name)
+    let _pbf as i32 = fflush(None to ptr)
+    let pidv as i32 = getpid()
+    let snip_buf as ptr[u8] = malloc(262144 to usize) to ptr[u8]
+    var snip_no as i32 = 0
+    var eof_hit as bool = False
+    while not eof_hit:
+        let _pp as i32 = printf("%s> " to cstr, self_name)
+        let _ppf as i32 = fflush(None to ptr)
+        var snip_len as usize = 0 to usize
+        var snip_done as bool = False
+        while not snip_done:
+            // read one line, appending bytes into the snippet buffer
+            var lb_len as usize = 0 to usize
+            var line_done as bool = False
+            while not line_done:
+                let ch_buf as ptr[u8] = malloc(1 to usize) to ptr[u8]
+                let r as isize = read(0, ch_buf, 1 to usize)
+                let c as u8 = deref ch_buf
+                free(ch_buf to ptr)
+                if r <= 0 to isize:
+                    line_done = True
+                    if lb_len == 0 to usize:
+                        eof_hit = True
+                        snip_done = True
+                    else:
+                        snip_len = snip_len + lb_len
+                        snip_done = True
+                elif c == 10 to u8:
+                    line_done = True
+                    if lb_len == 0 to usize:
+                        snip_done = True
+                    else:
+                        deref ((snip_buf to usize + (snip_len + lb_len) to usize) to ptr[u8]) = 10 to u8
+                        snip_len = snip_len + lb_len + 1 to usize
+                else:
+                    deref ((snip_buf to usize + (snip_len + lb_len) to usize) to ptr[u8]) = c
+                    lb_len = lb_len + 1 to usize
+        if snip_len == 0 to usize:
+            continue
+        snip_no = snip_no + 1 to i32
+        deref ((snip_buf to usize + snip_len) to ptr[u8]) = 0 to u8
+        let out_buf as ptr[u8] = malloc(128 to usize) to ptr[u8]
+        let _so as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d" to cstr, pidv, snip_no)
+        var perf as PerfState = perf_init()
+        perf.enabled = prof_flag
+        let ok as bool = compile_source(snip_buf to cstr, "<repl>" to cstr, out_buf to cstr, default_mode, "x86_64-unknown-linux-gnu" to cstr, ref perf, False, False, "/tmp" to cstr, False)
+        if ok:
+            let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
+            run_argv[0] = out_buf to cstr
+            run_argv[1] = None to cstr
+            let rc as i32 = mantiq_run_command_direct(run_argv)
+            free(run_argv to ptr)
+            let _pr as i32 = printf("[exit %d]\n" to cstr, rc)
+        let _ff as i32 = fflush(None to ptr)
+    let _pbye as i32 = printf("\nbye\n" to cstr)
+    let _ff2 as i32 = fflush(None to ptr)
+    free(snip_buf to ptr)
+    return 0 to i32
+
+
 fn main(argc as i32, argv as ptr[cstr]) as i32:
     var default_mode as i32 = LanguageMode.Mantiq to i32
     var bin_name as cstr = "mantiq" to cstr
@@ -1649,6 +1727,15 @@ fn main(argc as i32, argv as ptr[cstr]) as i32:
         let _f1 as i32 = fflush(None to ptr)
         return 0 to i32
     let cmd as cstr = get_arg(argv, 1 to i32)
+    if strcmp(cmd, "repl" to cstr) == 0:
+        // Slice 41 (JIT J0.0): `repl [nizam|mantiq]` — per Decision 0035's
+        // interface; fresh pipeline state per snippet in J0.0.
+        var repl_mode as i32 = default_mode
+        if argc >= 3 and strcmp(get_arg(argv, 2 to i32), "nizam" to cstr) == 0:
+            repl_mode = LanguageMode.Nizam to i32
+        elif argc >= 3 and strcmp(get_arg(argv, 2 to i32), "mantiq" to cstr) == 0:
+            repl_mode = LanguageMode.Mantiq to i32
+        return start_repl(repl_mode, prof_flag)
     if strcmp(cmd, "version" to cstr) == 0 or strcmp(cmd, "--version" to cstr) == 0:
         let _p4 as i32 = printf("%s Self-Hosting Compiler v0.1.0\n" to cstr, self_name)
         let _f2 as i32 = fflush(None to ptr)

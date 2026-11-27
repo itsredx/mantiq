@@ -1,0 +1,2 @@
+extern fn printf(fmt as cstr, ...) as i32
+printf("hi from repl\n" to cstr)

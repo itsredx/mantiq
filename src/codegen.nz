@@ -3705,8 +3705,41 @@ struct LLVMCodegen:
                         let _ as i32 = sprintf(buf, "%u" to cstr, c_val to u32)
                         init_val = buf
                     elif init_node != None to ptr[Node] and node_kind(init_node) == NodeType.StringLiteral:
+                        // Slice 41: emit_expr registers the @.str.N
+                        // constant (type_out) but also appends a
+                        // getelementptr instruction — illegal at module
+                        // level. Recover the constant symbol from the
+                        // appended region, then truncate. Pointer-typed
+                        // globals (cstr) initialize to the constant's
+                        // address — a legal LLVM global initializer;
+                        // aggregate-typed ones (String) keep
+                        // zeroinitializer.
+                        let saved_glen as usize = (deref self).main_out.len
                         let _ as ptr[u8] = self.emit_expr(init_node)
-                        init_val = "zeroinitializer" to ptr[u8]
+                        var str_init as ptr[u8] = make[u8](32 to usize) to ptr[u8]
+                        var found_str as bool = False
+                        var scan_i as usize = saved_glen
+                        let glen_now as usize = (deref self).main_out.len
+                        let gbuf as ptr[u8] = (deref self).main_out.buffer
+                        while scan_i + 6 to usize <= glen_now:
+                            if deref ((gbuf to usize + scan_i) to ptr[u8]) == 64 to u8 and deref ((gbuf to usize + scan_i + 1 to usize) to ptr[u8]) == 46 to u8 and deref ((gbuf to usize + scan_i + 2 to usize) to ptr[u8]) == 115 to u8 and deref ((gbuf to usize + scan_i + 3 to usize) to ptr[u8]) == 116 to u8 and deref ((gbuf to usize + scan_i + 4 to usize) to ptr[u8]) == 114 to u8 and deref ((gbuf to usize + scan_i + 5 to usize) to ptr[u8]) == 46 to u8:
+                                // copy "@.str." + trailing digits, NUL-terminated
+                                var cp as usize = 0 to usize
+                                while cp < 6 to usize:
+                                    deref ((str_init to usize + cp) to ptr[u8]) = deref ((gbuf to usize + scan_i + cp) to ptr[u8])
+                                    cp = cp + 1 to usize
+                                while scan_i + cp < glen_now and deref ((gbuf to usize + scan_i + cp) to ptr[u8]) >= 48 to u8 and deref ((gbuf to usize + scan_i + cp) to ptr[u8]) <= 57 to u8:
+                                    deref ((str_init to usize + cp) to ptr[u8]) = deref ((gbuf to usize + scan_i + cp) to ptr[u8])
+                                    cp = cp + 1 to usize
+                                deref ((str_init to usize + cp) to ptr[u8]) = 0 to u8
+                                found_str = True
+                                break
+                            scan_i = scan_i + 1 to usize
+                        (deref self).main_out.len = saved_glen
+                        if found_str and strcmp(v_type.data to cstr, "ptr" to cstr) == 0:
+                            init_val = str_init
+                        else:
+                            init_val = "zeroinitializer" to ptr[u8]
                     // Float-typed globals without an initializer: the
                     // default "0" is an integer constant — a type error
                     // for double/float globals. Emit the formatted zero.
@@ -3777,14 +3810,58 @@ struct LLVMCodegen:
             if node_kind(decl) == NodeType.FunDecl and node_is_extern(decl):
                 self.emit_node(decl)
             i = i + 1 to i64
-        // Pass 2: Emit functions, statements, and other program elements
+        // Pass 2: Emit functions, statements, and other program elements.
+        // Slice 41 (JIT J0.0): bare top-level statements cannot live at
+        // LLVM module level (instructions outside any `define` are
+        // rejected by clang). Collect them and wrap them in a synthetic
+        // script-style `@main`, ported from the legacy Zig codegen —
+        // emitted after all functions so calls resolve against real
+        // definitions. Skipped entirely when a user `fn main` exists.
+        var has_user_main as bool = False
+        var stmts as List[ptr[Node]] = List[ptr[Node]]()
+        i = 0 to i64
+        while i < count:
+            let d0 as ptr[Node] = get_node_decl(ref decls, i)
+            let dk0 as NodeType = node_kind(d0)
+            if dk0 == NodeType.FunDecl:
+                let n0 as String = node_name(d0)
+                if n0.data != None and strcmp(n0.data to cstr, "main" to cstr) == 0 and not node_is_extern(d0):
+                    has_user_main = True
+            elif dk0 == NodeType.VarDecl or dk0 == NodeType.FieldDecl or dk0 == NodeType.StructDecl or dk0 == NodeType.ClassDecl or dk0 == NodeType.InterfaceDecl or dk0 == NodeType.EnumDecl or dk0 == NodeType.UnionDecl or dk0 == NodeType.ImportDecl:
+                pass
+            else:
+                // statement kind — routed into the synthetic main
+                stmts.append(d0)
+            i = i + 1 to i64
         i = 0 to i64
         while i < count:
             let decl as ptr[Node] = get_node_decl(ref decls, i)
             let dk as NodeType = node_kind(decl)
             if dk != NodeType.VarDecl and dk != NodeType.FieldDecl and dk != NodeType.StructDecl and dk != NodeType.ClassDecl and dk != NodeType.InterfaceDecl and dk != NodeType.EnumDecl and dk != NodeType.UnionDecl:
-                self.emit_node(decl)
+                if not has_user_main and not (dk == NodeType.FunDecl or dk == NodeType.ImportDecl):
+                    // statement: deferred to the synthetic @main below
+                    pass
+                else:
+                    self.emit_node(decl)
             i = i + 1 to i64
+        if not has_user_main and stmts.length() > 0 to i64:
+            append_cstr(ref (deref self).main_out, "define i32 @main() {\nentry:\n" to cstr)
+            (deref self).current_return_type = String.make("i32" to cstr)
+            (deref self).var_slots = Dict[String, String]()
+            (deref self).var_counts = Dict[String, i32]()
+            (deref self).var_types = Dict[String, String]()
+            var s_i as i64 = 0 to i64
+            let s_count as i64 = stmts.length()
+            while s_i < s_count:
+                let s_node as ptr[Node] = stmts[s_i]
+                if node_kind(s_node) != NodeType.ReturnStmt:
+                    // top-level return is meaningless in script mode;
+                    // emitting it here would strand the trailing ret
+                    self.emit_node(s_node)
+                s_i = s_i + 1 to i64
+            append_cstr(ref (deref self).main_out, "  ret i32 0\n" to cstr)
+            self.clear_statement_temps()
+            append_cstr(ref (deref self).main_out, "}\n\n" to cstr)
 
     public fn emit_fun_decl(self as ptr[LLVMCodegen], node as ptr[Node]):
         let name as String = node_name(node)

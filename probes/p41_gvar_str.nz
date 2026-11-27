@@ -1,0 +1,4 @@
+extern fn printf(fmt as cstr, ...) as i32
+var s as cstr = "global str"
+printf("%s ok
+" to cstr, s)
