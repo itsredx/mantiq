@@ -1278,6 +1278,32 @@ fn cond_llvm_type(node as ptr[Node]) as String:
 
 
 // ── LLVMCodegen ──────────────────────────────────────────────────────────────
+
+// Slice 42 (JIT J0.1): REPL persistent-state accumulation. When
+// non-zero, emit_program drops root statements that START on an
+// earlier row (prior snippets' statements — already executed) and
+// wraps only statements at/after this row in the synthetic @main.
+// Declarations from prior snippets (fns, globals, structs) are
+// re-emitted every snippet so later snippets can reference them.
+// 0 = no filtering (file mode and J0.0 fresh-state REPL).
+var repl_stmt_min_row as i64 = 0 to i64
+
+
+fn set_repl_stmt_min_row(v as i64):
+    repl_stmt_min_row = v
+
+
+// Slice 42 (JIT J0.1): REPL sessions compile every snippet — including
+// declarations-only ones — into an executable, which needs a `main` to
+// link. Set once by start_repl; makes emit_program emit a trivial
+// synthetic @main (ret i32 0) when the session so far has no statements.
+var repl_mode as bool = False
+
+
+fn set_repl_mode(v as bool):
+    repl_mode = v
+
+
 struct LLVMCodegen:
     public var type_out as StringBuilder
     public var outlined_out as StringBuilder
@@ -3830,8 +3856,18 @@ struct LLVMCodegen:
             elif dk0 == NodeType.VarDecl or dk0 == NodeType.FieldDecl or dk0 == NodeType.StructDecl or dk0 == NodeType.ClassDecl or dk0 == NodeType.InterfaceDecl or dk0 == NodeType.EnumDecl or dk0 == NodeType.UnionDecl or dk0 == NodeType.ImportDecl:
                 pass
             else:
-                // statement kind — routed into the synthetic main
-                stmts.append(d0)
+                // statement kind — routed into the synthetic main.
+                // Slice 42: in REPL accumulation mode, prior snippets'
+                // statements have already executed; only statements
+                // starting at/after the new snippet's first row join
+                // the synthetic main. Prior declarations (handled by
+                // the other branches) are re-emitted unconditionally.
+                if repl_stmt_min_row > 0 to i64:
+                    let sp0 as Span = node_span(d0)
+                    if sp0.start_row to i64 >= repl_stmt_min_row:
+                        stmts.append(d0)
+                else:
+                    stmts.append(d0)
             i = i + 1 to i64
         i = 0 to i64
         while i < count:
@@ -3844,7 +3880,7 @@ struct LLVMCodegen:
                 else:
                     self.emit_node(decl)
             i = i + 1 to i64
-        if not has_user_main and stmts.length() > 0 to i64:
+        if not has_user_main and (stmts.length() > 0 to i64 or repl_mode):
             append_cstr(ref (deref self).main_out, "define i32 @main() {\nentry:\n" to cstr)
             (deref self).current_return_type = String.make("i32" to cstr)
             (deref self).var_slots = Dict[String, String]()

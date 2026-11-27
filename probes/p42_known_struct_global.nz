@@ -1,0 +1,20 @@
+// KNOWN-FAIL repro (file mode too): struct-typed global + field access
+// emits `inttoptr i64 @g to ptr` and a wrong named-type layout
+// (`%Cfg = type { i8 }` instead of `{ i32, i32 }`). Surfaced while
+// testing REPL J0.1 persistence; pre-existing in file mode, tracked
+// for a dedicated codegen slice.
+
+extern fn printf(fmt as cstr, ...) as i32
+
+struct Cfg:
+    x as i32
+    y as i32
+
+var g as Cfg = Cfg(x = 7, y = 9)
+
+fn get_y() as i32:
+    return g.y
+
+fn main() as i32:
+    printf("g.y=%d\n" to cstr, get_y())
+    return 0

@@ -12,7 +12,7 @@ import borrowck
 from borrowck import BorrowChecker
 from cfg import CFGAnalyzer
 import codegen
-from codegen import LLVMCodegen
+from codegen import LLVMCodegen, set_repl_mode, set_repl_stmt_min_row
 from dce import DeadCodeEliminator
 from error import DiagnosticEngine
 from fmt import fmt_transform
@@ -1643,11 +1643,24 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
     extern fn fflush(stream as ptr) as i32
     extern fn getpid() as i32
     extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
+    extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
     let self_name as cstr = compiler_name(default_mode)
-    let _pb as i32 = printf("%s REPL (J0.0): statements per snippet; blank line = run; Ctrl-D exits\n" to cstr, self_name)
+    let _pb as i32 = printf("%s REPL (J0.1): declarations persist across snippets; blank line = run; Ctrl-D exits\n" to cstr, self_name)
     let _pbf as i32 = fflush(None to ptr)
     let pidv as i32 = getpid()
     let snip_buf as ptr[u8] = malloc(262144 to usize) to ptr[u8]
+    // Slice 42 (JIT J0.1): accumulated session source. Each snippet is
+    // compiled as `accum + snippet` so declarations from prior snippets
+    // (fns, globals, structs) typecheck and re-emit; the codegen's
+    // repl_stmt_min_row threshold keeps prior statements out of the
+    // synthetic @main (they already executed). Mutations to globals are
+    // re-initialized per snippet until J0.2's dlopen/external-global
+    // scheme lands.
+    let accum_buf as ptr[u8] = malloc(8388608 to usize) to ptr[u8]
+    let work_buf as ptr[u8] = malloc(8650752 to usize) to ptr[u8]
+    var accum_len as usize = 0 to usize
+    var accum_rows as i64 = 0 to i64
+    set_repl_mode(True)
     var snip_no as i32 = 0
     var eof_hit as bool = False
     while not eof_hit:
@@ -1686,12 +1699,26 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
             continue
         snip_no = snip_no + 1 to i32
         deref ((snip_buf to usize + snip_len) to ptr[u8]) = 0 to u8
+        // combined source = accumulated prior snippets + this snippet
+        memcpy(work_buf, accum_buf, accum_len)
+        memcpy((work_buf to usize + accum_len) to ptr, snip_buf, snip_len)
+        deref ((work_buf to usize + accum_len + snip_len) to ptr[u8]) = 0 to u8
+        set_repl_stmt_min_row(accum_rows)
         let out_buf as ptr[u8] = malloc(128 to usize) to ptr[u8]
         let _so as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d" to cstr, pidv, snip_no)
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
-        let ok as bool = compile_source(snip_buf to cstr, "<repl>" to cstr, out_buf to cstr, default_mode, "x86_64-unknown-linux-gnu" to cstr, ref perf, False, False, "/tmp" to cstr, False)
+        let ok as bool = compile_source(work_buf to cstr, "<repl>" to cstr, out_buf to cstr, default_mode, "x86_64-unknown-linux-gnu" to cstr, ref perf, False, False, "/tmp" to cstr, False)
         if ok:
+            // committed: prior statements stay suppressed at the next
+            // threshold; count this snippet's rows for it
+            var nl_i as usize = 0 to usize
+            while nl_i < snip_len:
+                if deref ((snip_buf to usize + nl_i) to ptr[u8]) == 10 to u8:
+                    accum_rows = accum_rows + 1 to i64
+                nl_i = nl_i + 1 to usize
+            memcpy((accum_buf to usize + accum_len) to ptr, snip_buf, snip_len)
+            accum_len = accum_len + snip_len
             let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
             run_argv[0] = out_buf to cstr
             run_argv[1] = None to cstr
@@ -1702,6 +1729,8 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
     let _pbye as i32 = printf("\nbye\n" to cstr)
     let _ff2 as i32 = fflush(None to ptr)
     free(snip_buf to ptr)
+    free(accum_buf to ptr)
+    free(work_buf to ptr)
     return 0 to i32
 
 

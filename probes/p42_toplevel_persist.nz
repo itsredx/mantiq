@@ -1,0 +1,7 @@
+extern fn printf(fmt as cstr, ...) as i32
+var x as i32 = 21
+
+fn double_it(v as i32) as i32:
+    return v * 2
+
+printf("x=%d d=%d\n" to cstr, x, double_it(x))
