@@ -1,0 +1,14 @@
+// probe p43_j02_persist.nz — J0.2 cross-snippet value persistence.
+// Run under the REPL (file mode resets state per run, so this is a
+// single-snippet check of the extern-globals emission shape).
+// In a REPL session:
+//   s1: extern fn printf(fmt as cstr, ...) as i32
+//       var x as i32 = 21
+//   s2: var y as i32 = x + 2
+//       printf("y=%d\n" to cstr, y)          -> y=23
+//   s3: x = x + 1
+//       printf("x mutated: %d\n" to cstr, x) -> x mutated: 22
+//   s5: printf("x=%d y=%d\n" to cstr, x, y)  -> x=22 y=23 (J0.2 fix)
+extern fn printf(fmt as cstr, ...) as i32
+var x as i32 = 21
+printf("x=%d\n" to cstr, x)

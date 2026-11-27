@@ -12,7 +12,7 @@ import borrowck
 from borrowck import BorrowChecker
 from cfg import CFGAnalyzer
 import codegen
-from codegen import LLVMCodegen, set_repl_mode, set_repl_stmt_min_row
+from codegen import LLVMCodegen, set_repl_extern_globals, set_repl_mode, set_repl_stmt_min_row
 from dce import DeadCodeEliminator
 from error import DiagnosticEngine
 from fmt import fmt_transform
@@ -1090,6 +1090,48 @@ fn compile_source(
         fclose(f_ll)
         perf_end(perf, "write_ir", t5)
 
+        // ── Phase 6.5 (Slice 43 / JIT J0.2): REPL .so-chain link ─────────────────────
+        // repl_soshared short-circuits the executable pipeline: the
+        // snippet .ll is linked as a shared object together with the
+        // runtime and every previous session .so (DT_NEEDED chain), and
+        // the persistent executor child dlopens it and calls its
+        // synthetic `main`. All tree-sitter/cache machinery is skipped —
+        // snippet IR references only the runtime glue, libc, and user
+        // externs.
+        if repl_soshared:
+            let so_buf as ptr[u8] = malloc(65536 to usize) to ptr[u8]
+            var so_len as usize = 0 to usize
+            let so_cap as usize = 65400 to usize
+            memcpy((so_buf to usize + so_len) to ptr, "zig cc -O2 -shared -fPIC " to cstr, 26 to usize)
+            so_len = so_len + 25 to usize
+            let ll_sl as usize = strlen(ll_path)
+            if so_len + ll_sl < so_cap:
+                memcpy((so_buf to usize + so_len) to ptr, ll_path, ll_sl + 1 to usize)
+                so_len = so_len + ll_sl
+            if repl_prev_sos_cstr != None to cstr:
+                let ps_sl as usize = strlen(repl_prev_sos_cstr)
+                if so_len + 1 + ps_sl < so_cap:
+                    deref ((so_buf to usize + so_len) to ptr[u8]) = 32 to u8
+                    memcpy((so_buf to usize + so_len + 1 to usize) to ptr, repl_prev_sos_cstr, ps_sl + 1 to usize)
+                    so_len = so_len + 1 + ps_sl
+            let of_sl as usize = strlen(out_file)
+            let so_suffix as cstr = " -lm -lpthread -o " to cstr
+            let suffix_len as usize = strlen(so_suffix)
+            if so_len + suffix_len + of_sl + 6 < 65535 to usize:
+                memcpy((so_buf to usize + so_len) to ptr, so_suffix, suffix_len)
+                so_len = so_len + suffix_len
+                memcpy((so_buf to usize + so_len) to ptr, out_file, of_sl)
+                so_len = so_len + of_sl
+                memcpy((so_buf to usize + so_len) to ptr, " 2>&1" to cstr, 6 to usize)
+                so_len = so_len + 5 to usize
+            deref ((so_buf to usize + so_len) to ptr[u8]) = 0 to u8
+            let so_cmd_str as String = String.make(so_buf to cstr)
+            let so_rc as i32 = system_ref(ref so_cmd_str)
+            so_cmd_str.deinit()
+            free(so_buf to ptr)
+            mantiq_ast_arena_reset()
+            mantiq_intern_reset()
+            return so_rc == 0 to i32
         // ── Phase 7: Link ────────────────────────────────────────────────────────────
         let t6 as i64 = perf_begin(perf, "link")
         let lib_dir as cstr = compiler_lib_dir()
@@ -1627,25 +1669,51 @@ fn __fmt_read_stdin() as cstr:
     return buf to cstr
 
 
-// Slice 41 (JIT J0.0): interactive REPL — reads snippets until a blank
-// line, runs the full in-process pipeline per snippet, executes the
-// result natively. Fresh semantic state per snippet; persistent state
-// (J0.1) and cross-snippet .so linkage (J0.2) follow docs/jit-design.md.
+// Slice 43 (JIT J0.2): REPL .so-chain mode. When True, compile_source
+// links the snippet as a shared object (`zig cc -shared -fPIC` +
+// runtime + all previous .so files) instead of an executable; the
+// persistent executor child (see start_repl) dlopens it and calls its
+// synthetic `main`. Prior snippets' .so files stay loaded, so ELF
+// interposition binds every module's external-linkage globals to the
+// first-loaded copy — mutations and non-constant initializers persist
+// across snippets.
+var repl_soshared as bool = False
+
+
+// Space-separated paths of the session's previous .so files (link line
+// inputs → DT_NEEDED chain), maintained by start_repl. None = first
+// snippet.
+var repl_prev_sos_cstr as cstr = None to cstr
+
+
 // Slice 41 (JIT J0.0): interactive REPL — reads snippet lines until a
 // blank line, runs the full in-process pipeline per snippet, executes
-// the result natively. Fresh semantic state per snippet; persistent
-// state (J0.1) and cross-snippet .so linkage (J0.2) follow
-// docs/jit-design.md.
+// the result natively. J0.1: declarations persist via source
+// accumulation; J0.2: cross-snippet .so linkage via the executor child.
 fn start_repl(default_mode as i32, prof_flag as bool) as i32:
     extern fn read(fd as i32, buf as ptr, count as usize) as isize
+    extern fn write(fd as i32, buf as ptr, count as usize) as isize
     extern fn malloc(sz as usize) as ptr
     extern fn free(p as ptr) as i32
     extern fn fflush(stream as ptr) as i32
     extern fn getpid() as i32
     extern fn sprintf(str as ptr[u8], format as cstr, ...) as i32
     extern fn memcpy(dest as ptr, src as ptr, n as usize) as ptr
+    extern fn pipe(fds as ptr) as i32
+    extern fn strncmp(s1 as cstr, s2 as cstr, n as usize) as i32
+    extern fn dup2(oldfd as i32, newfd as i32) as i32
+    extern fn close(fd as i32) as i32
+    extern fn fork() as i32
+    extern fn execvp(file as cstr, argv as ptr[cstr]) as i32
+    extern fn _exit(code as i32)
+    extern fn open(path as cstr, flags as i32) as i32
+    extern fn signal(sig as i32, handler as usize) as usize
+    // Slice 43: ignore SIGPIPE — writing to the executor's command pipe
+    // after the child died (spawn failure, mid-session exit) must not
+    // kill the compiler; the EPIPE error return drives the fallback.
+    let _sig as usize = signal(13 to i32, 1 to usize)
     let self_name as cstr = compiler_name(default_mode)
-    let _pb as i32 = printf("%s REPL (J0.1): declarations persist across snippets; blank line = run; Ctrl-D exits\n" to cstr, self_name)
+    let _pb as i32 = printf("%s REPL (J0.2): persistent state via .so chain; blank line = run; Ctrl-D exits\n" to cstr, self_name)
     let _pbf as i32 = fflush(None to ptr)
     let pidv as i32 = getpid()
     let snip_buf as ptr[u8] = malloc(262144 to usize) to ptr[u8]
@@ -1653,9 +1721,7 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
     // compiled as `accum + snippet` so declarations from prior snippets
     // (fns, globals, structs) typecheck and re-emit; the codegen's
     // repl_stmt_min_row threshold keeps prior statements out of the
-    // synthetic @main (they already executed). Mutations to globals are
-    // re-initialized per snippet until J0.2's dlopen/external-global
-    // scheme lands.
+    // synthetic @main (they already executed).
     let accum_buf as ptr[u8] = malloc(8388608 to usize) to ptr[u8]
     let work_buf as ptr[u8] = malloc(8650752 to usize) to ptr[u8]
     var accum_len as usize = 0 to usize
@@ -1663,6 +1729,67 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
     set_repl_mode(True)
     var snip_no as i32 = 0
     var eof_hit as bool = False
+    // Slice 43 (JIT J0.2): persistent ctypes executor child. Spawned
+    // once per session: stdin = a command pipe (we write .so paths),
+    // stdout inherited (snippet printf output), stderr = a result pipe
+    // (we read `RC <n>` / `JITERR <msg>` lines). The child keeps every
+    // .so dlopen'd, so ELF interposition binds all modules' globals to
+    // the first-loaded copy — mutations persist across snippets. If the
+    // spawn fails, the session falls back to J0.1 executable runs.
+    // object FIRST in its own lookup scope, so each snippet's redundant
+    // external definition of a global (source accumulation re-emits them)
+    // shadows the first-loaded copy — mutations revert. RTLD_GLOBAL puts
+    // earlier .so's in the global scope BEFORE the new object, so ELF
+    // interposition binds every reference to the first-loaded definition.
+    let py_code as cstr = "import sys, ctypes\nfor line in sys.stdin:\n    p = line.strip()\n    if not p:\n        continue\n    try:\n        lib = ctypes.CDLL(p, mode = ctypes.RTLD_GLOBAL)\n        sys.stderr.write('RC %d\\n' % lib.main())\n        sys.stderr.flush()\n    except Exception as e:\n        sys.stderr.write('JITERR %s\\n' % e)\n        sys.stderr.flush()\n" to cstr
+    let fds_in as ptr[i32] = malloc(8 to usize) to ptr[i32]
+    let fds_err as ptr[i32] = malloc(8 to usize) to ptr[i32]
+    var exec_live as bool = False
+    var exec_in_fd as i32 = -1
+    var exec_err_fd as i32 = -1
+    if pipe(fds_in) == 0 and pipe(fds_err) == 0:
+        let child_pid as i32 = fork()
+        if child_pid == 0:
+            // child: stdin <- command pipe, stderr -> result pipe,
+            // stdout stays inherited (snippet output to the terminal)
+            close(fds_in[1])
+            close(fds_err[0])
+            dup2(fds_in[0], 0)
+            dup2(fds_err[1], 2)
+            close(fds_in[0])
+            close(fds_err[1])
+            let py_argv as ptr[cstr] = malloc(40 to usize) to ptr[cstr]
+            py_argv[0] = "python3" to cstr
+            py_argv[1] = "-u" to cstr
+            py_argv[2] = "-c" to cstr
+            py_argv[3] = py_code
+            py_argv[4] = None to cstr
+            let _ex as i32 = execvp("python3" to cstr, py_argv)
+            _exit(127)
+        elif child_pid > 0:
+            close(fds_in[0])
+            close(fds_err[1])
+            exec_in_fd = fds_in[1]
+            exec_err_fd = fds_err[0]
+            exec_live = True
+        else:
+            close(fds_in[0])
+            close(fds_in[1])
+            close(fds_err[0])
+            close(fds_err[1])
+    else:
+        close(fds_in[0])
+        close(fds_in[1])
+        close(fds_err[0])
+        close(fds_err[1])
+    free(fds_in to ptr)
+    free(fds_err to ptr)
+    // prev .so path accumulator for the link line (1 MB — ~20k snippets)
+    let sos_buf as ptr[u8] = malloc(1048576 to usize) to ptr[u8]
+    var sos_len as usize = 0 to usize
+    deref (sos_buf to ptr[u8]) = 0 to u8
+    // rc line reader from the executor's stderr pipe
+    let rc_buf as ptr[u8] = malloc(4096 to usize) to ptr[u8]
     while not eof_hit:
         let _pp as i32 = printf("%s> " to cstr, self_name)
         let _ppf as i32 = fflush(None to ptr)
@@ -1704,27 +1831,106 @@ fn start_repl(default_mode as i32, prof_flag as bool) as i32:
         memcpy((work_buf to usize + accum_len) to ptr, snip_buf, snip_len)
         deref ((work_buf to usize + accum_len + snip_len) to ptr[u8]) = 0 to u8
         set_repl_stmt_min_row(accum_rows)
-        let out_buf as ptr[u8] = malloc(128 to usize) to ptr[u8]
-        let _so as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d" to cstr, pidv, snip_no)
+        let out_buf as ptr[u8] = malloc(160 to usize) to ptr[u8]
+        if exec_live:
+            repl_soshared = True
+            set_repl_extern_globals(True)
+            let _so as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d.so" to cstr, pidv, snip_no)
+        else:
+            repl_soshared = False
+            set_repl_extern_globals(False)
+            let _so as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d" to cstr, pidv, snip_no)
         var perf as PerfState = perf_init()
         perf.enabled = prof_flag
         let ok as bool = compile_source(work_buf to cstr, "<repl>" to cstr, out_buf to cstr, default_mode, "x86_64-unknown-linux-gnu" to cstr, ref perf, False, False, "/tmp" to cstr, False)
         if ok:
-            // committed: prior statements stay suppressed at the next
-            // threshold; count this snippet's rows for it
-            var nl_i as usize = 0 to usize
-            while nl_i < snip_len:
-                if deref ((snip_buf to usize + nl_i) to ptr[u8]) == 10 to u8:
-                    accum_rows = accum_rows + 1 to i64
-                nl_i = nl_i + 1 to usize
-            memcpy((accum_buf to usize + accum_len) to ptr, snip_buf, snip_len)
-            accum_len = accum_len + snip_len
-            let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
-            run_argv[0] = out_buf to cstr
-            run_argv[1] = None to cstr
-            let rc as i32 = mantiq_run_command_direct(run_argv)
-            free(run_argv to ptr)
-            let _pr as i32 = printf("[exit %d]\n" to cstr, rc)
+            if exec_live:
+                // hand the .so to the executor, then read its result
+                // line from the stderr pipe (stdout carries the
+                // snippet's own output to the terminal untouched)
+                let ob_len as usize = strlen(out_buf)
+                var w1 as isize = write(exec_in_fd, out_buf, ob_len)
+                let _w2 as isize = write(exec_in_fd, "\n" to cstr, 1 to usize)
+                if w1 < 0 to isize:
+                    // EPIPE (SIGPIPE ignored): the child is gone
+                    exec_live = False
+                var rc_len as usize = 0 to usize
+                var rc_done as bool = False
+                var exec_dead as bool = False
+                while not rc_done:
+                    let rb as ptr[u8] = malloc(1 to usize) to ptr[u8]
+                    let rr as isize = read(exec_err_fd, rb, 1 to usize)
+                    let rc_c as u8 = deref rb
+                    free(rb to ptr)
+                    if rr <= 0 to isize:
+                        rc_done = True
+                        exec_dead = True
+                    elif rc_c == 10 to u8:
+                        rc_done = True
+                    else:
+                        deref ((rc_buf to usize + rc_len) to ptr[u8]) = rc_c
+                        rc_len = rc_len + 1 to usize
+                deref ((rc_buf to usize + rc_len) to ptr[u8]) = 0 to u8
+                if exec_dead:
+                    // Executor gone (spawn failure or mid-session death):
+                    // fall back to J0.1 executables. The .so just built is
+                    // unusable, so recompile this snippet as an executable
+                    // and run it; later snippets take the non-exec_live
+                    // path directly.
+                    exec_live = False
+                    let _pd as i32 = printf("[repl: executor exited; falling back to executables]\n" to cstr)
+                    let _so2 as i32 = sprintf(out_buf, "/tmp/nizam_repl_%d_%d" to cstr, pidv, snip_no)
+                    repl_soshared = False
+                    set_repl_extern_globals(False)
+                    let ok2 as bool = compile_source(work_buf to cstr, "<repl>" to cstr, out_buf to cstr, default_mode, "x86_64-unknown-linux-gnu" to cstr, ref perf, False, False, "/tmp" to cstr, False)
+                    if ok2:
+                        var nl_f as usize = 0 to usize
+                        while nl_f < snip_len:
+                            if deref ((snip_buf to usize + nl_f) to ptr[u8]) == 10 to u8:
+                                accum_rows = accum_rows + 1 to i64
+                            nl_f = nl_f + 1 to usize
+                        memcpy((accum_buf to usize + accum_len) to ptr, snip_buf, snip_len)
+                        accum_len = accum_len + snip_len
+                        let run_argv2 as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
+                        run_argv2[0] = out_buf to cstr
+                        run_argv2[1] = None to cstr
+                        let rc2 as i32 = mantiq_run_command_direct(run_argv2)
+                        free(run_argv2 to ptr)
+                        let _pr2 as i32 = printf("[exit %d]\n" to cstr, rc2)
+                elif rc_len >= 3 to usize and strncmp(rc_buf, "RC " to cstr, 3 to usize) == 0:
+                    extern fn atoi(s as cstr) as i32
+                    let rc_v as i32 = atoi((rc_buf to usize + 3 to usize) to cstr)
+                    let _pr as i32 = printf("[exit %d]\n" to cstr, rc_v)
+                    // committed: accumulate source and chain the .so
+                    var nl_i as usize = 0 to usize
+                    while nl_i < snip_len:
+                        if deref ((snip_buf to usize + nl_i) to ptr[u8]) == 10 to u8:
+                            accum_rows = accum_rows + 1 to i64
+                        nl_i = nl_i + 1 to usize
+                    memcpy((accum_buf to usize + accum_len) to ptr, snip_buf, snip_len)
+                    accum_len = accum_len + snip_len
+                    memcpy((sos_buf to usize + sos_len) to ptr, " " to cstr, 1 to usize)
+                    memcpy((sos_buf to usize + sos_len + 1 to usize) to ptr, out_buf, ob_len + 1 to usize)
+                    sos_len = sos_len + ob_len + 1 to usize
+                    repl_prev_sos_cstr = sos_buf to cstr
+                else:
+                    // JITERR or unexpected reply: not accumulated
+                    let _pj as i32 = printf("jit: %s\n" to cstr, rc_buf to cstr)
+            else:
+                // J0.1 fallback: per-snippet executable
+                var nl_i as usize = 0 to usize
+                while nl_i < snip_len:
+                    if deref ((snip_buf to usize + nl_i) to ptr[u8]) == 10 to u8:
+                        accum_rows = accum_rows + 1 to i64
+                    nl_i = nl_i + 1 to usize
+                memcpy((accum_buf to usize + accum_len) to ptr, snip_buf, snip_len)
+                accum_len = accum_len + snip_len
+                let run_argv as ptr[cstr] = malloc(16 to usize) to ptr[cstr]
+                run_argv[0] = out_buf to cstr
+                run_argv[1] = None to cstr
+                let rc as i32 = mantiq_run_command_direct(run_argv)
+                free(run_argv to ptr)
+                let _pr as i32 = printf("[exit %d]\n" to cstr, rc)
         let _ff as i32 = fflush(None to ptr)
     let _pbye as i32 = printf("\nbye\n" to cstr)
     let _ff2 as i32 = fflush(None to ptr)

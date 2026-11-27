@@ -1304,6 +1304,19 @@ fn set_repl_mode(v as bool):
     repl_mode = v
 
 
+// Slice 43 (JIT J0.2): REPL .so-chain mode. Top-level globals are
+// emitted with default (external) ELF linkage instead of internal, so
+// every snippet module's references interpose to the FIRST-LOADED
+// definition — the defining snippet's .so, kept loaded by the executor
+// process. Internal linkage would give each module a private copy and
+// break cross-snippet mutation persistence. File mode keeps internal.
+var repl_extern_globals as bool = False
+
+
+fn set_repl_extern_globals(v as bool):
+    repl_extern_globals = v
+
+
 struct LLVMCodegen:
     public var type_out as StringBuilder
     public var outlined_out as StringBuilder
@@ -3781,7 +3794,12 @@ struct LLVMCodegen:
                             init_val = f_buf0
                     append_cstr(ref (deref self).type_out, "@")
                     append_str(ref (deref self).type_out, v_name)
-                    append_cstr(ref (deref self).type_out, " = internal global ")
+                    if repl_extern_globals:
+                        // Slice 43: external ELF linkage — cross-snippet
+                        // persistence via interposition (see flag comment)
+                        append_cstr(ref (deref self).type_out, " = global ")
+                    else:
+                        append_cstr(ref (deref self).type_out, " = internal global ")
                     append_str(ref (deref self).type_out, v_type)
                     append_cstr(ref (deref self).type_out, " ")
                     append_cstr(ref (deref self).type_out, init_val to cstr)
@@ -3886,6 +3904,38 @@ struct LLVMCodegen:
             (deref self).var_slots = Dict[String, String]()
             (deref self).var_counts = Dict[String, i32]()
             (deref self).var_types = Dict[String, String]()
+            // Slice 43 (JIT J0.2): non-constant initializers of THIS
+            // snippet's top-level vars are assigned at runtime here —
+            // the global definition itself is zeroinit, and in .so-chain
+            // mode the store binds (by interposition) to the first
+            // definition of the name, which is this snippet's. Scalars
+            // only; aggregate/String-typed globals keep their zeroinit
+            // limitation. File mode (threshold 0) is untouched.
+            if repl_stmt_min_row > 0 to i64:
+                var g_i as i64 = 0 to i64
+                while g_i < count:
+                    let gd as ptr[Node] = get_node_decl(ref decls, g_i)
+                    if node_kind(gd) == NodeType.VarDecl:
+                        let g_sp as Span = node_span(gd)
+                        if g_sp.start_row to i64 >= repl_stmt_min_row:
+                            let g_name as String = node_name(gd)
+                            let g_init as ptr[Node] = node_left(gd)
+                            if g_name.data != None and g_init != None to ptr[Node] and (deref self).global_types.has(g_name):
+                                let g_k as NodeType = node_kind(g_init)
+                                if g_k != NodeType.NumberLiteral and g_k != NodeType.StringLiteral and g_k != NodeType.ColorLiteral and g_k != NodeType.BooleanLiteral:
+                                    let g_t as String = (deref self).global_types[g_name]
+                                    let gt_c as cstr = g_t.data to cstr
+                                    let is_scalar as bool = strcmp(gt_c, "i32" to cstr) == 0 or strcmp(gt_c, "i64" to cstr) == 0 or strcmp(gt_c, "i8" to cstr) == 0 or strcmp(gt_c, "i1" to cstr) == 0 or strcmp(gt_c, "double" to cstr) == 0 or strcmp(gt_c, "float" to cstr) == 0 or strcmp(gt_c, "ptr" to cstr) == 0 or strcmp(gt_c, "i16" to cstr) == 0
+                                    if is_scalar:
+                                        let g_reg as ptr[u8] = self.emit_expr(g_init)
+                                        append_cstr(ref (deref self).main_out, "  store " to cstr)
+                                        append_str(ref (deref self).main_out, g_t)
+                                        append_cstr(ref (deref self).main_out, " " to cstr)
+                                        append_cstr(ref (deref self).main_out, g_reg to cstr)
+                                        append_cstr(ref (deref self).main_out, ", ptr @" to cstr)
+                                        append_str(ref (deref self).main_out, g_name)
+                                        append_cstr(ref (deref self).main_out, "\n" to cstr)
+                    g_i = g_i + 1 to i64
             var s_i as i64 = 0 to i64
             let s_count as i64 = stmts.length()
             while s_i < s_count:

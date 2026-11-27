@@ -1,0 +1,9 @@
+// probe p43_j02_executor_death.nz — J0.2 fallback: with no python3 on
+// PATH the executor child spawn fails / dies, the session prints
+//   [repl: executor exited; falling back to executables]
+// and the snippet still runs as an executable (J0.1 semantics).
+// Pre-fix symptom: SIGPIPE killed the compiler (repl rc=141).
+extern fn printf(fmt as cstr, ...) as i32
+var q as i32 = 5
+q = q + 1
+printf("q=%d\n" to cstr, q)
