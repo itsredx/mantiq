@@ -1,0 +1,24 @@
+// ── p33b: List[StructWithNestedList] element storage integrity ───────────────
+struct Inner:
+    var x as i64
+    var y as i64
+
+struct Node:
+    var kind as i32
+    var kids as List[Inner]
+    var other as List[Inner]
+    var ret as i64
+    var flag as bool
+
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    let lst as List[Node] = List[Node]()
+    let n0 as Node = Node(kind = 11, kids = List[Inner](), other = List[Inner](), ret = 5, flag = True)
+    let n1 as Node = Node(kind = 22, kids = List[Inner](), other = List[Inner](), ret = 7, flag = False)
+    lst.append(n0)
+    lst.append(n1)
+    let r0 as Node = lst[0]
+    let r1 as Node = lst[1]
+    printf("r0.kind=%d r1.kind=%d r1.ret=%ld r1.flag=%d\n" to cstr, r0.kind, r1.kind, r1.ret, r1.flag to i32)
+    return 0 to i32

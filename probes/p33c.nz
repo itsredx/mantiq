@@ -1,0 +1,9 @@
+extern fn printf(fmt as cstr, ...) as i32
+
+fn apply_op(f as fn(i32) as i32, val as i32) as i32:
+    return f(val)
+
+fn main() as i32:
+    let r as i32 = apply_op(14, 21)
+    printf("r=%d\n" to cstr, r)
+    return 0 to i32

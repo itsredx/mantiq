@@ -1,0 +1,27 @@
+// ── p33a: List[Struct] element stride / storage integrity ────────────────────
+struct Big:
+    var kind as i32
+    var a as i64
+    var b as i64
+    var c as i64
+    var d as i64
+    var e as i64
+    var f as i64
+    var g as i64
+    var h as i64
+    var i as i64
+    var j as i64
+
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    let lst as List[Big] = List[Big]()
+    let b0 as Big = Big(kind = 11, a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10)
+    let b1 as Big = Big(kind = 22, a = 11, b = 12, c = 13, d = 14, e = 15, f = 16, g = 17, h = 18, i = 19, j = 20)
+    lst.append(b0)
+    lst.append(b1)
+    let r0 as Big = lst[0]
+    let r1 as Big = lst[1]
+    printf("r0.kind=%d r1.kind=%d\n" to cstr, r0.kind, r1.kind)
+    printf("r1.a=%ld r1.j=%ld\n" to cstr, r1.a, r1.j)
+    return 0 to i32

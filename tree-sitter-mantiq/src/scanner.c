@@ -1,4 +1,5 @@
 #include <tree_sitter/parser.h>
+#include <stdio.h>
 #include <wctype.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -91,7 +92,7 @@ bool tree_sitter_mantiq_external_scanner_scan(void *payload, TSLexer *lexer, con
             indent = 0;
             found_newline = true;
             advance(lexer);
-            lexer->mark_end(lexer); 
+            lexer->mark_end(lexer);
         } else if (lexer->lookahead == ' ') {
             indent++;
             advance(lexer);
@@ -127,9 +128,113 @@ bool tree_sitter_mantiq_external_scanner_scan(void *payload, TSLexer *lexer, con
     uint16_t current_indent = scanner->indent_stack[scanner->stack_size - 1];
 
     if (valid_symbols[DEDENT] && scanner->current_line_indent < current_indent) {
-        scanner->stack_size--;
-        lexer->result_symbol = DEDENT;
-        return true;
+        // Slice 40: a comment-only line must not trigger the dedent
+        // itself. Before this fix, a comment at lower indentation than
+        // the enclosing block fired DEDENT one line early; the next
+        // line's leading newline was then emitted as NEWLINE, breaking
+        // `elif`/`else` chaining (E0101/E0102 cascade across the rest
+        // of the file). When the would-be dedent trigger is a comment
+        // at line start, skip the comment/blank lines (comments are
+        // extras, so consuming them here is equivalent to the parser
+        // skipping them) and re-measure from the next content line.
+        // Comment-as-branch-body (deeper indent) and trailing comments
+        // never enter this path and keep the original behavior.
+        bool cmt_at_line_start = (start_column == 0 || start_column == indent);
+        if (cmt_at_line_start && lexer->lookahead == '/') {
+            lexer->mark_end(lexer);
+            advance(lexer);
+            if (lexer->lookahead == '/' || lexer->lookahead == '*') {
+                bool is_line_comment = (lexer->lookahead == '/');
+                if (is_line_comment) {
+                    while (lexer->lookahead != '\n' && !lexer->eof(lexer)) {
+                        advance(lexer);
+                    }
+                } else {
+                    advance(lexer);
+                    bool star = false;
+                    while (!lexer->eof(lexer)) {
+                        if (star && lexer->lookahead == '/') {
+                            advance(lexer);
+                            break;
+                        }
+                        star = (lexer->lookahead == '*');
+                        advance(lexer);
+                    }
+                }
+                if (is_line_comment && lexer->lookahead != '\n') {
+                    // line comment ran to EOF: leave the dedent to the
+                    // EOF handler on the next scan call
+                    return false;
+                }
+                if (is_line_comment) {
+                    advance(lexer);
+                    lexer->mark_end(lexer);
+                }
+                // skip further comment/blank lines, re-measure
+                for (;;) {
+                    while (lexer->lookahead == ' ' || lexer->lookahead == '\t' || lexer->lookahead == '\f' || lexer->lookahead == '\v' ||
+                           lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+                        if (lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+                            indent = 0;
+                            found_newline = true;
+                            advance(lexer);
+                            lexer->mark_end(lexer);
+                        } else if (lexer->lookahead == ' ') {
+                            indent++;
+                            advance(lexer);
+                        } else if (lexer->lookahead == '\t') {
+                            indent += 4;
+                            advance(lexer);
+                        }
+                    }
+                    if (found_newline && lexer->lookahead == '/') {
+                        lexer->mark_end(lexer);
+                        advance(lexer);
+                        if (lexer->lookahead == '/') {
+                            while (lexer->lookahead != '\n' && !lexer->eof(lexer)) {
+                                advance(lexer);
+                            }
+                            if (lexer->lookahead == '\n') {
+                                advance(lexer);
+                                lexer->mark_end(lexer);
+                                found_newline = true;
+                                indent = 0;
+                                continue;
+                            }
+                            return false;
+                        } else if (lexer->lookahead == '*') {
+                            advance(lexer);
+                            bool star2 = false;
+                            while (!lexer->eof(lexer)) {
+                                if (star2 && lexer->lookahead == '/') {
+                                    advance(lexer);
+                                    break;
+                                }
+                                star2 = (lexer->lookahead == '*');
+                                advance(lexer);
+                            }
+                            indent = 0;
+                            continue;
+                        }
+                        // lone '/': expression continuation — rewind
+                        return false;
+                    }
+                    break;
+                }
+                scanner->current_line_indent = indent;
+            } else {
+                // lone '/' at line start: not a comment — rewind so the
+                // internal lexer can lex the expression continuation.
+                return false;
+            }
+        }
+        if (scanner->current_line_indent < current_indent) {
+            scanner->stack_size--;
+            lexer->result_symbol = DEDENT;
+            return true;
+        }
+        // else: fall through — the re-measured line drives the
+        // INDENT/NEWLINE logic below.
     }
 
     if (found_newline) {

@@ -1,0 +1,27 @@
+from std.sync import Mutex, mutex_lock, mutex_unlock, mutex_init
+extern fn printf(fmt as cstr, ...) as i32
+
+var counter as i32 = 0
+
+fn worker(m as ptr[Mutex]) as i32:
+    var i as i32 = 0
+    while i < 100000:
+        mutex_lock(m)
+        counter = counter + 1
+        mutex_unlock(m)
+        i = i + 1
+    return 0
+
+fn main() as i32:
+    let m as ptr[Mutex] = make[Mutex](1 to usize)
+    mutex_init(m)
+    let t1 = spawn worker(m)
+    let t2 = spawn worker(m)
+    let t3 = spawn worker(m)
+    let t4 = spawn worker(m)
+    let _r1 = await t1
+    let _r2 = await t2
+    let _r3 = await t3
+    let _r4 = await t4
+    printf("counter=%d\n" to cstr, counter)
+    return 0

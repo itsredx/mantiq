@@ -1,0 +1,8 @@
+import std.sync
+extern fn printf(fmt as cstr, ...) as i32
+
+fn main() as i32:
+    let m as ptr[Mutex] = make[Mutex](1 to usize)
+    mutex_init(m)
+    printf("state=%d\n" to cstr, (deref m).state)
+    return 0
